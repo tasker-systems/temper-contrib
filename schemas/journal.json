@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/journal.json",
+  "title": "Journal open_meta vocabulary",
+  "description": "Metadata for a journal entry resource. Fields carried over from the journal template: date-only titling, no author.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["date", "tags"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Entry date, YYYY-MM-DD"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Topical tags"
+    },
+    "mood": { "type": "string" },
+    "weather": { "type": "string" },
+    "location": { "type": "string" }
+  }
+}

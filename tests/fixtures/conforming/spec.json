@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-01",
+  "author": "Test Author",
+  "tags": ["design", "tooling"],
+  "version": "0.1.0",
+  "status": "review",
+  "categories": ["contrib", "writing"],
+  "project": "writing package",
+  "component": "compilation",
+  "priority": "high",
+  "complexity": "medium",
+  "estimated_effort": "12 story points",
+  "reviewers": ["Reviewer A"],
+  "dependencies": ["pandoc"],
+  "implementation_language": ["bash"],
+  "platforms": ["macos", "linux"],
+  "security_requirements": ["no personal identity in shipped artifacts"]
+}

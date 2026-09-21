@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/story.json",
+  "title": "Story open_meta vocabulary",
+  "description": "Metadata for a story resource. Fields carried over from the story template: series/book/cycle chain, draft lifecycle, pov and tense, publication fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["date", "author", "tags", "status"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Start date, YYYY-MM-DD"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name; enters at install time from user config, never shipped"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "themes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "genre": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "collection": { "type": "string" },
+    "series": { "type": "string" },
+    "cycle": { "type": "string" },
+    "book": { "type": "string" },
+    "chapter": { "type": ["integer", "string"] },
+    "order": { "type": ["integer", "string"] },
+    "word_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tracking placement (skill vs script) is ruled by the dogfood task"
+    },
+    "estimated_reading_time": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "revision", "complete", "published"],
+      "default": "draft"
+    },
+    "characters": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "setting": { "type": "string" },
+    "time_period": { "type": "string" },
+    "pov": {
+      "type": "string",
+      "enum": ["first", "third-limited", "third-omniscient", "second"]
+    },
+    "tense": {
+      "type": "string",
+      "enum": ["past", "present", "future"]
+    },
+    "inspiration": { "type": "string" },
+    "dedication": { "type": "string" },
+    "notes": { "type": "string" },
+    "published": {
+      "type": "boolean",
+      "default": false
+    },
+    "isbn": { "type": "string" },
+    "copyright": { "type": "string" }
+  }
+}

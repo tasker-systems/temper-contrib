@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/reflection.json",
+  "title": "Reflection open_meta vocabulary",
+  "description": "Metadata for a reflection resource. Fields carried over from the reflection template: topic/trigger/context, insights, lessons learned, follow-up lists.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["date", "author", "tags"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Reflection date, YYYY-MM-DD"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name; enters at install time from user config, never shipped"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "themes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "topic": { "type": "string" },
+    "trigger": {
+      "type": "string",
+      "description": "What prompted the reflection"
+    },
+    "context": { "type": "string" },
+    "mood": { "type": "string" },
+    "insights": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "lessons_learned": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "questions_raised": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "actions_to_take": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related_reflections": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Refs or titles of related reflection resources"
+    }
+  }
+}
