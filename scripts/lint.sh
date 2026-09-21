@@ -12,6 +12,7 @@ usage() {
   cat <<USAGE
 usage:
   lint.sh <doc-type> <payload.json | ->   validate an open_meta payload against schemas/<doc-type>.json
+  lint.sh --schema <name> <payload.json | - >   validate a payload against schemas/<name>.json (e.g. compilation-manifest)
   lint.sh --self-check                    schemas valid + fixtures pass both directions + no private dependencies
 
 doc types: journal poem story reflection spec
@@ -21,15 +22,22 @@ USAGE
 
 die() { printf 'lint: %s\n' "$1" >&2; exit 2; }
 
+# Python that can import jsonschema: the repo's uv venv when present, else PATH.
+if [ -x "$ROOT/.venv/bin/python3" ]; then
+  PYTHON="$ROOT/.venv/bin/python3"
+else
+  PYTHON="python3"
+fi
+
 require_validator() {
-  if ! python3 -c 'import jsonschema' >/dev/null 2>&1; then
-    die "python3 module 'jsonschema' not found - install it (python3 -m pip install jsonschema)"
+  if ! "$PYTHON" -c 'import jsonschema' >/dev/null 2>&1; then
+    die "module 'jsonschema' not importable by $PYTHON - run 'uv sync' in the repo root"
   fi
 }
 
 schema_path() {
   local type="$1"
-  [ -f "$SCHEMAS/$type.json" ] || die "unknown doc type '$type' (no schemas/$type.json)"
+  [ -f "$SCHEMAS/$type.json" ] || die "no schemas/$type.json (known: journal poem story reflection spec compilation-manifest)"
   printf '%s' "$SCHEMAS/$type.json"
 }
 
@@ -44,7 +52,7 @@ validate_payload() {
     cat >"$tmp"
     payload="$tmp"
   fi
-  python3 - "$schema" "$payload" <<'PY' || rc=$?
+  "$PYTHON" - "$schema" "$payload" <<'PY' || rc=$?
 import json
 import sys
 
@@ -75,7 +83,7 @@ self_check() {
 
   local schema failures=0
   for schema in "$SCHEMAS"/*.json; do
-    if python3 - "$schema" <<'PY'
+    if "$PYTHON" - "$schema" <<'PY'
 import json
 import sys
 
@@ -140,6 +148,11 @@ PY
 
 case "${1:-}" in
   --self-check) self_check ;;
+  --schema)
+    [ -n "${2:-}" ] && [ -n "${3:-}" ] || { usage >&2; exit 2; }
+    require_validator
+    validate_payload "$2" "$3"
+    ;;
   -h | --help | "") usage; [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || exit 2 ;;
   *)
     [ -n "${2:-}" ] || { usage >&2; exit 2; }

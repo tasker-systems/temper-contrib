@@ -1,0 +1,12 @@
+[project]
+name = "temper-contrib"
+version = "0.1.0"
+description = "Tooling dependencies for the temper-contrib writing package: open_meta vocabulary linting and epub compilation"
+requires-python = ">=3.9"
+dependencies = [
+  "jsonschema>=4.20",
+  "pypandoc-binary>=1.13",
+]
+
+[tool.uv]
+package = false
