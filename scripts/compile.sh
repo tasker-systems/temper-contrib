@@ -57,17 +57,18 @@ else
   [ -x "$PANDOC" ] || die "pypandoc-binary did not provide a pandoc executable"
 fi
 
-# The current manifest artifact for this collection.
+# The current manifest artifact for this collection (list returns a flat array).
 artifact_id="$(temper data-artifact list "$COLLECTION" --kind compilation-manifest --format json \
-  | jq -r '(.rows // .artifacts // .) | if type == "array" then (map(select(.intent == "current")) | if length > 0 then .[0].id else (.[0].id // empty) end) else .id // empty end')"
+  | jq -r '(if type == "array" then . else [.] end)
+           | map(select(.intent == "current" and .is_folded != true))
+           | .[0].artifact_id // empty')"
 [ -n "$artifact_id" ] || die "no compilation-manifest artifact on $COLLECTION - run scripts/manifest.sh --collection $COLLECTION --apply first"
 
 tmpjson="$(mktemp "${TMPDIR:-/tmp}/compile-manifest.XXXXXX")"
 builddir="$(mktemp -d "${TMPDIR:-/tmp}/compile-build.XXXXXX")"
 trap 'rm -rf "$tmpjson" "$builddir"' EXIT
 
-temper data-artifact show "$COLLECTION" "$artifact_id" --format json \
-  | jq '.content // .payload // .' >"$tmpjson"
+temper data-artifact show "$COLLECTION" "$artifact_id" --format json | jq '.content' >"$tmpjson"
 
 # Defensive re-check at build time: the manifest is the authority, so it must
 # be valid against its shape before anything is fetched.
@@ -97,7 +98,10 @@ base="$(jq -r '.output // empty' "$tmpjson")"
 } >"$builddir/meta.yaml"
 
 # Fetch member bodies in manifest order.
-mapfile -t refs < <(jq -r '.members[].ref' "$tmpjson")
+refs=()
+while IFS= read -r ref; do
+  [ -n "$ref" ] && refs+=("$ref")
+done < <(jq -r '.members[].ref' "$tmpjson")
 [ "${#refs[@]}" -gt 0 ] || die "manifest has no members"
 
 files=()
@@ -109,6 +113,11 @@ for ref in "${refs[@]}"; do
   f="$builddir/$(printf '%03d' "$i")-$(printf '%s' "$member_title" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2} ?//' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g').md"
   temper resource show "$ref" --format json | jq -r '.content' >"$f"
   [ -s "$f" ] || die "member $ref has an empty body"
+  # Chapter heading is a rendering decision: inject the resource title only
+  # when the writing itself does not start with a heading.
+  if ! grep -qm1 '^#' "$f"; then
+    printf '# %s\n\n' "$member_title" | cat - "$f" >"$f.headed" && mv "$f.headed" "$f"
+  fi
   words="$(wc -w <"$f" | tr -d ' ')"
   total_words=$((total_words + words))
   printf '  %2d. %-60s %6s words\n' "$i" "$member_title" "$words"

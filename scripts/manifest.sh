@@ -69,7 +69,7 @@ done
 
 manifest="$(printf '%s' "$members_json" | jq -c --arg collection "$COLLECTION" '
   {collection: $collection,
-   members: (sort_by(.open_meta.order // .open_meta.date) | map(
+   members: (.rows | sort_by(.open_meta.order // .open_meta.date) | map(
      {ref: .ref} + (if .open_meta.order != null then {order: .open_meta.order} else {} end)
    ))}')"
 

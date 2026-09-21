@@ -84,7 +84,12 @@ temper resource show <ref> --format json | jq -r '.content' > /tmp/body.md
 temper resource update <ref> --open-meta '<json>' --body @/tmp/body.md </dev/null
 ```
 
-Re-lint after any metadata change.
+`--open-meta` REPLACES each key it names and leaves every other key untouched
+— it merges, it does not swap the whole object, and a `null` value is
+silently ignored (not stored, not deleted). There is currently no way to
+DELETE an open_meta key through the CLI: removing a key means recreating the
+document (delete, then create again through the flow). Get the metadata right
+at creation; re-lint after any change.
 
 ## Collections and compilation
 
