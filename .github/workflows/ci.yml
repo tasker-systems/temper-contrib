@@ -24,7 +24,8 @@ jobs:
 
       - name: Install validators
         run: |
-          pip install jsonschema
+          pip install uv
+          uv sync
           sudo apt-get update
           sudo apt-get install -y shellcheck
 

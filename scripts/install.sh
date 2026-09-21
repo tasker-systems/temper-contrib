@@ -26,7 +26,7 @@ Installs the writing package:
   1. probes the temper CLI for 'data-artifact schema declare' (the version floor)
   2. declares the compilation-manifest shape (enforcing) on <ref>
   3. copies skills/$SKILL_NAME into the selected agent skill dirs
-  4. writes author + context to $CONFIG_FILE (personal identity lives here, never in the repo)
+  4. writes author, context, and repo path to $CONFIG_FILE (personal identity lives here, never in the repo)
 
 <context> is a temper context ref, e.g. @me/writing or +team/slug.
 targets: agents | claude | opencode (default: agents)
@@ -37,11 +37,12 @@ USAGE
 die() { printf 'install: %s\n' "$1" >&2; exit 2; }
 
 CONTEXT="" AUTHOR="" TARGETS="agents"
+need_value() { if [ $# -lt 2 ] || [ -z "${2:-}" ]; then die "$1 requires a value"; fi; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --context) CONTEXT="${2:?}"; shift 2 ;;
-    --author) AUTHOR="${2:?}"; shift 2 ;;
-    --targets) TARGETS="${2:?}"; shift 2 ;;
+    --context) need_value "$@"; CONTEXT="$2"; shift 2 ;;
+    --author) need_value "$@"; AUTHOR="$2"; shift 2 ;;
+    --targets) need_value "$@"; TARGETS="$2"; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -91,9 +92,13 @@ done
 
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
+# Single-quote every value so `source writing.conf` cannot re-expand anything
+# the user typed (author names, refs, and clone paths may hold $ or quotes).
+conf_escape() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 cat >"$CONFIG_FILE" <<CONF
-WRITING_AUTHOR="$AUTHOR"
-WRITING_CONTEXT="$CONTEXT"
+WRITING_AUTHOR='$(conf_escape "$AUTHOR")'
+WRITING_CONTEXT='$(conf_escape "$CONTEXT")'
+WRITING_REPO='$(conf_escape "$ROOT")'
 CONF
 chmod 600 "$CONFIG_FILE"
 printf 'wrote config: %s\n' "$CONFIG_FILE"

@@ -24,6 +24,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "collection": { "type": "string" },
     "topic": { "type": "string" },
     "trigger": {
       "type": "string",
