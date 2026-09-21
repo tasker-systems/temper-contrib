@@ -26,7 +26,7 @@ Installs the writing package:
   1. probes the temper CLI for 'data-artifact schema declare' (the version floor)
   2. declares the compilation-manifest shape (enforcing) on <ref>
   3. copies skills/$SKILL_NAME into the selected agent skill dirs
-  4. writes author + context to $CONFIG_FILE (personal identity lives here, never in the repo)
+  4. writes author, context, and repo path to $CONFIG_FILE (personal identity lives here, never in the repo)
 
 <context> is a temper context ref, e.g. @me/writing or +team/slug.
 targets: agents | claude | opencode (default: agents)
@@ -94,6 +94,7 @@ chmod 700 "$CONFIG_DIR"
 cat >"$CONFIG_FILE" <<CONF
 WRITING_AUTHOR="$AUTHOR"
 WRITING_CONTEXT="$CONTEXT"
+WRITING_REPO="$ROOT"
 CONF
 chmod 600 "$CONFIG_FILE"
 printf 'wrote config: %s\n' "$CONFIG_FILE"
