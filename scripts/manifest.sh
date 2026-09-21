@@ -37,10 +37,11 @@ USAGE
 die() { printf 'manifest: %s\n' "$1" >&2; exit 2; }
 
 COLLECTION="" STATUS="" APPLY=0
+need_value() { [ $# -ge 2 ] && [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --collection) COLLECTION="${2:?}"; shift 2 ;;
-    --status) STATUS="${2:?}"; shift 2 ;;
+    --collection) need_value "$@"; COLLECTION="$2"; shift 2 ;;
+    --status) need_value "$@"; STATUS="$2"; shift 2 ;;
     --apply) APPLY=1; shift ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
@@ -55,10 +56,12 @@ command -v jq >/dev/null 2>&1 || die "jq not found on PATH"
 context="$(temper resource show "$COLLECTION" --format json | jq -r '.context_ref // empty')"
 [ -n "$context" ] || die "cannot resolve the context of collection $COLLECTION"
 
-# One filtered, sorted JSON array of members across all doc types.
+# One filtered, sorted JSON array of members across all doc types. A temper
+# failure here must abort: an empty fallback would reconcile a manifest that
+# silently omits members.
 members_json='{"rows":[]}'
 for type in "${DOC_TYPES[@]}"; do
-  page="$(temper resource list --type "$type" --context "$context" --with open-meta --format json --all 2>/dev/null || printf '{"rows":[]}')"
+  page="$(temper resource list --type "$type" --context "$context" --with open-meta --format json --all)"
   members_json="$(printf '%s\n%s\n' "$members_json" "$page" | jq -cs --arg collection "$COLLECTION" --arg status "$STATUS" '
     ([.[1].rows // []
       | map(select(.open_meta.collection == $collection))
@@ -67,11 +70,15 @@ for type in "${DOC_TYPES[@]}"; do
     | .[0] + {rows: ((.[0].rows // []) + $new)}')"
 done
 
+# Only numeric order values drive ordering (the manifest schema requires
+# integer); string orders fall back to the member's date.
 manifest="$(printf '%s' "$members_json" | jq -c --arg collection "$COLLECTION" '
   {collection: $collection,
-   members: (.rows | sort_by(.open_meta.order // .open_meta.date) | map(
-     {ref: .ref} + (if .open_meta.order != null then {order: .open_meta.order} else {} end)
-   ))}')"
+   members: (.rows
+     | sort_by(if (.open_meta.order | type) == "number" then .open_meta.order else .open_meta.date end)
+     | map({ref: .ref}
+         + (if (.open_meta.order | type) == "number" then {order: .open_meta.order} else {} end))
+   )}')"
 
 if [ "$(printf '%s' "$manifest" | jq '.members | length')" -eq 0 ]; then
   die "no members found for collection $COLLECTION (documents must carry open_meta.collection = <this ref>)"
@@ -98,6 +105,6 @@ if ! temper data-artifact commit \
   --intent current \
   "$COLLECTION" \
   --content @"$tmp"; then
-  die "commit failed AFTER a passing local validation - the payload is not the problem; temper refused or errored server-side. Re-run later or investigate temper."
+  die "commit failed after passing local validation against the repo schema. The enforcing shape declared on your context may have drifted from schemas/compilation-manifest.json (rerun install.sh), or temper errored server-side."
 fi
 printf 'committed compilation-manifest (intent current) on %s\n' "$COLLECTION"

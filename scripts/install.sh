@@ -37,11 +37,12 @@ USAGE
 die() { printf 'install: %s\n' "$1" >&2; exit 2; }
 
 CONTEXT="" AUTHOR="" TARGETS="agents"
+need_value() { [ $# -ge 2 ] && [ -n "${2:-}" ] || die "$1 requires a value"; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --context) CONTEXT="${2:?}"; shift 2 ;;
-    --author) AUTHOR="${2:?}"; shift 2 ;;
-    --targets) TARGETS="${2:?}"; shift 2 ;;
+    --context) need_value "$@"; CONTEXT="$2"; shift 2 ;;
+    --author) need_value "$@"; AUTHOR="$2"; shift 2 ;;
+    --targets) need_value "$@"; TARGETS="$2"; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -91,10 +92,13 @@ done
 
 mkdir -p "$CONFIG_DIR"
 chmod 700 "$CONFIG_DIR"
+# Single-quote every value so `source writing.conf` cannot re-expand anything
+# the user typed (author names, refs, and clone paths may hold $ or quotes).
+conf_escape() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 cat >"$CONFIG_FILE" <<CONF
-WRITING_AUTHOR="$AUTHOR"
-WRITING_CONTEXT="$CONTEXT"
-WRITING_REPO="$ROOT"
+WRITING_AUTHOR='$(conf_escape "$AUTHOR")'
+WRITING_CONTEXT='$(conf_escape "$CONTEXT")'
+WRITING_REPO='$(conf_escape "$ROOT")'
 CONF
 chmod 600 "$CONFIG_FILE"
 printf 'wrote config: %s\n' "$CONFIG_FILE"
