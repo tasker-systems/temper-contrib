@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/spec.json",
+  "title": "Spec open_meta vocabulary",
+  "description": "Metadata for a specification resource. Fields carried over from the spec template: versioned lifecycle, priority/complexity, traceability links, requirement categories.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["date", "author", "tags", "version", "status"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Spec date, YYYY-MM-DD"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name; enters at install time from user config, never shipped"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "version": {
+      "type": "string",
+      "description": "Spec version, e.g. 0.1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "review", "approved", "implemented", "deprecated"],
+      "default": "draft"
+    },
+    "categories": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "project": { "type": "string" },
+    "component": { "type": "string" },
+    "repository": { "type": "string" },
+    "issue_tracker": { "type": "string" },
+    "documentation_url": { "type": "string" },
+    "priority": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "critical"],
+      "default": "medium"
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "default": "medium"
+    },
+    "estimated_effort": {
+      "type": "string",
+      "description": "Person-hours or story points"
+    },
+    "target_release": { "type": "string" },
+    "assignee": { "type": "string" },
+    "reviewers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stakeholders": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dependencies": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "related_specs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "implementation_language": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "platforms": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "architecture_style": {
+      "type": "string",
+      "description": "e.g., microservices, monolith, serverless"
+    },
+    "design_patterns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "security_requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "performance_requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scalability_requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "availability_requirements": { "type": "string" },
+    "compliance_requirements": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

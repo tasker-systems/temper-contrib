@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Schemas + lint self-check + shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validators
+        run: |
+          pip install jsonschema
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Parse-check scripts
+        run: bash -n scripts/*.sh
+
+      - name: Shellcheck scripts
+        run: shellcheck scripts/*.sh
+
+      - name: Lint self-check
+        run: ./scripts/lint.sh --self-check

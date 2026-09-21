@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/compilation-manifest.json",
+  "title": "Compilation manifest",
+  "description": "Data-artifact shape for a collection resource's compilation manifest. Declared enforcing on the user's context at install time; the manifest is the build authority for compilation - members by ref plus order, with pandoc metadata passed through.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["collection", "members"],
+  "properties": {
+    "collection": {
+      "type": "string",
+      "description": "Full ref of the owning collection resource"
+    },
+    "title": {
+      "type": "string",
+      "description": "Compiled work title; defaults to the collection title"
+    },
+    "output": {
+      "type": "string",
+      "description": "Output file base name; defaults to the collection slug"
+    },
+    "members": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref"],
+        "properties": {
+          "ref": {
+            "type": "string",
+            "description": "Full resource ref of the member document"
+          },
+          "order": {
+            "type": "integer",
+            "description": "Position in the compiled work; ties broken by list position"
+          },
+          "title": {
+            "type": "string",
+            "description": "Override title for this member in the compiled work"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Pandoc metadata passed through to the epub build (author, language, rights, ...)",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean"]
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "date": "2026-01-05",
+  "author": "Test Author",
+  "tags": ["novelette", "space-opera"],
+  "themes": ["isolation"],
+  "genre": ["science fiction"],
+  "series": "The Long Orbit",
+  "book": "Book One",
+  "chapter": 3,
+  "order": 3,
+  "word_count": 18400,
+  "estimated_reading_time": "74 minutes",
+  "status": "revision",
+  "characters": ["Mara Voss", "Elias Trent"],
+  "setting": "orbital station Meridian",
+  "time_period": "near future",
+  "pov": "third-limited",
+  "tense": "past",
+  "published": false
+}

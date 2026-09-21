@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tasker-systems/temper-contrib/schemas/poem.json",
+  "title": "Poem open_meta vocabulary",
+  "description": "Metadata for a poem resource. Fields carried over from the poem template: form, mood, inspiration, dedication, publication flag.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["date", "author", "tags"],
+  "properties": {
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Write date, YYYY-MM-DD"
+    },
+    "author": {
+      "type": "string",
+      "description": "Author name; enters at install time from user config, never shipped"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "themes": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "collection": { "type": "string" },
+    "series": { "type": "string" },
+    "order": {
+      "type": ["integer", "string"],
+      "description": "Position within a series"
+    },
+    "form": {
+      "type": "string",
+      "description": "e.g., sonnet, haiku, free verse"
+    },
+    "mood": { "type": "string" },
+    "inspiration": { "type": "string" },
+    "dedication": { "type": "string" },
+    "published": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
