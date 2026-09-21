@@ -20,6 +20,7 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "collection": { "type": "string" },
     "version": {
       "type": "string",
       "description": "Spec version, e.g. 0.1.0"

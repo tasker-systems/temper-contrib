@@ -34,11 +34,6 @@
     "book": { "type": "string" },
     "chapter": { "type": ["integer", "string"] },
     "order": { "type": ["integer", "string"] },
-    "word_count": {
-      "type": "integer",
-      "minimum": 0,
-      "description": "Tracking placement (skill vs script) is ruled by the dogfood task"
-    },
     "estimated_reading_time": { "type": "string" },
     "status": {
       "type": "string",

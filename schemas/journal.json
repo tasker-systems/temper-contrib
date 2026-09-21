@@ -17,6 +17,7 @@
       "items": { "type": "string" },
       "description": "Topical tags"
     },
+    "collection": { "type": "string" },
     "mood": { "type": "string" },
     "weather": { "type": "string" },
     "location": { "type": "string" }
