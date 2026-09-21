@@ -33,7 +33,7 @@ die() { printf 'compile: %s\n' "$1" >&2; exit 2; }
 
 COLLECTION="" OUTDIR="." TITLE_OVR="" AUTHOR_OVR=""
 declare -a EXTRA_META=()
-need_value() { [ $# -ge 2 ] && [ -n "${2:-}" ] || die "$1 requires a value"; }
+need_value() { if [ $# -lt 2 ] || [ -z "${2:-}" ]; then die "$1 requires a value"; fi; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --collection) need_value "$@"; COLLECTION="$2"; shift 2 ;;

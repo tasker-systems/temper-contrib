@@ -149,7 +149,7 @@ PY
 case "${1:-}" in
   --self-check) self_check ;;
   --schema)
-    [ -n "${2:-}" ] && [ -n "${3:-}" ] || { usage >&2; exit 2; }
+    if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then usage >&2; exit 2; fi
     require_validator
     validate_payload "$2" "$3"
     ;;

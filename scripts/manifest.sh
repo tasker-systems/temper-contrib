@@ -37,7 +37,7 @@ USAGE
 die() { printf 'manifest: %s\n' "$1" >&2; exit 2; }
 
 COLLECTION="" STATUS="" APPLY=0
-need_value() { [ $# -ge 2 ] && [ -n "${2:-}" ] || die "$1 requires a value"; }
+need_value() { if [ $# -lt 2 ] || [ -z "${2:-}" ]; then die "$1 requires a value"; fi; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --collection) need_value "$@"; COLLECTION="$2"; shift 2 ;;
