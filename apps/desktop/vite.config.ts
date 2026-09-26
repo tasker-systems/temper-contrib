@@ -1,12 +1,17 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import { sveltekit } from "@sveltejs/kit/vite";
+import tailwindcss from "@tailwindcss/vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+// The theme contract and themes live at the repository root (`themes/`) and are read in place,
+// never copied: one source for every consumer. Vite resolves this against the project root.
+const themes = "../../themes";
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-	plugins: [sveltekit()],
+	plugins: [tailwindcss(), sveltekit()],
 
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	//
@@ -27,6 +32,14 @@ export default defineConfig(async () => ({
 		watch: {
 			// 3. tell Vite to ignore watching `src-tauri`
 			ignored: ["**/src-tauri/**"]
+		},
+		fs: {
+			allow: [".", themes]
 		}
+	},
+
+	test: {
+		include: ["src/**/*.test.ts"],
+		environment: "node"
 	}
 }));

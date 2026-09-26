@@ -93,6 +93,14 @@ jobs:
         run: npm run check
         working-directory: apps/desktop
 
+      - name: Unit tests (catalog witnesses, theme selection, ref resolution)
+        run: npm test
+        working-directory: apps/desktop
+
+      - name: No literal colours under src/
+        run: npm run guard:colours
+        working-directory: apps/desktop
+
       - name: Build frontend
         run: npm run build
         working-directory: apps/desktop

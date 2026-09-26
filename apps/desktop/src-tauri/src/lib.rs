@@ -9,6 +9,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             temper::temper_connection_status,
             temper::temper_whoami,
+            temper::temper_resolve_refs,
             acp::acp_initialize
         ])
         .run(tauri::generate_context!())

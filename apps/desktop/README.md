@@ -13,6 +13,25 @@ core in `src-tauri/`.
   Witnessed against `opencode acp`; `claude-agent-acp` is configured the same
   way.
 
+## What the UI holds
+
+- **Theme roles** — `src/app.css` imports the repository's `themes/` contract and
+  every theme in place (never copied). Components read `--tp-*` roles or `tp-`
+  utilities only; `npm run guard:colours` fails on a literal colour. Fonts are
+  bundled (`@fontsource-variable/*`), never fetched. `data-theme` on `<html>`
+  selects the theme; "follow system" switches between a theme and its
+  `counterpart` with the OS appearance (`src/lib/theme.ts`).
+- **The `temper` catalog** — `src/lib/catalog/temper.catalog.json` is the one
+  source for what a json-render spec may name: closed JSON Schema props per
+  component, loaded into zod with `z.fromJSONSchema`. `checkSpec` is the gate
+  (json-render's own `validate` checks structure and names but not per-component
+  props); `TemperView` renders a spec only once it passes, and otherwise shows
+  every reason it was refused. `/catalog` renders sample specs through it.
+- **Reference resolution** — `ResourceRef` shows what temper says a resource is:
+  the `temper_resolve_refs` command resolves ids through `temperkb-client`,
+  batched and cached per session (`src/lib/refs.ts`). An id that does not
+  resolve reads as unresolved, never as the title a spec suggested.
+
 ## Development
 
 ```bash
@@ -24,8 +43,11 @@ npm run tauri dev   # builds the Rust core and opens the app window
 
 ```bash
 npm run check               # svelte-check
+npm test                    # catalog witnesses, theme selection, ref resolution
+npm run guard:colours       # no literal colours under src/
 npm run build               # static frontend build
 cargo check                 # in src-tauri/
 cargo test -- --ignored     # witnesses needing credentials or an agent binary:
-                            # temper profile round-trip, ACP initialize handshake
+                            # temper profile round-trip, ACP initialize handshake,
+                            # ref resolution (TEMPER_WITNESS_REF=<a readable id>)
 ```

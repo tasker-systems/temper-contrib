@@ -1,9 +1,11 @@
 <script lang="ts">
 	import { invoke } from '@tauri-apps/api/core';
+	import RegionState from '$lib/components/RegionState.svelte';
 
 	type ConnectionStatus = { connected: boolean; error: string | null };
 
 	let status = $state<ConnectionStatus | null>(null);
+	let statusFailed = $state<string>('');
 	let profile = $state<string>('');
 	let error = $state<string>('');
 	let agentCommand = $state<string>('opencode acp');
@@ -22,8 +24,13 @@
 		}
 	}
 
-	const refreshStatus = () =>
-		run(() => invoke<ConnectionStatus>('temper_connection_status'), (v) => (status = v));
+	async function refreshStatus() {
+		try {
+			status = await invoke<ConnectionStatus>('temper_connection_status');
+		} catch (e) {
+			statusFailed = String(e);
+		}
+	}
 	const whoami = () =>
 		run(() => invoke<unknown>('temper_whoami'), (v) => (profile = JSON.stringify(v, null, 2)));
 	const initializeAgent = () =>
@@ -35,89 +42,89 @@
 	refreshStatus();
 </script>
 
-<main>
-	<h1>temper-desktop</h1>
-
-	<section>
-		<h2>temper</h2>
-		<p>
-			Connection:
-			{#if status?.connected}
-				<strong>connected</strong>
-			{:else if status}
-				<strong>not connected</strong>
-				{#if status.error}
-					— {status.error}
-				{/if}
-			{:else}
-				checking…
-			{/if}
-		</p>
-		<button onclick={whoami} disabled={busy || !status?.connected}>Who am I?</button>
-		{#if profile}<pre>{profile}</pre>{/if}
+<main class="page">
+	<p class="t-label">temper</p>
+	<section class="ed-rail">
+		{#if statusFailed}
+			<RegionState state="failed" label="connection status" detail={statusFailed} />
+		{:else if status === null}
+			<RegionState state="arriving" label="connection status" />
+		{:else if status.connected}
+			<p class="state">Connected with this machine's temper credentials.</p>
+		{:else}
+			<p class="state">Not connected{#if status.error} — {status.error}{/if}.</p>
+		{/if}
+		<button class="ed-action ed-action--primary" onclick={whoami} disabled={busy || !status?.connected}>
+			Who am I?
+		</button>
+		{#if profile}<pre class="t-code">{profile}</pre>{/if}
 	</section>
 
-	<section>
-		<h2>ACP agent</h2>
-		<label>
-			Command
+	<p class="t-label">ACP agent</p>
+	<section class="ed-rail">
+		<label class="field">
+			<span class="t-strip">Command</span>
 			<input bind:value={agentCommand} placeholder="opencode acp" />
 		</label>
-		<button onclick={initializeAgent} disabled={busy || !agentCommand.trim()}>
+		<button class="ed-action ed-action--primary" onclick={initializeAgent} disabled={busy || !agentCommand.trim()}>
 			Initialize handshake
 		</button>
-		{#if acpResult}<pre>{acpResult}</pre>{/if}
+		{#if acpResult}<pre class="t-code">{acpResult}</pre>{/if}
 	</section>
 
 	{#if error}
-		<p class="error">{error}</p>
+		<RegionState state="failed" label="the last request" detail={error} />
 	{/if}
 </main>
 
 <style>
-	main {
-		max-width: 640px;
+	.page {
+		max-width: 44rem;
 		margin: 0 auto;
-		padding: 2rem 1rem;
-		font-family: system-ui, sans-serif;
+		padding: 2.5rem 1.5rem 4rem;
 	}
-	h1 {
-		font-size: 1.4rem;
+	.t-label {
+		margin: 0 0 0.8rem;
 	}
-	h2 {
-		font-size: 1.05rem;
-		margin-bottom: 0.5rem;
+	.ed-rail {
+		margin-bottom: 3rem;
+		display: grid;
+		gap: 0.8rem;
+		justify-items: start;
 	}
-	section {
-		margin-bottom: 2rem;
+	.state {
+		margin: 0;
+		font: 1rem/1.7 var(--tp-font-reading);
+		color: var(--tp-text-muted);
 	}
-	label {
-		display: block;
-		margin-bottom: 0.5rem;
+	.field {
+		display: grid;
+		gap: 0.4rem;
+		width: 100%;
 	}
 	input {
-		width: 100%;
 		box-sizing: border-box;
-		margin-top: 0.25rem;
-		padding: 0.4rem;
+		width: 100%;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		color: var(--tp-text);
+		font: 0.85rem var(--tp-font-doing);
+	}
+	input:focus {
+		border-color: var(--tp-accent-line);
+		outline: none;
 	}
 	pre {
-		background: #f4f4f5;
-		padding: 0.75rem;
-		border-radius: 6px;
-		overflow: auto;
+		width: 100%;
+		box-sizing: border-box;
+		margin: 0;
+		padding: 0.8rem 1rem;
 		max-height: 320px;
-		font-size: 0.8rem;
-	}
-	.error {
-		color: #b91c1c;
-	}
-	button {
-		padding: 0.4rem 0.9rem;
-		cursor: pointer;
-	}
-	button:disabled {
-		cursor: not-allowed;
-		opacity: 0.5;
+		overflow: auto;
+		background: var(--tp-surface);
+		border: 1px solid var(--tp-rule);
+		border-radius: var(--tp-radius-chip);
 	}
 </style>

@@ -39,6 +39,6 @@ apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src
 - Verify before pushing — plugins: `bash -n`, shellcheck, and
   `<pkg>/scripts/lint.sh --self-check` (a conforming payload passes, a
   hand-broken one fails); themes: `themes/scripts/themes.sh build` after any
-  `theme.json` or contract change, then `--self-check`; desktop app: `npm run check` and `cargo check`
+  `theme.json` or contract change, then `--self-check`; desktop app: `npm run check`, `npm test`, `npm run guard:colours` and `cargo check`
   in `apps/desktop` (+ `cargo test -- --ignored` for the witnesses that
   need credentials or an agent binary). CI is the final gate, not the first.
