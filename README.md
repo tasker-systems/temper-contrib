@@ -21,9 +21,9 @@ temper-contrib/
 │   ├── schemas/                   # JSON Schema draft 2020-12 vocabularies — source of truth
 │   ├── scripts/                   # install.sh, lint.sh, compile.sh, manifest.sh
 │   └── tests/fixtures/            # conforming + hand-broken open_meta payloads
-├── apps/desktop/                  # temper-desktop — vanilla Tauri scaffold
-│   ├── src/                       # web UI (plain HTML/JS until the real UI lands)
-│   └── src-tauri/                 # Rust core
+├── apps/desktop/                  # temper-desktop — Tauri app
+│   ├── src/                       # SvelteKit 2 + Svelte 5 UI (SPA)
+│   └── src-tauri/                 # Rust core: temper client + ACP host
 └── .github/workflows/             # plugin checks + desktop cargo check
 ```
 
@@ -52,8 +52,14 @@ Personal identity enters at install time and never ships in this repository.
 
 ## temper-desktop
 
-`apps/desktop` holds the Tauri scaffold: a Rust core in `src-tauri/` and a
-plain web UI in `src/`. From a fresh clone:
+`apps/desktop` is a Tauri app: a SvelteKit 2 + Svelte 5 UI (SPA mode,
+adapter-static) over a Rust core in `src-tauri/`. The core consumes
+[`temperkb-client`](https://crates.io/crates/temperkb-client) from crates.io at
+semver, reusing the machine's existing temper credentials, and hosts an
+Agent Client Protocol (ACP) client that spawns agent subprocesses such as
+`opencode acp`.
+
+From a fresh clone:
 
 ```bash
 cd apps/desktop
@@ -61,8 +67,15 @@ npm install
 npm run tauri dev   # builds the Rust core and opens the app window
 ```
 
-Rust-side changes verify with `cargo check` (or `cargo build`) in
-`apps/desktop/src-tauri`.
+Verification:
+
+```bash
+npm run check               # svelte-check, in apps/desktop
+npm run build               # static frontend build
+cargo check                 # in apps/desktop/src-tauri
+cargo test -- --ignored     # witnesses: temper profile round-trip, ACP initialize
+                            # handshake with opencode acp — need credentials/agent on PATH
+```
 
 ## CI
 

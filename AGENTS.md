@@ -14,8 +14,8 @@ plugins/<pkg>/               # self-contained plugin packages
   schemas/*.json             # JSON Schema draft 2020-12 vocabularies — source of truth
   scripts/*.sh               # bash + temper CLI; environment-specific, CI-able
   tests/fixtures/            # conforming/ + broken/ open_meta payloads
-apps/desktop/                # temper-desktop — Tauri app (Rust core in src-tauri/, web UI in src/)
-.github/workflows/           # plugin checks + desktop cargo check
+apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src/, Rust core in src-tauri/)
+.github/workflows/           # plugin checks + desktop frontend/cargo checks
 ```
 
 ## Conventions
@@ -31,5 +31,6 @@ apps/desktop/                # temper-desktop — Tauri app (Rust core in src-ta
 - Branch `<initials>/<scope>`; commit messages carry no temper resource ids.
 - Verify before pushing — plugins: `bash -n`, shellcheck, and
   `<pkg>/scripts/lint.sh --self-check` (a conforming payload passes, a
-  hand-broken one fails); desktop app: `cargo check` in
-  `apps/desktop/src-tauri`. CI is the final gate, not the first.
+  hand-broken one fails); desktop app: `npm run check` and `cargo check`
+  in `apps/desktop` (+ `cargo test -- --ignored` for the witnesses that
+  need credentials or an agent binary). CI is the final gate, not the first.
