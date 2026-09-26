@@ -15,8 +15,26 @@ function* files(dir) {
 	}
 }
 
+// Blank out every `open … close` span, keeping its newlines so reported line numbers stay true.
+// A scan rather than a regex replace: an unterminated comment blanks the rest of the file instead
+// of leaving a fragment behind.
+function blank(text, open, close) {
+	let out = '';
+	let i = 0;
+	for (;;) {
+		const start = text.indexOf(open, i);
+		if (start < 0) return out + text.slice(i);
+		out += text.slice(i, start);
+		const end = text.indexOf(close, start + open.length);
+		const stop = end < 0 ? text.length : end + close.length;
+		out += text.slice(start, stop).replace(/[^\n]/g, '');
+		if (end < 0) return out;
+		i = stop;
+	}
+}
+
 const stripComments = (text) =>
-	text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*\/\/.*$/gm, '');
+	blank(blank(text, '/*', '*/'), '<!--', '-->').replace(/^\s*\/\/.*$/gm, '');
 
 let failures = 0;
 for (const path of files(ROOT)) {
