@@ -1,19 +1,21 @@
 # temper-contrib — agent fundamentals
 
-Contrib home for temper packages: self-contained bundles of agent skills
-(`skills/<pkg>/SKILL.md`), JSON Schema vocabularies (`schemas/`), and bash
-scripts (`scripts/`) that compose with the temper CLI. This repo ships no
-temper code; it depends on temper only through its public CLI surface.
-temper itself lives in the sibling `tasker-systems/temper`.
+Contrib home for temper: plugin packages (`plugins/<pkg>/`) and desktop apps
+(`apps/<app>/`) that compose with the temper CLI. Plugins depend on temper
+only through its public CLI surface; the desktop app depends on temper through
+crates.io (`temperkb-client`). This repo ships no temper code. temper itself
+lives in the sibling `tasker-systems/temper`.
 
 ## Layout
 
 ```
-skills/<pkg>/SKILL.md   # agent-facing create/compile flows
-schemas/*.json          # JSON Schema draft 2020-12 vocabularies — source of truth
-scripts/*.sh            # bash + temper CLI; environment-specific, CI-able
-tests/fixtures/         # conforming/ + broken/ open_meta payloads
-.github/workflows/      # schema validity, lint self-checks, shellcheck
+plugins/<pkg>/               # self-contained plugin packages
+  skills/<skill>/SKILL.md    # agent-facing create/compile flows
+  schemas/*.json             # JSON Schema draft 2020-12 vocabularies — source of truth
+  scripts/*.sh               # bash + temper CLI; environment-specific, CI-able
+  tests/fixtures/            # conforming/ + broken/ open_meta payloads
+apps/desktop/                # temper-desktop — Tauri app (Rust core in src-tauri/, web UI in src/)
+.github/workflows/           # plugin checks + desktop cargo check
 ```
 
 ## Conventions
@@ -27,6 +29,7 @@ tests/fixtures/         # conforming/ + broken/ open_meta payloads
 - Public repo — a change must not narrate the gap it closes in commits, PR
   text, or doc diffs; in-progress reasoning lives in the temper vault.
 - Branch `<initials>/<scope>`; commit messages carry no temper resource ids.
-- Verify before pushing: `bash -n`, shellcheck, and `scripts/lint.sh
-  --self-check` (a conforming payload passes, a hand-broken one fails). CI is
-  the final gate, not the first.
+- Verify before pushing — plugins: `bash -n`, shellcheck, and
+  `<pkg>/scripts/lint.sh --self-check` (a conforming payload passes, a
+  hand-broken one fails); desktop app: `cargo check` in
+  `apps/desktop/src-tauri`. CI is the final gate, not the first.
