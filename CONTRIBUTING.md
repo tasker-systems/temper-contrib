@@ -46,7 +46,9 @@ the Rust side of a Tauri app verifies with `cargo check` in its `src-tauri/`.
 - Draft 2020-12 schemas, `additionalProperties: false` — vocabularies are
   closed by intent.
 - Personal identity (author names, vault paths, prototype repositories)
-  never ships; it enters at install time.
+  never enters through agent or tooling action; it belongs to install time.
+  Accountability is recorded deliberately, not leaked: `AUTHORS.md` carries
+  the project's authors.
 - Commit messages and PR descriptions state what the change does — they do
   not narrate weaknesses it closes.
 

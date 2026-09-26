@@ -24,8 +24,10 @@ apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src
   contract only bites closed.
 - Scripts: bash, shellcheck-clean; explicit targets/context args, no ambient
   assumptions.
-- Personal identity never ships: author names and vault paths enter at
-  install time, never in the repo.
+- Personal identity (author names, vault paths) never enters the repo
+  through agent or tooling action — it belongs to install time.
+  Accountability is recorded deliberately, not leaked: `AUTHORS.md` carries
+  the project's authors.
 - Public repo — a change must not narrate the gap it closes in commits, PR
   text, or doc diffs; in-progress reasoning lives in the temper vault.
 - Branch `<initials>/<scope>`; commit messages carry no temper resource ids.
