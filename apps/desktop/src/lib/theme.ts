@@ -1,7 +1,7 @@
 /**
  * Theme selection. Every theme under the repository's `themes/` is discovered at build time, so a
- * new theme needs no code here. The choice is a per-device convenience for now (localStorage);
- * as a per-person fact it belongs in temper, which is later work.
+ * new theme needs no code here. The choice is a device fact: the Rust core's settings store holds
+ * it (an app-data file behind the settings commands), never webview localStorage.
  */
 
 export type Appearance = 'dark' | 'light';
@@ -29,8 +29,6 @@ export const THEMES: ThemeMeta[] = Object.values(discovered)
 
 export const DEFAULT_PREFERENCE: ThemePreference = { follow: 'system', family: 'quiet-instrument' };
 
-const STORAGE_KEY = 'temper-desktop.theme';
-
 /** The theme name a preference selects, given the system's appearance. Never returns an unknown name. */
 export function resolveTheme(
 	pref: ThemePreference,
@@ -47,6 +45,12 @@ export function resolveTheme(
 	return other && other.appearance === want ? other.name : base.name;
 }
 
+/** Anything that is not a recognisable preference — including what a store of another
+ *  vintage returns — falls back to the default rather than failing the whole surface. */
+export function coercePreference(value: unknown): ThemePreference {
+	return isPreference(value) ? value : DEFAULT_PREFERENCE;
+}
+
 function isPreference(value: unknown): value is ThemePreference {
 	if (typeof value !== 'object' || value === null) return false;
 	const v = value as Record<string, unknown>;
@@ -54,23 +58,4 @@ function isPreference(value: unknown): value is ThemePreference {
 		(v.follow === 'system' && typeof v.family === 'string') ||
 		(v.follow === 'fixed' && typeof v.name === 'string')
 	);
-}
-
-/** Storage can be absent or throw (private windows, cleared site data); the default always stands in. */
-export function loadPreference(storage: Pick<Storage, 'getItem'> | undefined): ThemePreference {
-	try {
-		const raw = storage?.getItem(STORAGE_KEY);
-		const parsed: unknown = raw ? JSON.parse(raw) : null;
-		return isPreference(parsed) ? parsed : DEFAULT_PREFERENCE;
-	} catch {
-		return DEFAULT_PREFERENCE;
-	}
-}
-
-export function savePreference(storage: Pick<Storage, 'setItem'> | undefined, pref: ThemePreference): void {
-	try {
-		storage?.setItem(STORAGE_KEY, JSON.stringify(pref));
-	} catch {
-		// A preference that cannot be stored still applies for this session.
-	}
 }
