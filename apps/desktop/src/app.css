@@ -1,0 +1,14 @@
+/* The app's styles are the theme contract, read in place from the repository's themes/.
+   Components read `--tp-*` roles or `tp-` utilities and never a literal colour
+   (`npm run guard:colours` enforces it). The active theme is `data-theme` on <html>. */
+@import "tailwindcss";
+@import "../../../themes/contract/tailwind.css";
+@import "../../../themes/contract/shadcn-bridge.css";
+@import "../../../themes/quiet-instrument/theme.css";
+@import "../../../themes/quiet-instrument-paper/theme.css";
+@import "../../../themes/contract/base.css";
+
+body {
+	margin: 0;
+	min-height: 100vh;
+}

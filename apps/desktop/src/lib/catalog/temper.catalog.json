@@ -1,0 +1,65 @@
+{
+  "catalog": "temper",
+  "version": "1.0.0",
+  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
+  "components": {
+    "RegionState": {
+      "description": "The state of a read that is not present: arriving, empty, gave-up, or failed. The sentence is composed from `label` (the region's noun, e.g. \"history\"); do not word it yourself. Use when content is not available; render the content itself when it is.",
+      "slots": [],
+      "example": { "state": "failed", "label": "history" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["state", "label"],
+        "properties": {
+          "state": { "enum": ["arriving", "empty", "gave-up", "failed"] },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The region's noun: history, connections, proposals." },
+          "detail": { "type": "string", "maxLength": 200, "description": "What was being read, or the reason given. Shown after the sentence." }
+        }
+      }
+    },
+    "BoundedList": {
+      "description": "A bounded list that says what it omits. `total` is every matching item, `shown` how many rows follow as children, `scope` what the total counts (\"since you last engaged\"). The omission sentence is composed; do not word it yourself. Children are the rows (e.g. ResourceRef). When `state` is not present, no rows render and the state is shown instead.",
+      "slots": ["default"],
+      "example": { "total": 41, "shown": 3, "scope": "since you last engaged", "label": "activity", "state": "present" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["total", "shown", "scope", "label", "state"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0, "description": "Every item the list stands for, not only those shown." },
+          "shown": { "type": "integer", "minimum": 0, "description": "How many rows follow as children. Never more than total." },
+          "scope": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What total counts: \"since you last engaged\", \"in this context\"." },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The list's noun, used when it is not present: activity, sources." },
+          "state": { "enum": ["present", "arriving", "empty", "gave-up", "failed"] },
+          "more": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["step"],
+            "properties": { "step": { "type": "integer", "minimum": 1, "maximum": 100 } },
+            "description": "Offer to show more, `step` at a time. Emits `more`; a view action, never a write."
+          }
+        }
+      }
+    },
+    "ResourceRef": {
+      "description": "A link to a temper resource by id. The app resolves the title, doc type and home; `titleHint` shows only while resolving and never stands in for the resource. Use for every mention of a resource.",
+      "slots": [],
+      "example": { "id": "01a0d873-59c9-72f0-a31f-23f0da5d8789" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^([a-z0-9-]*-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "A resource UUID, or its decorated slug-<uuid> ref."
+          },
+          "titleHint": { "type": "string", "maxLength": 200, "description": "Shown only while the reference resolves." },
+          "block": { "type": "string", "maxLength": 120, "description": "A block within the resource, by its heading-stable id." }
+        }
+      }
+    }
+  }
+}

@@ -1054,6 +1054,7 @@ dependencies = [
  "temperkb-client",
  "temperkb-workflow",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
