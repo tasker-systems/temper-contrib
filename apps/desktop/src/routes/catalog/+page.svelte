@@ -38,7 +38,11 @@
 		<TemperView spec={activity} {handlers} />
 	</section>
 
-	<p class="t-label">Resource refs · resolved, arriving, unresolved</p>
+	<!-- Against temper every ref settles, so only the fixtures hold one in the arriving state;
+	     the heading names only the states this page can actually show. -->
+	<p class="t-label">
+		Resource refs · {resolver.source === 'fixtures' ? 'resolved, arriving, unresolved' : 'resolved and unresolved'}
+	</p>
 	<section class="ed-rail">
 		<TemperView spec={refsSpec} />
 	</section>

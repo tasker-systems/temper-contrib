@@ -11,6 +11,8 @@ class ThemeStore {
 	systemDark = $state(true);
 	active = $derived(resolveTheme(this.pref, this.systemDark));
 	#initialised = false;
+	/** Set once the person chooses; a stored value that arrives after that never overrides them. */
+	#chosen = false;
 
 	init(): void {
 		if (this.#initialised) return;
@@ -22,7 +24,7 @@ class ThemeStore {
 	async #load(): Promise<void> {
 		try {
 			const settings = await invoke<{ theme?: unknown }>('settings_get');
-			this.pref = coercePreference(settings.theme);
+			if (!this.#chosen) this.pref = coercePreference(settings.theme);
 		} catch {
 			// The store is unreachable (development in a plain browser, e.g.); the default stands.
 		}
@@ -35,6 +37,7 @@ class ThemeStore {
 	}
 
 	async choose(next: ThemePreference): Promise<void> {
+		this.#chosen = true;
 		this.pref = next;
 		try {
 			await invoke('settings_set_theme', { theme: next });

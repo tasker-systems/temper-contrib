@@ -66,11 +66,17 @@ impl SettingsState {
 
     /// Persists first, then commits to memory: a failed write leaves the
     /// in-memory state untouched, so memory never claims a save the file lost.
+    ///
+    /// The lock is held across the whole read-modify-write, so two saves can
+    /// never both start from the same snapshot and have the second overwrite
+    /// the first's change — whichever thread or async runtime the commands
+    /// run on.
     fn persist(&self, apply: impl FnOnce(&mut DeviceSettings)) -> Result<(), String> {
-        let mut next = self.get();
+        let mut current = self.settings.lock().expect("settings lock");
+        let mut next = current.clone();
         apply(&mut next);
         Self::write(&self.path, &next)?;
-        *self.settings.lock().expect("settings lock") = next;
+        *current = next;
         Ok(())
     }
 
@@ -139,6 +145,40 @@ mod tests {
             Some("/home/dev/project")
         );
         assert_eq!(second.get().theme, Some(theme));
+    }
+
+    /// Saves of different fields made at the same time all survive: none is
+    /// lost to another that started from the same snapshot.
+    #[test]
+    fn concurrent_saves_keep_every_change() {
+        let dir = temp_dir();
+        let state = std::sync::Arc::new(SettingsState::load(dir.clone()));
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let state = state.clone();
+                std::thread::spawn(move || {
+                    if i % 2 == 0 {
+                        state
+                            .set_working_dir(format!("/dir/{i}"))
+                            .expect("save dir");
+                    } else {
+                        state
+                            .set_theme(json!({ "follow": "fixed", "name": format!("t{i}") }))
+                            .expect("save theme");
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("thread");
+        }
+        let reloaded = SettingsState::load(dir).get();
+        assert!(
+            reloaded.working_dir.is_some(),
+            "a working-directory save was lost"
+        );
+        assert!(reloaded.theme.is_some(), "a theme save was lost");
+        assert_eq!(reloaded, state.get(), "memory and file agree");
     }
 
     #[test]
