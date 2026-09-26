@@ -14,7 +14,12 @@
 		status?: string;
 	};
 	type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate };
-	type ChatMessage = { role: 'user' | 'assistant' | 'system'; text: string };
+	type ChatMessage = {
+		role: 'user' | 'assistant' | 'system';
+		text: string;
+		toolCallId?: string;
+		status?: string;
+	};
 
 	const AGENTS = [
 		{ label: 'opencode', command: 'opencode acp' },
@@ -90,11 +95,19 @@
 			return;
 		}
 		if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
-			const label = update.title ?? update.toolCallId ?? 'tool';
-			messages.push({
-				role: 'system',
-				text: `tool · ${label}${update.status ? ` · ${update.status}` : ''}`
-			});
+			// One transcript line per tool call: updates refresh the existing
+			// entry rather than appending a new line per notification.
+			const id = typeof update.toolCallId === 'string' ? update.toolCallId : null;
+			let entry = id
+				? [...messages].reverse().find((m) => m.role === 'system' && m.toolCallId === id)
+				: undefined;
+			if (!entry) {
+				entry = { role: 'system', text: update.title ?? id ?? 'tool', toolCallId: id ?? undefined };
+				messages.push(entry);
+			} else if (update.title) {
+				entry.text = update.title;
+			}
+			if (update.status) entry.status = update.status;
 		}
 	}
 
@@ -206,9 +219,11 @@
 				{agentLabel()} <span aria-hidden="true">·</span> session <span class="ed-strip-em">{conversation.sessionId}</span>
 			</p>
 			<div class="transcript">
-				{#each messages as message, i (i)}
-					<p class={message.role}>{message.text}</p>
-				{/each}
+			{#each messages as message, i (i)}
+				<p class={message.role}>
+					{message.text}{message.status ? ` · ${message.status}` : ''}
+				</p>
+			{/each}
 				{#if prompting}
 					<p class="pending" role="status"><span aria-hidden="true">◌</span> {agentLabel()} is responding…</p>
 				{/if}
