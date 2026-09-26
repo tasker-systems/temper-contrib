@@ -1,0 +1,11 @@
+[project]
+name = "temper-contrib-themes"
+version = "0.1.0"
+description = "Tooling dependencies for temper-contrib themes: contract validation and legibility checks"
+requires-python = ">=3.9"
+dependencies = [
+  "jsonschema>=4.20",
+]
+
+[tool.uv]
+package = false
