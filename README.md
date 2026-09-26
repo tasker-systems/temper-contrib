@@ -1,33 +1,43 @@
 # temper-contrib
 
-**Self-contained contrib packages for [Temper](https://github.com/tasker-systems/temper) — agent skills, JSON Schema vocabularies, and operational scripts**
+**Contrib home for [Temper](https://github.com/tasker-systems/temper) — plugins and desktop apps that compose with the temper CLI**
 
 ---
 
 ## What's Here
 
-temper-contrib ships packages that compose with the temper CLI. Each package
-is self-contained: it depends on temper only through its public CLI surface,
-and nothing in this repository is required to run temper itself.
+temper-contrib ships two kinds of artifacts:
+
+- **Plugins** (`plugins/`) — self-contained packages that depend on temper only
+  through its public CLI surface: agent skills, JSON Schema vocabularies, and
+  operational scripts. Nothing here is required to run temper itself.
+- **Apps** (`apps/`) — desktop applications. `apps/desktop` is temper-desktop,
+  a Tauri app that makes temper a native surface.
 
 ```
 temper-contrib/
-├── skills/writing-templates/    # writing package: create/compile flows (SKILL.md)
-├── schemas/                     # JSON Schema draft 2020-12 vocabularies — source of truth
-├── scripts/                     # install.sh, lint.sh (bash + temper CLI)
-├── tests/fixtures/              # conforming + hand-broken open_meta payloads
-└── .github/workflows/           # schema validity, lint self-checks, shellcheck
+├── plugins/author-tools/          # author-tools plugin: writing create/compile flows
+│   ├── skills/writing-templates/  # agent-facing flows (SKILL.md)
+│   ├── schemas/                   # JSON Schema draft 2020-12 vocabularies — source of truth
+│   ├── scripts/                   # install.sh, lint.sh, compile.sh, manifest.sh
+│   └── tests/fixtures/            # conforming + hand-broken open_meta payloads
+├── apps/desktop/                  # temper-desktop — vanilla Tauri scaffold
+│   ├── src/                       # web UI (plain HTML/JS until the real UI lands)
+│   └── src-tauri/                 # Rust core
+└── .github/workflows/             # plugin checks + desktop cargo check
 ```
 
-## The Writing Package
+## The Author Tools Plugin
 
 Temper-backed writing for five doc types — `journal`, `poem`, `story`,
 `reflection`, `spec` — plus `collection` compilation. A document is a temper
 resource: body is the writing, `open_meta` is the metadata. The vocabularies
-in `schemas/` define what metadata each type carries; `scripts/lint.sh`
-enforces them at write time.
+in `plugins/author-tools/schemas/` define what metadata each type carries;
+`scripts/lint.sh` enforces them at write time.
 
 ```bash
+cd plugins/author-tools
+
 # Validate an open_meta payload against a vocabulary
 scripts/lint.sh story payload.json
 
@@ -40,11 +50,25 @@ scripts/install.sh --context @me/writing --author "Your Name" --targets agents,o
 
 Personal identity enters at install time and never ships in this repository.
 
+## temper-desktop
+
+`apps/desktop` holds the Tauri scaffold: a Rust core in `src-tauri/` and a
+plain web UI in `src/`. From a fresh clone:
+
+```bash
+cd apps/desktop
+npm install
+npm run tauri dev   # builds the Rust core and opens the app window
+```
+
+Rust-side changes verify with `cargo check` (or `cargo build`) in
+`apps/desktop/src-tauri`.
+
 ## CI
 
 | Workflow | Purpose |
 |----------|---------|
-| **CI** (`ci.yml`) | Validate schemas, run lint self-check in both directions, shellcheck scripts |
+| **CI** (`ci.yml`) | Validate plugin schemas, run lint self-check in both directions, shellcheck scripts, `cargo check` the desktop app |
 
 ## Contributing
 
