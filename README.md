@@ -6,11 +6,14 @@
 
 ## What's Here
 
-temper-contrib ships two kinds of artifacts:
+temper-contrib ships three kinds of artifacts:
 
 - **Plugins** (`plugins/`) — self-contained packages that depend on temper only
   through its public CLI surface: agent skills, JSON Schema vocabularies, and
   operational scripts. Nothing here is required to run temper itself.
+- **Themes** (`themes/`) — data-only visual themes over one role contract, so the
+  desktop, its component primitives, and anything rendered from a plugin or agent
+  spec restyle together. See [themes/README.md](themes/README.md).
 - **Apps** (`apps/`) — desktop applications. `apps/desktop` is temper-desktop,
   a Tauri app that makes temper a native surface.
 
@@ -21,6 +24,9 @@ temper-contrib/
 │   ├── schemas/                   # JSON Schema draft 2020-12 vocabularies — source of truth
 │   ├── scripts/                   # install.sh, lint.sh, compile.sh, manifest.sh
 │   └── tests/fixtures/            # conforming + hand-broken open_meta payloads
+├── themes/                        # theme contract + themes (data) — see themes/README.md
+│   ├── contract/                  # theme.schema.json, Tailwind + shadcn bridges, base recipes
+│   └── quiet-instrument[-paper]/  # the house theme, dark and light
 ├── apps/desktop/                  # temper-desktop — Tauri app
 │   ├── src/                       # SvelteKit 2 + Svelte 5 UI (SPA)
 │   └── src-tauri/                 # Rust core: temper client + ACP host
@@ -81,7 +87,7 @@ cargo test -- --ignored     # witnesses: temper profile round-trip, ACP initiali
 
 | Workflow | Purpose |
 |----------|---------|
-| **CI** (`ci.yml`) | Validate plugin schemas, run lint self-check in both directions, shellcheck scripts, `cargo check` the desktop app |
+| **CI** (`ci.yml`) | Validate plugin schemas, run lint self-check in both directions, shellcheck scripts, `cargo check` the desktop app; validate themes against the contract, contrast floors, and generated CSS |
 
 ## Contributing
 
