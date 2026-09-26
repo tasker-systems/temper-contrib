@@ -63,6 +63,21 @@
 	const whoami = () =>
 		run(() => invoke<unknown>('temper_whoami'), (v) => (profile = JSON.stringify(v, null, 2)));
 
+	/** The declared-at-start directory is also the preference: a store that cannot be written
+	 *  does not fail a conversation that has already begun. */
+	function rememberWorkingDir(): void {
+		invoke('settings_set_working_dir', { dir: workingDir.trim() }).catch(() => {});
+	}
+
+	async function loadDefaults(): Promise<void> {
+		try {
+			const settings = await invoke<{ workingDir?: string | null }>('settings_get');
+			workingDir = settings.workingDir ?? workingDir;
+		} catch {
+			// The store is unreachable; the input stays empty and declaring still works.
+		}
+	}
+
 	$effect(() => {
 		listen<AcpEvent>('acp-update', (event) => {
 			const current = untrack(() => conversation);
@@ -129,6 +144,7 @@
 			});
 			conversation = info;
 			messages = [];
+			rememberWorkingDir();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -168,6 +184,7 @@
 	}
 
 	refreshStatus();
+	loadDefaults();
 </script>
 
 <main class="page">

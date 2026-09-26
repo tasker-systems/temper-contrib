@@ -6,9 +6,15 @@
 	import '@fontsource-variable/inter';
 	import '../app.css';
 	import favicon from '$lib/assets/favicon.svg';
-	import ThemeSwitch from '$lib/ThemeSwitch.svelte';
+	import { themeStore } from '$lib/theme-store.svelte';
 
 	let { children } = $props();
+
+	themeStore.init();
+
+	$effect(() => {
+		document.documentElement.dataset.theme = themeStore.active;
+	});
 </script>
 
 <svelte:head>
@@ -21,9 +27,10 @@
 		<path d="M 6 13 L 18 13 Q 23 13 25 16.5 Q 27 20 25 24" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" fill="none" />
 	</svg>
 	<a class="t-wordmark" href="/">temper</a>
-	<nav class="t-strip"><a href="/">home</a><span aria-hidden="true">·</span><a href="/catalog">catalog</a></nav>
+	<nav class="t-strip">
+		<a href="/">home</a><span aria-hidden="true">·</span><a href="/catalog">catalog</a><span aria-hidden="true">·</span><a href="/settings">settings</a>
+	</nav>
 	<span class="spacer"></span>
-	<ThemeSwitch />
 </header>
 
 {@render children()}
