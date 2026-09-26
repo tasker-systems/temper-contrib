@@ -6,7 +6,8 @@
 	 * and is another.
 	 *
 	 * Not a link yet: the desktop has no resource view to follow into, and a link to nowhere
-	 * would overstate itself. The decorated ref and home ride the tooltip.
+	 * would overstate itself. A long title is truncated to one line, so the tooltip leads with
+	 * the whole title, then the home and the decorated ref.
 	 */
 	import { getRefResolver, type Resolution } from '$lib/refs';
 
@@ -36,7 +37,7 @@
 {:else if resolution.state === 'resolved'}
 	<span
 		class="ref"
-		title={[resolution.decoratedRef, resolution.contextRef].filter(Boolean).join(' · ')}
+		title={[resolution.title, resolution.contextRef, resolution.decoratedRef].filter(Boolean).join('\n')}
 	>
 		<span class="type" style:color={typeColour(resolution.docType)}>{resolution.docType}</span>
 		<span class="title">{resolution.title}</span>

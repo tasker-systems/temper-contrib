@@ -10,28 +10,38 @@
 	import ThemeSwitch from '$lib/ThemeSwitch.svelte';
 
 	let workingDir = $state('');
-	let saved = $state(false);
+	/** What the store holds, as last read or saved — the baseline "saved" is measured against. */
+	let stored = $state('');
 	let saving = $state(false);
-	let error = $state('');
+	let justSaved = $state(false);
+	/** Reading the store and writing to it fail differently, so they are held apart. */
+	let loadError = $state('');
+	let saveError = $state('');
+
+	const dirty = $derived(workingDir !== stored);
+	// "saved" holds only while the field still shows what was saved; an edit retracts it.
+	const saved = $derived(justSaved && !dirty);
 
 	onMount(async () => {
 		try {
 			const settings = await invoke<{ workingDir?: string | null }>('settings_get');
-			workingDir = settings.workingDir ?? '';
+			workingDir = stored = settings.workingDir ?? '';
 		} catch (e) {
-			error = String(e);
+			loadError = String(e);
 		}
 	});
 
 	async function saveWorkingDir(): Promise<void> {
 		saving = true;
-		saved = false;
-		error = '';
+		justSaved = false;
+		saveError = '';
+		const value = workingDir;
 		try {
-			await invoke('settings_set_working_dir', { dir: workingDir });
-			saved = true;
+			await invoke('settings_set_working_dir', { dir: value });
+			stored = value;
+			justSaved = true;
 		} catch (e) {
-			error = String(e);
+			saveError = String(e);
 		} finally {
 			saving = false;
 		}
@@ -46,6 +56,10 @@
 
 	<h1 class="t-h2">The <em>settings</em> room</h1>
 
+	{#if loadError}
+		<RegionState state="failed" label="device settings" detail={loadError} />
+	{/if}
+
 	<p class="t-label">Appearance</p>
 	<section class="ed-rail">
 		<ThemeSwitch />
@@ -58,16 +72,17 @@
 			<input bind:value={workingDir} placeholder="/path/to/project" />
 		</label>
 		<div class="actions">
-			<button class="ed-action ed-action--primary" onclick={saveWorkingDir} disabled={saving}>
+			<button class="ed-action ed-action--primary" onclick={saveWorkingDir} disabled={saving || !dirty}>
 				{saving ? 'Saving…' : 'Save'}
 			</button>
 			{#if saved}<span class="t-strip" role="status">saved</span>{/if}
 		</div>
+		{#if saveError}
+			<p class="ed-notice" role="alert">
+				Not saved — the working directory on this machine is unchanged. {saveError}
+			</p>
+		{/if}
 	</section>
-
-	{#if error}
-		<RegionState state="failed" label="saving the working directory" detail={error} />
-	{/if}
 </main>
 
 <style>
