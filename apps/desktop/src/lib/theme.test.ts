@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { THEMES, DEFAULT_PREFERENCE, loadPreference, resolveTheme } from './theme';
+import { THEMES, DEFAULT_PREFERENCE, coercePreference, resolveTheme } from './theme';
 
 describe('theme discovery', () => {
 	it('finds every theme in themes/, paired as counterparts', () => {
@@ -31,15 +31,16 @@ describe('resolveTheme', () => {
 	});
 });
 
-describe('loadPreference', () => {
-	it('falls back to the default on absent, malformed or throwing storage', () => {
-		expect(loadPreference(undefined)).toEqual(DEFAULT_PREFERENCE);
-		expect(loadPreference({ getItem: () => '{not json' })).toEqual(DEFAULT_PREFERENCE);
-		expect(loadPreference({ getItem: () => '{"follow":"sideways"}' })).toEqual(DEFAULT_PREFERENCE);
-		expect(loadPreference({ getItem: () => { throw new Error('blocked'); } })).toEqual(DEFAULT_PREFERENCE);
+describe('coercePreference', () => {
+	it('falls back to the default on absent or malformed values', () => {
+		expect(coercePreference(undefined)).toEqual(DEFAULT_PREFERENCE);
+		expect(coercePreference(null)).toEqual(DEFAULT_PREFERENCE);
+		expect(coercePreference('quiet-instrument')).toEqual(DEFAULT_PREFERENCE);
+		expect(coercePreference({ follow: 'sideways' })).toEqual(DEFAULT_PREFERENCE);
+		expect(coercePreference({ follow: 'fixed' })).toEqual(DEFAULT_PREFERENCE);
 	});
-	it('reads a stored preference', () => {
-		const stored = { follow: 'fixed', name: 'quiet-instrument-paper' };
-		expect(loadPreference({ getItem: () => JSON.stringify(stored) })).toEqual(stored);
+	it('keeps a recognisable preference whole', () => {
+		const stored = { follow: 'fixed', name: 'quiet-instrument-paper' } as const;
+		expect(coercePreference(stored)).toEqual(stored);
 	});
 });
