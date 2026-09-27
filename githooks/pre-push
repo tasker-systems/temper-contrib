@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Pre-push: the test suites the pre-commit hook does not run, for the trees this branch changed
+# against origin/main. Push is rarer than commit, so it can afford the suites; CI remains the
+# backstop and runs everything. Skips loudly when there is no merge-base to diff against.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+base="$(git merge-base origin/main HEAD 2>/dev/null || true)"
+if [ -z "$base" ]; then
+  echo "==> pre-push: no merge-base with origin/main — SKIPPING the test suites. CI runs them regardless." >&2
+  exit 0
+fi
+
+CHANGED="$(git diff --name-only "$base" HEAD)"
+changed() { echo "$CHANGED" | grep -qE "$1"; }
+
+if changed '^apps/desktop/src-tauri/'; then
+  echo "==> pre-push: cargo test (apps/desktop/src-tauri)..."
+  (cd apps/desktop/src-tauri && cargo test --quiet)
+fi
+
+if echo "$CHANGED" | grep '^apps/desktop/' | grep -qv '^apps/desktop/src-tauri/'; then
+  if [ -d apps/desktop/node_modules ]; then
+    echo "==> pre-push: vitest (apps/desktop)..."
+    (cd apps/desktop && npm test --silent)
+  else
+    echo "  ! apps/desktop changed but node_modules is absent — SKIPPING vitest. CI runs it regardless." >&2
+  fi
+fi
+
+echo "==> pre-push: OK"

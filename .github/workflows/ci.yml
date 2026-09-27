@@ -13,6 +13,13 @@ concurrency:
 permissions:
   contents: read
 
+# Job names are the status-check contexts the branch ruleset matches EXACTLY: renaming one strands
+# the ruleset on a context that never reports. `CI Success` (the last job) fans every job in, so
+# the ruleset can require that one context and new jobs join the gate without a settings change.
+#
+# Every gate here is also a cargo-make task (Makefile.toml): `cargo make check` and
+# `cargo make test` run this same battery locally.
+
 jobs:
   verify:
     name: Plugin checks (schemas + lint self-check + shellcheck)
@@ -89,6 +96,10 @@ jobs:
         run: npm ci
         working-directory: apps/desktop
 
+      - name: Biome (lint + format + imports)
+        run: npm run lint
+        working-directory: apps/desktop
+
       - name: Svelte check
         run: npm run check
         working-directory: apps/desktop
@@ -105,6 +116,91 @@ jobs:
         run: npm run build
         working-directory: apps/desktop
 
-      - name: Cargo check
-        run: cargo check
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Rustfmt
+        run: cargo fmt --all -- --check
         working-directory: apps/desktop/src-tauri
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: apps/desktop/src-tauri
+
+      - name: Cargo test
+        run: cargo test
+        working-directory: apps/desktop/src-tauri
+
+      - name: Rustdoc (warnings are errors)
+        run: cargo doc --no-deps --document-private-items
+        working-directory: apps/desktop/src-tauri
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  hygiene:
+    name: Repo hygiene (secrets + python + shell + workflows)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      ACTIONLINT_VERSION: 1.7.7
+      RUFF_VERSION: 0.15.8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # Pinned by version and verified by checksum: a changed release asset fails the download
+      # instead of scanning.
+      - name: Install gitleaks and actionlint (checksum-verified)
+        run: |
+          cd /tmp
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          curl -fsSLO "$base/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSLO "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          grep " gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz$" "gitleaks_${GITLEAKS_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" gitleaks
+          base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}"
+          curl -fsSLO "$base/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSLO "$base/actionlint_${ACTIONLINT_VERSION}_checksums.txt"
+          grep " actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz$" "actionlint_${ACTIONLINT_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" actionlint
+          sudo install -m 0755 gitleaks actionlint /usr/local/bin/
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Secret scan (tracked content)
+        run: gitleaks dir . -c .gitleaks.toml --no-banner --redact -v
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Ruff (lint + format)
+        run: |
+          uvx "ruff@${RUFF_VERSION}" check .
+          uvx "ruff@${RUFF_VERSION}" format --check .
+
+      - name: Shell (bash -n + shellcheck, every tracked script and githook)
+        run: |
+          mapfile -t files < <(git ls-files '*.sh' 'githooks/*')
+          for f in "${files[@]}"; do bash -n "$f"; done
+          shellcheck "${files[@]}"
+
+      - name: Workflows (actionlint)
+        run: actionlint
+
+  ci-success:
+    name: CI Success
+    if: always()
+    needs: [verify, themes, desktop, hygiene]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do
+            [ "$r" = "success" ] || { echo "::error::a required job finished '$r'"; exit 1; }
+          done

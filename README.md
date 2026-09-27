@@ -73,23 +73,36 @@ npm install
 npm run tauri dev   # builds the Rust core and opens the app window
 ```
 
-Verification:
+Verification is repository-wide; see [Development](#development). The desktop's
+live witnesses need credentials or an agent on PATH and run by hand:
+`cargo test -- --ignored` in `apps/desktop/src-tauri`.
+
+## Development
+
+One entry point runs every package's gates, the same ones CI runs
+([cargo-make](https://github.com/sagiegurari/cargo-make)):
 
 ```bash
-npm run check               # svelte-check, in apps/desktop
-npm test                    # unit (node) + component (jsdom) witnesses
-npm run guard:colours       # components read theme roles, never literal colours
-npm run build               # static frontend build
-cargo check                 # in apps/desktop/src-tauri
-cargo test -- --ignored     # witnesses: temper profile round-trip, ACP initialize
-                            # handshake with opencode acp — need credentials/agent on PATH
+cargo make setup    # npm ci, uv sync, and point git at githooks/
+cargo make check    # rustfmt, clippy, rustdoc, biome, svelte-check, literal colours,
+                    # ruff, shellcheck, plugin + theme self-checks, actionlint, gitleaks
+cargo make test     # cargo test + vitest (unit and component)
+cargo make fix      # rustfmt, clippy --fix, biome --write, ruff
 ```
+
+`githooks/pre-commit` runs only the batteries a staged change can affect (plus a
+gitleaks scan of the staged change); `githooks/pre-push` runs the test suites for
+the trees a branch changed. Missing tools skip loudly; CI runs everything.
 
 ## CI
 
-| Workflow | Purpose |
-|----------|---------|
-| **CI** (`ci.yml`) | Validate plugin schemas, run lint self-check in both directions, shellcheck scripts, `cargo check` the desktop app; validate themes against the contract, contrast floors, and generated CSS |
+| Job | Purpose |
+|-----|---------|
+| Plugin checks | Plugin schemas, lint self-check in both directions, shellcheck |
+| Theme checks | Themes against the contract, contrast floors, generated CSS in sync |
+| Desktop | Biome, svelte-check, vitest, literal colours, frontend build; rustfmt, clippy, cargo test, rustdoc |
+| Repo hygiene | gitleaks, ruff, shellcheck over every script and hook, actionlint |
+| CI Success | Fans every job in — the one context the branch ruleset needs to require |
 
 ## Contributing
 

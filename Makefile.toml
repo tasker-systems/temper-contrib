@@ -1,0 +1,240 @@
+# =============================================================================
+# temper-contrib — cargo-make tasks
+# =============================================================================
+#
+# One entry point for every package's checks, so a contributor (or an agent) runs the same
+# battery CI runs without knowing each package's tooling.
+#
+#   cargo make check     Every quality gate: format, lint, types, self-checks, secrets
+#   cargo make test      Every test suite (desktop Rust + vitest)
+#   cargo make fix       Apply every auto-fix (rustfmt, clippy --fix, biome, ruff)
+#   cargo make setup     Install dependencies (npm ci, uv sync) and the git hooks
+#   cargo make hooks     Point git at githooks/ only
+#
+# Install: `cargo install cargo-make` (or `brew install cargo-make`). Individual tasks are
+# listed by `cargo make --list-all-steps`; CI (.github/workflows/ci.yml) runs the same
+# commands step by step, so a green `check` + `test` here is a green CI there.
+
+[config]
+default_to_workspace = false
+skip_core_tasks = true
+
+[env]
+DESKTOP = "${CARGO_MAKE_WORKING_DIRECTORY}/apps/desktop"
+TAURI = "${CARGO_MAKE_WORKING_DIRECTORY}/apps/desktop/src-tauri"
+
+[tasks.default]
+description = "Show the entry-point tasks"
+script = '''
+echo "temper-contrib — cargo-make tasks"
+echo ""
+echo "  cargo make check    format, lint, types, self-checks, secrets"
+echo "  cargo make test     desktop Rust tests + vitest (unit and component)"
+echo "  cargo make fix      rustfmt, clippy --fix, biome --write, ruff"
+echo "  cargo make setup    npm ci, uv sync, git hooks"
+echo "  cargo make hooks    git config core.hooksPath githooks"
+echo ""
+echo "  cargo make --list-all-steps   every task"
+'''
+
+# =============================================================================
+# Composites
+# =============================================================================
+
+[tasks.check]
+description = "Run every quality gate (mirrors CI)"
+dependencies = [
+  "rust-fmt-check",
+  "rust-clippy",
+  "rust-docs",
+  "desktop-lint",
+  "desktop-typecheck",
+  "desktop-guard-colours",
+  "python-lint",
+  "shell-lint",
+  "plugins-self-check",
+  "themes-self-check",
+  "workflows-lint",
+  "secrets",
+]
+
+[tasks.test]
+description = "Run every test suite"
+dependencies = ["rust-test", "desktop-test"]
+
+[tasks.fix]
+description = "Apply every auto-fix"
+dependencies = ["rust-fmt-fix", "rust-clippy-fix", "desktop-lint-fix", "python-fix"]
+
+[tasks.setup]
+description = "Install dependencies and the git hooks"
+dependencies = ["desktop-install", "python-install", "hooks"]
+
+[tasks.hooks]
+description = "Use the repository's git hooks (githooks/)"
+script = '''
+git config core.hooksPath githooks
+chmod +x githooks/*
+echo "git hooks: githooks/ (pre-commit, pre-push)"
+'''
+
+# =============================================================================
+# Desktop — Rust core (apps/desktop/src-tauri)
+# =============================================================================
+
+[tasks.rust-fmt-check]
+description = "rustfmt, check only"
+cwd = "${TAURI}"
+command = "cargo"
+args = ["fmt", "--all", "--", "--check"]
+
+[tasks.rust-fmt-fix]
+description = "rustfmt, rewrite"
+cwd = "${TAURI}"
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.rust-clippy]
+description = "clippy, warnings are errors"
+cwd = "${TAURI}"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
+
+[tasks.rust-clippy-fix]
+description = "clippy --fix"
+cwd = "${TAURI}"
+command = "cargo"
+args = ["clippy", "--all-targets", "--all-features", "--fix", "--allow-dirty", "--allow-staged"]
+
+[tasks.rust-docs]
+description = "rustdoc, warnings are errors"
+cwd = "${TAURI}"
+env = { RUSTDOCFLAGS = "-D warnings" }
+command = "cargo"
+args = ["doc", "--no-deps", "--document-private-items"]
+
+[tasks.rust-test]
+description = "cargo test (ignored live witnesses excluded; run them with -- --ignored)"
+cwd = "${TAURI}"
+command = "cargo"
+args = ["test"]
+
+# =============================================================================
+# Desktop — SvelteKit UI (apps/desktop)
+# =============================================================================
+
+[tasks.desktop-install]
+description = "npm ci"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["ci"]
+
+[tasks.desktop-lint]
+description = "biome: lint + format + import order, check only"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["run", "lint"]
+
+[tasks.desktop-lint-fix]
+description = "biome: apply safe fixes and formatting"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["run", "lint:fix"]
+
+[tasks.desktop-typecheck]
+description = "svelte-check"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["run", "check"]
+
+[tasks.desktop-guard-colours]
+description = "no literal colours under src/"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["run", "guard:colours"]
+
+[tasks.desktop-test]
+description = "vitest: unit (node) + component (jsdom)"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["test"]
+
+[tasks.desktop-build]
+description = "vite build (the frontend Tauri bundles)"
+cwd = "${DESKTOP}"
+command = "npm"
+args = ["run", "build"]
+
+# =============================================================================
+# Python (ruff.toml at the root covers every .py file)
+# =============================================================================
+
+[tasks.python-install]
+description = "uv sync for each package that carries a pyproject.toml"
+script = '''
+for dir in plugins/author-tools themes; do
+  (cd "$dir" && uv sync)
+done
+'''
+
+[tasks.python-lint]
+description = "ruff check + ruff format --check"
+script = '''
+ruff check .
+ruff format --check .
+'''
+
+[tasks.python-fix]
+description = "ruff check --fix + ruff format"
+script = '''
+ruff check --fix .
+ruff format .
+'''
+
+# =============================================================================
+# Shell, plugin and theme self-checks
+# =============================================================================
+
+[tasks.shell-lint]
+description = "bash -n + shellcheck over every tracked shell script"
+script = '''
+set -e
+files=$(git ls-files '*.sh' 'githooks/*')
+for f in $files; do bash -n "$f"; done
+# shellcheck disable=SC2086
+shellcheck $files
+'''
+
+[tasks.plugins-self-check]
+description = "author-tools: schemas valid, fixtures pass/fail as declared"
+command = "./plugins/author-tools/scripts/lint.sh"
+args = ["--self-check"]
+
+[tasks.themes-self-check]
+description = "themes: contract, contrast floors, distinctness, generated files in sync"
+command = "./themes/scripts/themes.sh"
+args = ["--self-check"]
+
+[tasks.workflows-lint]
+description = "actionlint over .github/workflows (skips loudly when actionlint is absent; CI always runs it)"
+script = '''
+if ! command -v actionlint >/dev/null 2>&1; then
+  echo "! actionlint not on PATH — SKIPPING the workflow lint (brew install actionlint). CI runs it regardless." >&2
+  exit 0
+fi
+actionlint
+'''
+
+# =============================================================================
+# Secrets
+# =============================================================================
+
+[tasks.secrets]
+description = "gitleaks over tracked content (skips loudly when gitleaks is absent; CI always runs it)"
+script = '''
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "! gitleaks not on PATH — SKIPPING the secret scan (brew install gitleaks). CI runs it regardless." >&2
+  exit 0
+fi
+gitleaks dir . -c .gitleaks.toml --no-banner --redact
+'''

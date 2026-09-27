@@ -47,12 +47,15 @@ npm run tauri dev   # builds the Rust core and opens the app window
 
 ## Verification
 
+`cargo make check` and `cargo make test` at the repository root run all of these.
+
 ```bash
+npm run lint                # biome: lint + format + import order (lint:fix writes)
 npm run check               # svelte-check
 npm test                    # unit (node) + component (jsdom) witnesses
 npm run guard:colours       # no literal colours under src/
 npm run build               # static frontend build
-cargo check                 # in src-tauri/
+cargo clippy --all-targets -- -D warnings   # in src-tauri/ (cargo fmt, cargo test too)
 cargo test -- --ignored     # witnesses needing credentials or an agent binary:
                             # temper profile round-trip, ACP initialize handshake,
                             # ref resolution (TEMPER_WITNESS_REF=<a readable id>)

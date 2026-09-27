@@ -1,0 +1,37 @@
+# Dependabot version updates. Grouped weekly PRs per ecosystem, so each bump is reviewed as one
+# set of upstream revisions rather than a stream of individually trivial PRs.
+version: 2
+
+updates:
+  # Workflow `uses:` pins. `/` means "this repository's workflows", not the root directory.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"
+
+  # The desktop's Rust core.
+  - package-ecosystem: cargo
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # The desktop's SvelteKit UI.
+  - package-ecosystem: npm
+    directory: "/apps/desktop"
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(deps)"
