@@ -208,7 +208,11 @@ def main() -> int:
             )
 
             routes = []
-            for href in ["/settings", "/"]:
+            for href in ["/settings", "/setup", "/"]:
+                if href == "/setup":
+                    # The setup room is reached only through the chrome menu — the
+                    # witness opens it the way a person does before clicking the entry.
+                    driver.find_element(By.CSS_SELECTOR, "header .chrome-menu button").click()
                 driver.find_element(By.CSS_SELECTOR, f'header a[href="{href}"]').click()
                 WebDriverWait(driver, 10).until(
                     lambda d, h=href: d.execute_script("return location.pathname") == h

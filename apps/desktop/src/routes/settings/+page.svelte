@@ -9,6 +9,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import RegionState from '$lib/components/RegionState.svelte';
 	import ThemeSwitch from '$lib/ThemeSwitch.svelte';
+	import { ageWords, DEFAULT_TEMPER_CONTEXT, ownContextsOf, temperViews } from '$lib/temper-views.svelte';
 
 	let workingDir = $state('');
 	/** What the store holds, as last read or saved — the baseline "saved" is measured against. */
@@ -30,6 +31,25 @@
 	const saved = $derived(justSaved && !dirty);
 	const contextDirty = $derived(temperContext !== storedContext);
 	const contextSaved = $derived(justSavedContext && !contextDirty);
+
+	// What the configured name resolves to, read from the temper views the whole app
+	// shares. This field is the raw editor; only the setup room validates and saves
+	// against live reads — here the status says what the last read knew.
+	const effectiveContext = $derived(temperContext.trim() || DEFAULT_TEMPER_CONTEXT);
+	const ownContexts = $derived(ownContextsOf(temperViews.profileIdentity, temperViews.contexts));
+	const contextResolves = $derived(
+		ownContexts?.some((c) => c.name === effectiveContext) ?? null
+	);
+	const contextStatus = $derived.by(() => {
+		if (contextResolves === null) return 'not checked yet — the setup room validates it';
+		const decorated = `@${temperViews.profileIdentity?.handle ?? ''}/${ownContexts?.find((c) => c.name === effectiveContext)?.slug ?? effectiveContext}`;
+		if (contextResolves) {
+			return temperViews.contextsFresh
+				? `resolves — ${decorated}`
+				: `resolves on the last read, ${ageWords(temperViews.contextsFetchedAt ?? 0)} ago — the setup room re-checks`;
+		}
+		return 'not found among your contexts — the setup room can create it';
+	});
 
 	onMount(async () => {
 		try {
@@ -134,6 +154,8 @@
 				Not saved — the temper context on this machine is unchanged. {saveContextError}
 			</p>
 		{/if}
+		<p class="t-strip">{contextStatus}</p>
+		<a class="t-action" href="/setup">set up the app…</a>
 	</section>
 </main>
 

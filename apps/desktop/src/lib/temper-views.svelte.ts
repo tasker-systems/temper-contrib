@@ -31,6 +31,25 @@ export type TemperRecentPage = { total: number; rows: TemperRecentRow[] };
 /** The recent-work list's first page, and how far each Show-more step extends it. */
 export const RECENT_STEP = 10;
 
+/** The store's default context name until a setting says otherwise. The Rust core
+ * owns the value (`DeviceSettings::DEFAULT_TEMPER_CONTEXT`); this is its echo, offered. */
+export const DEFAULT_TEMPER_CONTEXT = 'temper-desktop';
+
+/**
+ * The person's own contexts — `@<handle>`, the `@me` target. Team-owned contexts,
+ * even visible ones, are never the person context; neither is anyone else's. `null`
+ * until the person and their contexts are both known.
+ */
+export function ownContextsOf(
+	identity: TemperIdentity | null,
+	contexts: TemperContext[] | null
+): TemperContext[] | null {
+	if (!identity?.handle || contexts === null) return null;
+	return contexts
+		.filter((c) => c.ownerRef === `@${identity.handle}`)
+		.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 const CACHE_KEY = 'temper-desktop.temper-cache.v1';
 
 type PersistedCache = {

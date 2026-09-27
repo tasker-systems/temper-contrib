@@ -244,6 +244,52 @@ pub async fn temper_contexts(
         .collect())
 }
 
+/// A context the app just created, as the create read it back. It carries no
+/// resource count — a count is a read's fact, and this command made no read.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperCreatedContext {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub slug: String,
+    pub owner_ref: String,
+    /// RFC 3339, same shape as the contexts view's `updated`.
+    pub updated: String,
+}
+
+/// The name a context-create accepts: trimmed and non-empty. The setup flow is
+/// its caller, but the refusal is the command's, tested here without a client.
+pub fn trimmed_context_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a temper context name is required".to_string());
+    }
+    Ok(name.to_string())
+}
+
+/// Creates a profile-owned context for the signed-in person (`@<handle>/<name>`)
+/// — the only owner the setup flow targets. The person context the desktop
+/// stores facts in is created here when it does not exist yet.
+#[tauri::command]
+pub async fn temper_context_create(
+    state: tauri::State<'_, TemperState>,
+    name: String,
+) -> Result<TemperCreatedContext, String> {
+    let name = trimmed_context_name(&name)?;
+    let row = temper_client(&state)?
+        .contexts()
+        .create(&name, None)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(TemperCreatedContext {
+        id: row.id.0,
+        name: row.name,
+        slug: row.slug,
+        owner_ref: row.owner_ref,
+        updated: row.updated.to_rfc3339(),
+    })
+}
+
 /// One bounded page of the person's recent work: visible resources, newest
 /// update first. `offset` walks further into the same ordering.
 #[tauri::command]
@@ -318,6 +364,56 @@ mod tests {
             parse_ref(&format!("x{id}")).is_none(),
             "a uuid glued to a slug is not a ref"
         );
+    }
+
+    /// A create whose name is blank is refused before any client is touched.
+    #[test]
+    fn a_blank_context_name_is_refused() {
+        assert!(super::trimmed_context_name("   ").is_err());
+        assert_eq!(
+            super::trimmed_context_name("  temper-desktop ").unwrap(),
+            "temper-desktop"
+        );
+    }
+
+    /// Witness for the context-create write the setup flow stands on: creates a
+    /// witness-named, profile-owned context against the real API, finds it among
+    /// the person's visible contexts owned by the same `@<handle>`, and retires
+    /// it. Ignored by default — needs the machine's temper credentials and network.
+    /// Run locally: `cargo test -p desktop -- --ignored context_create_round_trip`
+    #[tokio::test]
+    #[ignore = "requires temper credentials and network"]
+    async fn context_create_round_trip() {
+        let state = super::TemperState::connect();
+        let client = state
+            .client
+            .expect("machine temper credentials should resolve to a client");
+
+        let name = format!("desktop-witness-{}", uuid::Uuid::new_v4().simple());
+        let created = client
+            .contexts()
+            .create(&name, None)
+            .await
+            .expect("create a profile-owned context");
+        assert!(
+            created.owner_ref.starts_with('@'),
+            "a profile-owned context is owned by @<handle>, got {}",
+            created.owner_ref
+        );
+
+        let listed = client.contexts().list().await.expect("list contexts");
+        assert!(
+            listed
+                .iter()
+                .any(|c| c.name == name && c.owner_ref == created.owner_ref),
+            "the created context is visible to its owner after creation"
+        );
+
+        client
+            .contexts()
+            .delete(created.id.0)
+            .await
+            .expect("retire the witness context");
     }
 
     /// Witness for reference resolution against the real API. Ignored by default — it needs the
