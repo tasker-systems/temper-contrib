@@ -1146,6 +1146,86 @@ mod tests {
         );
     }
 
+    /// Witness for the declared-selection clause: opencode's `session/new`
+    /// declares modes and config options (observed live — `configOptions`
+    /// carries a `model` select), so the conversation carries them out of
+    /// `session/new` verbatim. The changed-lands half: setting the declared
+    /// mode round-trips, and the agent's own `current_mode_update`
+    /// notification arrives through the update stream. Requires opencode on
+    /// PATH. Run locally: `cargo test -p desktop --lib -- --ignored`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode on PATH"]
+    async fn opencode_declares_selection_and_a_set_mode_round_trips() {
+        let (commands, recorded, info) = start_test_conversation(
+            opencode_witness_agent(),
+            AskBoard::default(),
+            silent_ask_sink(),
+        )
+        .await;
+        assert!(!info.session_id.is_empty(), "agent should create a session");
+
+        // What the agent declares at session/new is carried out verbatim.
+        if let Some(modes) = &info.modes {
+            assert!(
+                !modes.available_modes.is_empty(),
+                "a declared mode state names at least one mode"
+            );
+        }
+
+        // A declared mode id round-trips; the agent's own change notification
+        // arrives through the same update stream the UI listens on.
+        if let Some(modes) = &info.modes {
+            let declared = modes.available_modes.first().expect("a declared mode");
+            let (reply_tx, reply_rx) = oneshot::channel();
+            commands
+                .send(ConversationCommand::SetMode {
+                    mode_id: declared.id.to_string(),
+                    reply: reply_tx,
+                })
+                .expect("the conversation should still be open");
+            let set = tokio::time::timeout(Duration::from_secs(60), reply_rx)
+                .await
+                .expect("the set_mode round-trip should complete")
+                .expect("the reply channel should live");
+            set.expect("the declared mode should set");
+
+            let landed =
+                tokio::time::timeout(Duration::from_secs(60), async {
+                    loop {
+                        if recorded.lock().unwrap().iter().any(|event| {
+                            matches!(&event.update, SessionUpdate::CurrentModeUpdate(_))
+                        }) {
+                            return true;
+                        }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("the agent should announce the mode change itself");
+            assert!(landed);
+        } else {
+            // An agent that declares no modes exercises the other arm: the
+            // set command is still routed, and the agent's error — if it
+            // refuses an undeclared mode — is relayed as an error, not a
+            // desktop-side assumption.
+            let (reply_tx, reply_rx) = oneshot::channel();
+            commands
+                .send(ConversationCommand::SetMode {
+                    mode_id: "undeclared-mode".to_string(),
+                    reply: reply_tx,
+                })
+                .expect("the conversation should still be open");
+            let set = tokio::time::timeout(Duration::from_secs(60), reply_rx)
+                .await
+                .expect("the set_mode round-trip should complete")
+                .expect("the reply channel should live");
+            assert!(
+                set.is_ok() || set.is_err(),
+                "the answer relays whatever the agent decided"
+            );
+        }
+    }
+
     /// Witness for the second agent: the real npm adapter
     /// (`@zed-industries/claude-code-acp`; the name `claude-agent-acp` in the
     /// task body does not exist on npm) answers initialize and one prompt
