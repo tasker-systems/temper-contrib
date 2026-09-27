@@ -5,13 +5,19 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-/// One agent's launch facts. The fields exist so the sequenced agent-config
-/// task has a home; nothing populates them yet, so no command writes them.
+/// One agent's launch facts, as the device store holds them. `command` is
+/// a launch command string — `opencode acp`, `npx -y @zed-industries/
+/// claude-code-acp` — parsed the way the ACP crate parses command strings,
+/// or a JSON object carrying command, args, and env verbatim. `label` is
+/// the picker's word for it. `binary_path` is kept for the store's shape;
+/// a configured agent is launched by `command`, and the path is a hint the
+/// config layer may set the command to.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentLaunch {
     pub binary_path: Option<String>,
     pub command: Option<String>,
+    pub label: Option<String>,
 }
 
 /// The device tier: facts about this machine, not the person. Held in an
@@ -88,6 +94,34 @@ impl SettingsState {
         self.persist(|s| s.temper_context = Some(name))
     }
 
+    /// Stores one agent's launch facts by its key. An empty launch command
+    /// is refused: a configured agent that cannot be launched is a lie in
+    /// the picker, not a disabled entry.
+    pub fn set_agent(&self, key: String, launch: AgentLaunch) -> Result<(), String> {
+        let key = key.trim().to_string();
+        if key.is_empty() {
+            return Err("an agent key is required".to_string());
+        }
+        match launch.command.as_deref().map(str::trim) {
+            None | Some("") => {
+                return Err(format!("agent {key} needs a launch command"));
+            }
+            _ => {}
+        }
+        self.persist(|s| {
+            s.agents.insert(key, launch);
+        })
+    }
+
+    /// Removes one configured agent. Removing the last one leaves the
+    /// picker empty — the room then has no agent to offer, and says so,
+    /// rather than falling back to a hardcoded default.
+    pub fn remove_agent(&self, key: &str) -> Result<(), String> {
+        self.persist(|s| {
+            s.agents.remove(key);
+        })
+    }
+
     /// Persists first, then commits to memory: a failed write leaves the
     /// in-memory state untouched, so memory never claims a save the file lost.
     ///
@@ -145,6 +179,23 @@ pub fn settings_set_temper_context(
     name: String,
 ) -> Result<(), String> {
     state.set_temper_context(name)
+}
+
+#[tauri::command]
+pub fn settings_set_agent(
+    state: tauri::State<SettingsState>,
+    key: String,
+    launch: AgentLaunch,
+) -> Result<(), String> {
+    state.set_agent(key, launch)
+}
+
+#[tauri::command]
+pub fn settings_remove_agent(
+    state: tauri::State<SettingsState>,
+    key: String,
+) -> Result<(), String> {
+    state.remove_agent(&key)
 }
 
 #[cfg(test)]
@@ -266,5 +317,83 @@ mod tests {
             "a store whose parent is a file cannot be written"
         );
         assert_eq!(state.get(), DeviceSettings::default());
+    }
+
+    // --- Agents by configuration ---------------------------------------------
+
+    fn launch(command: &str) -> AgentLaunch {
+        AgentLaunch {
+            label: Some("opencode".to_string()),
+            command: Some(command.to_string()),
+            binary_path: None,
+        }
+    }
+
+    /// Witness for the configured-picker clause: an agent stored through one
+    /// instance is in the picker's data through a fresh one — configuration,
+    /// not code. The store's shape carries it whole (command, label).
+    #[test]
+    fn a_configured_agent_survives_a_restart_and_reaches_the_picker() {
+        let dir = temp_dir();
+        {
+            let first = SettingsState::load(dir.clone());
+            first
+                .set_agent("opencode".to_string(), launch("opencode acp"))
+                .expect("save the agent");
+        }
+        let second = SettingsState::load(dir);
+        let agents = second.get().agents;
+        assert_eq!(
+            agents.len(),
+            1,
+            "the configured agent is the picker's whole roster"
+        );
+        assert_eq!(
+            agents.get("opencode").and_then(|a| a.command.as_deref()),
+            Some("opencode acp")
+        );
+    }
+
+    /// An agent with no launch command is refused: a configured agent that
+    /// cannot be launched is a lie in the picker.
+    #[test]
+    fn an_agent_without_a_launch_command_is_refused() {
+        let state = SettingsState::load(temp_dir());
+        assert!(state
+            .set_agent("broken".to_string(), AgentLaunch::default())
+            .is_err());
+        assert!(state
+            .set_agent(
+                "blank".to_string(),
+                AgentLaunch {
+                    command: Some("   ".to_string()),
+                    ..AgentLaunch::default()
+                }
+            )
+            .is_err());
+        assert!(
+            state.get().agents.is_empty(),
+            "nothing half-configured landed"
+        );
+    }
+
+    /// An empty key is refused; a removal works and removing the last agent
+    /// leaves the store's roster empty — the picker says so, it never falls
+    /// back to a hardcoded default.
+    #[test]
+    fn an_empty_key_is_refused_and_removal_clears_the_roster() {
+        let dir = temp_dir();
+        let state = SettingsState::load(dir);
+        assert!(state
+            .set_agent("  ".to_string(), launch("opencode acp"))
+            .is_err());
+        state
+            .set_agent("opencode".to_string(), launch("opencode acp"))
+            .expect("save");
+        state.remove_agent("opencode").expect("remove the agent");
+        assert!(
+            state.get().agents.is_empty(),
+            "the roster is empty, not defaulted"
+        );
     }
 }

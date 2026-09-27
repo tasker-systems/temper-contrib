@@ -21,7 +21,13 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 	if (cmd === 'acp_start') {
 		return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
 	}
-	if (cmd === 'settings_get') return Promise.resolve({ workingDir: null, temperContext: null });
+	if (cmd === 'settings_get') {
+		return Promise.resolve({
+			workingDir: null,
+			temperContext: null,
+			agents: { opencode: { label: 'opencode', command: 'opencode acp' } }
+		});
+	}
 	return Promise.resolve(null);
 }
 
@@ -44,6 +50,12 @@ describe('the layout owns the engagement', () => {
 		agentSession.conversation = null;
 		agentSession.messages = [];
 		agentSession.asks = [];
+		agentSession.selection = { modes: null, configOptions: [] };
+		// The roster is seeded, not loaded: `init()` is idempotent, so the
+		// store's own read would be a first-test-only effect — these
+		// witnesses test the engagement, not the roster read.
+		agentSession.agents = [{ key: 'opencode', label: 'opencode', command: 'opencode acp' }];
+		agentSession.agentKey = 'opencode';
 		agentSession.prompting = false;
 		agentSession.error = '';
 		agentSession.init();

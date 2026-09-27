@@ -22,7 +22,13 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 	if (cmd === 'acp_start') {
 		return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
 	}
-	if (cmd === 'settings_get') return Promise.resolve({ workingDir: null, temperContext: null });
+	if (cmd === 'settings_get') {
+		return Promise.resolve({
+			workingDir: null,
+			temperContext: null,
+			agents: { opencode: { label: 'opencode', command: 'opencode acp' } }
+		});
+	}
 	return Promise.resolve(null);
 }
 

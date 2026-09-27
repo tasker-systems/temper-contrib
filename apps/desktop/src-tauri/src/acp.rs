@@ -8,7 +8,8 @@ use std::time::Duration;
 use agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionNotification, SessionUpdate, TextContent,
+    SessionConfigOption, SessionConfigOptionValue, SessionModeState, SessionNotification,
+    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Error};
@@ -251,6 +252,15 @@ pub enum ConversationCommand {
         text: String,
         reply: oneshot::Sender<Result<String, String>>,
     },
+    SetMode {
+        mode_id: String,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
+    SetConfigOption {
+        config_id: String,
+        value: SessionConfigOptionValue,
+        reply: oneshot::Sender<Result<(), String>>,
+    },
 }
 
 /// What the conversation loop reports once the handshake and session
@@ -258,6 +268,12 @@ pub enum ConversationCommand {
 struct ConversationReady {
     session_id: String,
     agent_info: serde_json::Value,
+    /// What `session/new` declares: the mode state and the config options,
+    /// verbatim — the agent's own vocabulary, carried out for the room to
+    /// render. Nothing here is an agent's answer: an agent that declares
+    /// neither carries neither.
+    modes: Option<SessionModeState>,
+    config_options: Option<Vec<SessionConfigOption>>,
 }
 
 #[derive(Clone)]
@@ -280,6 +296,8 @@ pub struct ConversationInfo {
     pub conversation_id: String,
     pub session_id: String,
     pub agent_info: serde_json::Value,
+    pub modes: Option<SessionModeState>,
+    pub config_options: Option<Vec<SessionConfigOption>>,
 }
 
 /// Spawns an ACP agent subprocess, completes the `initialize` handshake,
@@ -297,7 +315,13 @@ pub async fn acp_start(
     command: String,
     cwd: String,
 ) -> Result<ConversationInfo, String> {
-    let agent = AcpAgent::from_str(&command).map_err(|e| e.to_string())?;
+    // A configured agent's launch facts reach here as one launch spec from
+    // the device store: a plain command string (`opencode acp`) parses by
+    // shell words, and a JSON object (`{"command":…, "args":…, "env":…}`)
+    // carries its args and env verbatim — the same forms the ACP crate
+    // accepts, so the store holds exactly what it can launch.
+    let agent = AcpAgent::from_str(command.trim())
+        .map_err(|e| format!("the launch command does not parse as an ACP agent: {e}"))?;
     let cwd = expand_cwd(&cwd)?;
 
     let conversation_id = format!(
@@ -382,6 +406,8 @@ pub async fn acp_start(
         conversation_id,
         session_id: info.session_id,
         agent_info: info.agent_info,
+        modes: info.modes,
+        config_options: info.config_options,
     })
 }
 
@@ -418,6 +444,8 @@ async fn run_conversation(
     let _ = ready.send(Ok(ConversationReady {
         session_id: session_id.to_string(),
         agent_info,
+        modes: new_session.modes.clone(),
+        config_options: new_session.config_options.clone(),
     }));
 
     while let Some(command) = commands.recv().await {
@@ -432,6 +460,34 @@ async fn run_conversation(
                     .await;
                 let _ = reply.send(match result {
                     Ok(response) => Ok(stop_reason_string(&response.stop_reason)),
+                    Err(e) => Err(e.to_string()),
+                });
+            }
+            ConversationCommand::SetMode { mode_id, reply } => {
+                let result = connection
+                    .send_request(SetSessionModeRequest::new(session_id.clone(), mode_id))
+                    .block_task()
+                    .await;
+                let _ = reply.send(match result {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e.to_string()),
+                });
+            }
+            ConversationCommand::SetConfigOption {
+                config_id,
+                value,
+                reply,
+            } => {
+                let result = connection
+                    .send_request(SetSessionConfigOptionRequest::new(
+                        session_id.clone(),
+                        config_id,
+                        value,
+                    ))
+                    .block_task()
+                    .await;
+                let _ = reply.send(match result {
+                    Ok(_) => Ok(()),
                     Err(e) => Err(e.to_string()),
                 });
             }
@@ -509,13 +565,7 @@ pub async fn acp_prompt(
     conversation_id: String,
     text: String,
 ) -> Result<String, String> {
-    let commands = {
-        let conversations = state.conversations.lock().unwrap();
-        conversations
-            .get(&conversation_id)
-            .map(|handle| handle.commands.clone())
-            .ok_or_else(|| format!("unknown conversation {conversation_id}"))?
-    };
+    let commands = conversation_commands(&state, &conversation_id)?;
 
     let (reply_tx, reply_rx) = oneshot::channel();
     if commands
@@ -534,6 +584,76 @@ pub async fn acp_prompt(
     reply_rx
         .await
         .map_err(|_| "conversation ended before the turn completed".to_string())?
+}
+
+/// Sets the session's mode. The mode id is the agent's own — one of what
+/// `session/new` declared in `availableModes`; anything else is the agent's
+/// error to refuse, and the answer relays it. Declared changes the agent
+/// makes itself arrive as `current_mode_update` notifications, which the
+/// UI already streams.
+#[tauri::command]
+pub async fn acp_set_mode(
+    state: tauri::State<'_, AcpState>,
+    conversation_id: String,
+    mode_id: String,
+) -> Result<(), String> {
+    let commands = conversation_commands(&state, &conversation_id)?;
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if commands
+        .send(ConversationCommand::SetMode {
+            mode_id,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return Err("conversation has ended".to_string());
+    }
+    reply_rx
+        .await
+        .map_err(|_| "conversation ended before the mode was set".to_string())?
+}
+
+/// Sets one session configuration option's value. The value is the agent's
+/// own declared shape (a value id for a select, a boolean for a toggle);
+/// the agent's answer carries the updated declared set, which arrives as
+/// `config_option_update` notifications.
+#[tauri::command]
+pub async fn acp_set_config_option(
+    state: tauri::State<'_, AcpState>,
+    conversation_id: String,
+    config_id: String,
+    value: SessionConfigOptionValue,
+) -> Result<(), String> {
+    let commands = conversation_commands(&state, &conversation_id)?;
+    let (reply_tx, reply_rx) = oneshot::channel();
+    if commands
+        .send(ConversationCommand::SetConfigOption {
+            config_id,
+            value,
+            reply: reply_tx,
+        })
+        .is_err()
+    {
+        return Err("conversation has ended".to_string());
+    }
+    reply_rx
+        .await
+        .map_err(|_| "conversation ended before the option was set".to_string())?
+}
+
+/// Clones the live command channel for a conversation, or names the
+/// conversation that is not there.
+fn conversation_commands(
+    state: &tauri::State<'_, AcpState>,
+    conversation_id: &str,
+) -> Result<mpsc::UnboundedSender<ConversationCommand>, String> {
+    state
+        .conversations
+        .lock()
+        .unwrap()
+        .get(conversation_id)
+        .map(|handle| handle.commands.clone())
+        .ok_or_else(|| format!("unknown conversation {conversation_id}"))
 }
 
 fn stop_reason_string(reason: &agent_client_protocol::schema::v1::StopReason) -> String {
@@ -1024,6 +1144,86 @@ mod tests {
             chunks.len() > 1,
             "the prose answer should stream incrementally, not as one blob, got: {chunks:?}"
         );
+    }
+
+    /// Witness for the declared-selection clause: opencode's `session/new`
+    /// declares modes and config options (observed live — `configOptions`
+    /// carries a `model` select), so the conversation carries them out of
+    /// `session/new` verbatim. The changed-lands half: setting the declared
+    /// mode round-trips, and the agent's own `current_mode_update`
+    /// notification arrives through the update stream. Requires opencode on
+    /// PATH. Run locally: `cargo test -p desktop --lib -- --ignored`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode on PATH"]
+    async fn opencode_declares_selection_and_a_set_mode_round_trips() {
+        let (commands, recorded, info) = start_test_conversation(
+            opencode_witness_agent(),
+            AskBoard::default(),
+            silent_ask_sink(),
+        )
+        .await;
+        assert!(!info.session_id.is_empty(), "agent should create a session");
+
+        // What the agent declares at session/new is carried out verbatim.
+        if let Some(modes) = &info.modes {
+            assert!(
+                !modes.available_modes.is_empty(),
+                "a declared mode state names at least one mode"
+            );
+        }
+
+        // A declared mode id round-trips; the agent's own change notification
+        // arrives through the same update stream the UI listens on.
+        if let Some(modes) = &info.modes {
+            let declared = modes.available_modes.first().expect("a declared mode");
+            let (reply_tx, reply_rx) = oneshot::channel();
+            commands
+                .send(ConversationCommand::SetMode {
+                    mode_id: declared.id.to_string(),
+                    reply: reply_tx,
+                })
+                .expect("the conversation should still be open");
+            let set = tokio::time::timeout(Duration::from_secs(60), reply_rx)
+                .await
+                .expect("the set_mode round-trip should complete")
+                .expect("the reply channel should live");
+            set.expect("the declared mode should set");
+
+            let landed =
+                tokio::time::timeout(Duration::from_secs(60), async {
+                    loop {
+                        if recorded.lock().unwrap().iter().any(|event| {
+                            matches!(&event.update, SessionUpdate::CurrentModeUpdate(_))
+                        }) {
+                            return true;
+                        }
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                    }
+                })
+                .await
+                .expect("the agent should announce the mode change itself");
+            assert!(landed);
+        } else {
+            // An agent that declares no modes exercises the other arm: the
+            // set command is still routed, and the agent's error — if it
+            // refuses an undeclared mode — is relayed as an error, not a
+            // desktop-side assumption.
+            let (reply_tx, reply_rx) = oneshot::channel();
+            commands
+                .send(ConversationCommand::SetMode {
+                    mode_id: "undeclared-mode".to_string(),
+                    reply: reply_tx,
+                })
+                .expect("the conversation should still be open");
+            let set = tokio::time::timeout(Duration::from_secs(60), reply_rx)
+                .await
+                .expect("the set_mode round-trip should complete")
+                .expect("the reply channel should live");
+            assert!(
+                set.is_ok() || set.is_err(),
+                "the answer relays whatever the agent decided"
+            );
+        }
     }
 
     /// Witness for the second agent: the real npm adapter

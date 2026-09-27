@@ -5,19 +5,32 @@ import {
 	type AcpUpdate,
 	type AskedNotice,
 	type AskNotice,
+	applyConfigUpdate,
+	applyModeUpdate,
 	applyNotice,
 	applyUpdate,
 	type ChatMessage,
-	type DeclaredOption
+	type DeclaredConfigOption,
+	type DeclaredOption,
+	type DeclaredSelection,
+	declaredSelection,
+	EMPTY_SELECTION
 } from './reducers';
 
-type ConversationInfo = { conversationId: string; sessionId: string; agentInfo: unknown };
+type ConversationInfo = {
+	conversationId: string;
+	sessionId: string;
+	agentInfo: unknown;
+	modes?: DeclaredSelection['modes'];
+	configOptions?: DeclaredConfigOption[] | null;
+};
 type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate };
 
-export const AGENTS = [
-	{ label: 'opencode', command: 'opencode acp' },
-	{ label: 'claude code', command: 'npx -y @zed-industries/claude-code-acp' }
-];
+/** One configured agent, as the device store holds it: the launch spec
+ *  (a command string, or a JSON object with command/args/env) and the
+ *  picker's label. The roster is configuration — the desktop hardcodes
+ *  none of it. */
+export type ConfiguredAgent = { key: string; label: string; command: string };
 
 const STORE_KEY = 'temper-agent-panel-v1';
 
@@ -33,11 +46,13 @@ class AgentSession {
 	conversation = $state<ConversationInfo | null>(null);
 	messages = $state<ChatMessage[]>([]);
 	asks = $state<AskedNotice[]>([]);
+	selection = $state<DeclaredSelection>(EMPTY_SELECTION);
 	draft = $state<string>('');
 	prompting = $state<boolean>(false);
 	starting = $state<boolean>(false);
 	error = $state<string>('');
-	agentCommand = $state<string>(AGENTS[0].command);
+	agents = $state<ConfiguredAgent[]>([]);
+	agentKey = $state<string>('');
 	workingDir = $state<string>('');
 	panelOpen = $state<boolean>(true);
 	// The work record's open facts — set when the conversation opens, written when it closes.
@@ -53,7 +68,41 @@ class AgentSession {
 		this.initialised = true;
 		this.restorePanel();
 		this.loadDefaults();
+		this.loadAgents();
 		this.listenOnce();
+	}
+
+	/** The picker's roster is the device store's configured agents — read
+	 *  once at init, read again when the settings room changes it. A store
+	 *  that cannot be read leaves the roster empty and says nothing: an
+	 *  empty picker is honest, a hardcoded fallback is not. */
+	async loadAgents(): Promise<void> {
+		try {
+			const settings = await invoke<{
+				agents?: Record<string, { label?: string | null; command?: string | null }>;
+			}>('settings_get');
+			const roster: ConfiguredAgent[] = Object.entries(settings.agents ?? {})
+				.filter(([, a]) => typeof a.command === 'string' && a.command.trim() !== '')
+				.map(([key, a]) => ({
+					key,
+					label: a.label ?? key,
+					command: a.command as string
+				}));
+			this.agents = roster;
+			if (!roster.some((a) => a.key === this.agentKey)) {
+				this.agentKey = roster[0]?.key ?? '';
+			}
+		} catch {
+			// The store is unreachable; the roster stays empty and says nothing.
+		}
+	}
+
+	selectAgent(key: string): void {
+		this.agentKey = key;
+	}
+
+	agentLabel(): string {
+		return this.agents.find((a) => a.key === this.agentKey)?.label ?? this.agentKey;
 	}
 
 	/** The panel's open/closed state is a device fact: a versioned key, try/catch — a store
@@ -90,7 +139,24 @@ class AgentSession {
 		listen<AcpEvent>('acp-update', (event) => {
 			const current = untrack(() => this.conversation);
 			if (!current || event.payload.conversationId !== current.conversationId) return;
-			applyUpdate(this.messages, event.payload.update);
+			// Declared-change shapes land on the selection, not the transcript:
+			// the two are different state, each with its own reducer.
+			const update = event.payload.update;
+			if (update.sessionUpdate === 'current_mode_update') {
+				const modeId = (update as { currentModeId?: unknown }).currentModeId;
+				if (typeof modeId === 'string') {
+					untrack(() => applyModeUpdate(this.selection, modeId));
+				}
+				return;
+			}
+			if (update.sessionUpdate === 'config_option_update') {
+				const options = (update as { configOptions?: unknown }).configOptions;
+				if (Array.isArray(options)) {
+					untrack(() => applyConfigUpdate(this.selection, options as DeclaredConfigOption[]));
+				}
+				return;
+			}
+			applyUpdate(this.messages, update);
 		}).then((u) => {
 			this.unlisten = u;
 		});
@@ -101,10 +167,6 @@ class AgentSession {
 		}).then((u) => {
 			this.unlistenAsk = u;
 		});
-	}
-
-	agentLabel(): string {
-		return AGENTS.find((a) => a.command === this.agentCommand)?.label ?? this.agentCommand;
 	}
 
 	/** The declared-at-start directory is also the preference: a store that cannot be written
@@ -118,16 +180,25 @@ class AgentSession {
 			this.error = 'A working directory is required — agents treat it as their project root.';
 			return;
 		}
+		const agent = this.agents.find((a) => a.key === this.agentKey) ?? this.agents[0];
+		if (!agent) {
+			this.error = 'No agent is configured — add one in the settings room.';
+			return;
+		}
 		this.starting = true;
 		this.error = '';
 		try {
 			const info = await invoke<ConversationInfo>('acp_start', {
-				command: this.agentCommand,
+				command: agent.command,
 				cwd: this.workingDir
 			});
 			this.conversation = info;
 			this.messages = [];
 			this.asks = [];
+			// The declared selection is established at conversation start from
+			// what `session/new` declared — never inherited from how the room
+			// was entered, never guessed for an agent that declares nothing.
+			this.selection = declaredSelection(info);
 			this.rememberWorkingDir();
 			this.openedAt = new Date().toISOString();
 			this.recordKey = crypto.randomUUID();
@@ -171,18 +242,51 @@ class AgentSession {
 		}
 	}
 
+	/** Changes the session's mode. The id is the agent's own — one of what
+	 *  it declared; the agent's own error, if the id is not one of them,
+	 *  is relayed as the error. The declared change lands as a
+	 *  `current_mode_update` notification, which the listener applies. */
+	async setMode(modeId: string): Promise<void> {
+		if (!this.conversation) return;
+		try {
+			await invoke('acp_set_mode', {
+				conversationId: this.conversation.conversationId,
+				modeId
+			});
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
+	/** Changes one declared configuration option's value. The value shape is
+	 *  the agent's own (a value id for a select, a boolean for a toggle);
+	 *  the updated declared set arrives as a `config_option_update`. */
+	async setConfigOption(configId: string, value: string | boolean): Promise<void> {
+		if (!this.conversation) return;
+		try {
+			await invoke('acp_set_config_option', {
+				conversationId: this.conversation.conversationId,
+				configId,
+				value: typeof value === 'boolean' ? { type: 'boolean', value } : { type: 'value_id', value }
+			});
+		} catch (e) {
+			this.error = String(e);
+		}
+	}
+
 	async close(): Promise<void> {
 		if (!this.conversation) return;
 		const id = this.conversation.conversationId;
 		// Captured before the state clears: the record names the conversation that was.
 		const label = this.agentLabel();
-		const command = this.agentCommand;
+		const command = this.agents.find((a) => a.key === this.agentKey)?.command ?? this.agentKey;
 		const dir = this.workingDir;
 		const opened = this.openedAt;
 		const key = this.recordKey;
 		this.conversation = null;
 		this.messages = [];
 		this.asks = [];
+		this.selection = EMPTY_SELECTION;
 		try {
 			await invoke('acp_close', { conversationId: id });
 		} catch {
