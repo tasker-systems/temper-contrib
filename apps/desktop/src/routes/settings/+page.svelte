@@ -1,8 +1,9 @@
 <script lang="ts">
 	/**
 	 * The settings room: the device's preferences. Bounded and closable — it holds
-	 * Appearance and Agents, and stays silent about what it does not hold. Device
-	 * facts stay on this machine; what follows the person is temper's, later work.
+	 * Appearance, Agents, and the temper context the person's facts land in, and
+	 * stays silent about what it does not hold. Device facts stay on this
+	 * machine; the temper context names where person facts go.
 	 */
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
@@ -18,14 +19,26 @@
 	let loadError = $state('');
 	let saveError = $state('');
 
+	let temperContext = $state('');
+	let storedContext = $state('');
+	let savingContext = $state(false);
+	let justSavedContext = $state(false);
+	let saveContextError = $state('');
+
 	const dirty = $derived(workingDir !== stored);
 	// "saved" holds only while the field still shows what was saved; an edit retracts it.
 	const saved = $derived(justSaved && !dirty);
+	const contextDirty = $derived(temperContext !== storedContext);
+	const contextSaved = $derived(justSavedContext && !contextDirty);
 
 	onMount(async () => {
 		try {
-			const settings = await invoke<{ workingDir?: string | null }>('settings_get');
+			const settings = await invoke<{
+				workingDir?: string | null;
+				temperContext?: string | null;
+			}>('settings_get');
 			workingDir = stored = settings.workingDir ?? '';
+			temperContext = storedContext = settings.temperContext ?? '';
 		} catch (e) {
 			loadError = String(e);
 		}
@@ -44,6 +57,22 @@
 			saveError = String(e);
 		} finally {
 			saving = false;
+		}
+	}
+
+	async function saveTemperContext(): Promise<void> {
+		savingContext = true;
+		justSavedContext = false;
+		saveContextError = '';
+		const value = temperContext;
+		try {
+			await invoke('settings_set_temper_context', { name: value });
+			storedContext = value;
+			justSavedContext = true;
+		} catch (e) {
+			saveContextError = String(e);
+		} finally {
+			savingContext = false;
 		}
 	}
 </script>
@@ -80,6 +109,29 @@
 		{#if saveError}
 			<p class="ed-notice" role="alert">
 				Not saved — the working directory on this machine is unchanged. {saveError}
+			</p>
+		{/if}
+	</section>
+
+	<p class="t-label">Temper</p>
+	<section class="ed-rail">
+		<label class="field">
+			<span class="t-strip">Person context</span>
+			<input bind:value={temperContext} placeholder="temper-desktop" />
+		</label>
+		<div class="actions">
+			<button
+				class="ed-action ed-action--primary"
+				onclick={saveTemperContext}
+				disabled={savingContext || !contextDirty}
+			>
+				{savingContext ? 'Saving…' : 'Save'}
+			</button>
+			{#if contextSaved}<span class="t-strip" role="status">saved</span>{/if}
+		</div>
+		{#if saveContextError}
+			<p class="ed-notice" role="alert">
+				Not saved — the temper context on this machine is unchanged. {saveContextError}
 			</p>
 		{/if}
 	</section>

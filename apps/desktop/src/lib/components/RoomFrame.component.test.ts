@@ -46,7 +46,7 @@ describe('RoomFrame', () => {
 
 	it('renders nothing for an unfilled slot — no placeholder claiming a state', () => {
 		const { container } = render(RoomFrame, { props: { rooms: ROOMS, room: SETTINGS_ROOM } });
-		for (const slot of ['reach', 'pending', 'cacheAge']) {
+		for (const slot of ['reach', 'pending', 'cacheAge', 'profile']) {
 			expect(container.querySelector(`.t-slot-${slot}`)).toBeNull();
 		}
 	});
@@ -56,6 +56,17 @@ describe('RoomFrame', () => {
 			props: { rooms: ROOMS, room: SETTINGS_ROOM, reach: reachSnippet }
 		});
 		expect(container.querySelector('.t-slot-reach')?.textContent).toContain('words only');
+		expect(container.querySelector('.t-slot-pending')).toBeNull();
+		expect(container.querySelector('.t-slot-cacheAge')).toBeNull();
+		expect(container.querySelector('.t-slot-profile')).toBeNull();
+	});
+
+	it('renders a filled profile slot and leaves its unfilled siblings absent', () => {
+		const { container } = render(RoomFrame, {
+			props: { rooms: ROOMS, room: SETTINGS_ROOM, profile: reachSnippet }
+		});
+		expect(container.querySelector('.t-slot-profile')?.textContent).toContain('words only');
+		expect(container.querySelector('.t-slot-reach')).toBeNull();
 		expect(container.querySelector('.t-slot-pending')).toBeNull();
 		expect(container.querySelector('.t-slot-cacheAge')).toBeNull();
 	});

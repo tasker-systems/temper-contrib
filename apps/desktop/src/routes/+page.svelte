@@ -3,9 +3,9 @@
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { untrack } from 'svelte';
 	import RegionState from '$lib/components/RegionState.svelte';
+	import TemperViews from '$lib/components/TemperViews.svelte';
 	import Transcript, { type ChatMessage } from '$lib/components/Transcript.svelte';
 
-	type ConnectionStatus = { connected: boolean; error: string | null };
 	type ConversationInfo = { conversationId: string; sessionId: string; agentInfo: unknown };
 	type AcpUpdate = {
 		sessionUpdate?: string;
@@ -21,11 +21,7 @@
 		{ label: 'claude code', command: 'npx -y @zed-industries/claude-code-acp' }
 	];
 
-	let status = $state<ConnectionStatus | null>(null);
-	let statusFailed = $state<string>('');
-	let profile = $state<string>('');
 	let error = $state<string>('');
-	let busy = $state<boolean>(false);
 
 	let agentCommand = $state<string>(AGENTS[0].command);
 	let workingDir = $state<string>('');
@@ -35,34 +31,9 @@
 	let prompting = $state<boolean>(false);
 	let starting = $state<boolean>(false);
 	let unlisten: UnlistenFn | null = null;
-
-	async function run<T>(action: () => Promise<T>, onOk: (v: T) => void): Promise<void> {
-		busy = true;
-		error = '';
-		try {
-			onOk(await action());
-		} catch (e) {
-			error = String(e);
-		} finally {
-			busy = false;
-		}
-	}
-
-	async function refreshStatus(): Promise<void> {
-		try {
-			status = await invoke<ConnectionStatus>('temper_connection_status');
-		} catch (e) {
-			statusFailed = String(e);
-		}
-	}
-	const whoami = () =>
-		run(() => invoke<unknown>('temper_whoami'), (v) => (profile = JSON.stringify(v, null, 2)));
-
-	/** The declared-at-start directory is also the preference: a store that cannot be written
-	 *  does not fail a conversation that has already begun. */
-	function rememberWorkingDir(): void {
-		invoke('settings_set_working_dir', { dir: workingDir.trim() }).catch(() => {});
-	}
+	// The work record's open facts — set when the conversation opens, written when it closes.
+	let openedAt = $state<string>('');
+	let recordKey = $state<string>('');
 
 	async function loadDefaults(): Promise<void> {
 		try {
@@ -71,6 +42,12 @@
 		} catch {
 			// The store is unreachable; the input stays empty and declaring still works.
 		}
+	}
+
+	/** The declared-at-start directory is also the preference: a store that cannot be written
+	 *  does not fail a conversation that has already begun. */
+	function rememberWorkingDir(): void {
+		invoke('settings_set_working_dir', { dir: workingDir.trim() }).catch(() => {});
 	}
 
 	$effect(() => {
@@ -133,13 +110,15 @@
 		starting = true;
 		error = '';
 		try {
-			const info = await invoke<ConversationInfo>('acp_start', {
-				command: agentCommand,
-				cwd: workingDir
-			});
-			conversation = info;
-			messages = [];
-			rememberWorkingDir();
+		const info = await invoke<ConversationInfo>('acp_start', {
+			command: agentCommand,
+			cwd: workingDir
+		});
+		conversation = info;
+		messages = [];
+		rememberWorkingDir();
+		openedAt = new Date().toISOString();
+		recordKey = crypto.randomUUID();
 		} catch (e) {
 			error = String(e);
 		} finally {
@@ -169,6 +148,12 @@
 	async function closeConversation(): Promise<void> {
 		if (!conversation) return;
 		const id = conversation.conversationId;
+		// Captured before the state clears: the record names the conversation that was.
+		const label = agentLabel();
+		const command = agentCommand;
+		const dir = workingDir;
+		const opened = openedAt;
+		const key = recordKey;
 		conversation = null;
 		messages = [];
 		try {
@@ -176,30 +161,27 @@
 		} catch {
 			// the conversation is already gone client-side; a dead agent cleans up server-side
 		}
+		try {
+			await invoke('temper_write_work_record', {
+				facts: {
+					agentLabel: label,
+					agentCommand: command,
+					workingDir: dir,
+					openedAt: opened,
+					closedAt: new Date().toISOString()
+				},
+				idempotencyKey: key
+			});
+		} catch (e) {
+			// The close stands; only the record is missing, and it is named.
+			error = `the work record was not written — ${String(e)}`;
+		}
 	}
 
-	refreshStatus();
 	loadDefaults();
 </script>
 
 <main class="page">
-	<p class="t-label">temper</p>
-	<section class="ed-rail">
-		{#if statusFailed}
-			<RegionState state="failed" label="connection status" detail={statusFailed} />
-		{:else if status === null}
-			<RegionState state="arriving" label="connection status" />
-		{:else if status.connected}
-			<p class="state">Connected with this machine's temper credentials.</p>
-		{:else}
-			<p class="state">Not connected{#if status.error} — {status.error}{/if}.</p>
-		{/if}
-		<button class="ed-action ed-action--primary" onclick={whoami} disabled={busy || !status?.connected}>
-			Who am I?
-		</button>
-		{#if profile}<pre class="t-code">{profile}</pre>{/if}
-	</section>
-
 	<p class="t-label">ACP chat</p>
 	<section class="ed-rail">
 		{#if !conversation}
@@ -250,6 +232,8 @@
 		{/if}
 	</section>
 
+	<TemperViews />
+
 	{#if error}
 		<RegionState state="failed" label="the last request" detail={error} />
 	{/if}
@@ -269,11 +253,6 @@
 		display: grid;
 		gap: 0.8rem;
 		justify-items: start;
-	}
-	.state {
-		margin: 0;
-		font: 1rem/1.7 var(--tp-font-reading);
-		color: var(--tp-text-muted);
 	}
 	.agents {
 		display: flex;
@@ -310,16 +289,5 @@
 	}
 	.composer input {
 		flex: 1;
-	}
-	pre {
-		width: 100%;
-		box-sizing: border-box;
-		margin: 0;
-		padding: 0.8rem 1rem;
-		max-height: 320px;
-		overflow: auto;
-		background: var(--tp-surface);
-		border: 1px solid var(--tp-rule);
-		border-radius: var(--tp-radius-chip);
 	}
 </style>

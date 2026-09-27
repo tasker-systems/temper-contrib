@@ -9,10 +9,13 @@
 	import { page } from '$app/state';
 	import { themeStore } from '$lib/theme-store.svelte';
 	import RoomFrame from '$lib/components/RoomFrame.svelte';
+	import TemperProfile from '$lib/components/TemperProfile.svelte';
+	import { temperViews } from '$lib/temper-views.svelte';
 
 	let { children } = $props();
 
 	themeStore.init();
+	temperViews.init();
 
 	$effect(() => {
 		document.documentElement.dataset.theme = themeStore.active;
@@ -32,6 +35,10 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<RoomFrame {rooms} {room} />
+{#snippet profileSlot()}
+	<TemperProfile />
+{/snippet}
+
+<RoomFrame {rooms} {room} profile={profileSlot} />
 
 {@render children()}

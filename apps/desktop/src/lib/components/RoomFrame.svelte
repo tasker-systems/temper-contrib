@@ -21,9 +21,10 @@
 		reach?: Snippet;
 		pending?: Snippet;
 		cacheAge?: Snippet;
+		profile?: Snippet;
 	}
 
-	let { rooms, room, reach, pending, cacheAge }: Props = $props();
+	let { rooms, room, reach, pending, cacheAge, profile }: Props = $props();
 </script>
 
 <header class="masthead">
@@ -56,6 +57,9 @@
 	{/if}
 	{#if cacheAge}
 		<span class="t-slot-cacheAge">{@render cacheAge()}</span>
+	{/if}
+	{#if profile}
+		<span class="t-slot-profile">{@render profile()}</span>
 	{/if}
 </header>
 
