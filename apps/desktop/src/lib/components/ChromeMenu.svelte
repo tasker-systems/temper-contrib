@@ -1,9 +1,10 @@
 <script lang="ts">
 	/**
 	 * The chrome's standing menu, at the masthead's left: what the building offers
-	 * from any room. Bounded — "app setup" is its only entry today. It opens only
+	 * from any room. Bounded — settings and app setup are its entries, each opening
+	 * core's place in a tab (a tab already showing it is focused). It opens only
 	 * when the person opens it; nothing on the app's behalf opens it, and nothing
-	 * navigates to a setup room unprompted.
+	 * opens a setup tab unprompted.
 	 */
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
@@ -37,6 +38,9 @@
 	</button>
 	{#if open}
 		<ul class="entries">
+			<li>
+				<a href="/settings" onclick={() => (open = false)}>settings</a>
+			</li>
 			<li>
 				<a href="/setup" onclick={() => (open = false)}>app setup…</a>
 			</li>

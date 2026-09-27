@@ -1,17 +1,13 @@
 <script lang="ts">
 	/**
 	 * The document's neighbourhood: every resource one hop away, strongest joining edge first.
-	 * Each neighbour opens in the room, and the walk comes with it, so the way out walks back.
+	 * Each neighbour opens in this tab, and the way out walks back along the tab's trail.
 	 * Titles, types and excerpts are what temper's graph read returned — never typed here.
 	 */
-	import { PANEL_STEP, type Related, walkOn } from '$lib/document';
+	import { PANEL_STEP, type Related, roomHref } from '$lib/document';
 	import BoundedList from './BoundedList.svelte';
 
-	let {
-		related,
-		current,
-		walk
-	}: { related: Related; current: string; walk: string[] } = $props();
+	let { related }: { related: Related } = $props();
 
 	let shown = $state(PANEL_STEP);
 	const rows = $derived(related.neighbours.slice(0, shown));
@@ -27,7 +23,7 @@
 	onmore={() => (shown += PANEL_STEP)}
 >
 	{#each rows as n (n.id)}
-		<a class="neighbour" href={walkOn(n.id, current, walk)}>
+		<a class="neighbour" href={roomHref(n.id)}>
 			<span class="head">
 				{#if n.docType}<span class="type">{n.docType}</span>{/if}
 				<span class="title">{n.title}</span>

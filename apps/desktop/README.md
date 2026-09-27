@@ -38,14 +38,24 @@ core in `src-tauri/`.
   batched and cached per session (`src/lib/refs.ts`). An id that does not
   resolve reads as unresolved, never as the title a spec suggested, and only a
   resolved reference is a link.
-- **The document room** — `/r/<ref>` opens a document by address, body first:
+- **The shell** — `src/lib/shell/` is the whole window: a masthead, tabs, a room
+  strip and the agent panel. A tab is a subject (a resource, a query, a place)
+  seen through a lens, with its own back-trail; every open tab stays mounted and
+  hidden while inactive, so switching tabs re-reads nothing. The tab model
+  (`tabs.svelte.ts`) is the one door every move goes through, and open tabs
+  persist per device. Links stay `<a href>` (`/r/<ref>`, `/q?context=…`,
+  `/settings`); the shell reads a followed link back into a subject, opening it
+  in place, or in a new tab on ⌘/Ctrl or middle click. Lenses are data
+  (`lenses.ts`, `contributions/`): resolved from the lens asked for, then a
+  plugin lens declaring the doc type, then core's default. A lens not built yet
+  says so and what lands it. SvelteKit's router moves nobody between rooms.
+- **The document room** — the core document lens opens a document body first:
   what temper calls it, its properties (`src/lib/properties.ts`, ported from
-  temper-ui) and the rendered body. Connections, related resources one step
-  away, history and recorded sources sit in an "about this document" panel,
-  closed by default, each tab read only when first opened and failing on its
-  own. Walking from room to room carries the walk in the address (`?walk=`),
-  so the way out returns room by room and a room entered directly exits home.
-  The core commands are `src-tauri/src/document*.rs`.
+  temper-ui) and the rendered body. Its tab reads the body once, on opening.
+  Connections, related resources one step away, history and recorded sources sit
+  in an "about this document" panel, closed by default, each tab read only when
+  first opened and failing on its own. The core commands are
+  `src-tauri/src/document*.rs`.
 
 ## Content-Security-Policy
 
@@ -62,8 +72,9 @@ core in `src-tauri/`.
   `withGlobalTauri` is off (the UI imports `@tauri-apps/api`). Widening either is a reviewed
   change.
 - **Witness** — `cargo make desktop-csp-witness` builds for production and drives the real
-  webview through `tauri-driver` (`scripts/csp-witness.py`): every route renders with no
-  violations; injected scripts, eval, inline handlers and style attributes, remote images and
+  webview through `tauri-driver` (`scripts/csp-witness.py`): the shell is driven — a document
+  in a tab, a second tab, a switch back that keeps the room, a lens switch, settings and setup
+  as tabs — with no violations; injected scripts, eval, inline handlers and style attributes, remote images and
   remote fetches are all refused; the `__TAURI__` global is absent and a command outside the
   capability is refused. Verify against a production build, never the dev server.
 

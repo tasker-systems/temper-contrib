@@ -1,16 +1,16 @@
-// The document room's witnesses. `invoke` is mocked and records every command, so each witness
-// can say exactly which reads the room issued, and when.
+// The document room's witnesses, mounted the way the shell mounts it: a tab's step host reads the
+// body once, resolves the document lens, and hands the room the answer. `invoke` is mocked and
+// records every command, so each witness can say exactly which reads the room issued, and when.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connections, DocOpened, History, PanelRead, Related, Sources } from '$lib/document';
-import { roomTitles } from '$lib/room-title.svelte';
-import DocumentRoom from './DocumentRoom.svelte';
+import StepHost from '$lib/shell/StepHost.svelte';
+import { HOME_TAB, tabs } from '$lib/shell/tabs.svelte';
 
 const ID = '01a0e020-a6d7-7420-b924-68f5e89f354b';
-const FROM = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
 const PEER = '01a0e2a1-34a8-7a63-8fd6-cd3220c36191';
 const PANEL_READS = ['doc_connections', 'doc_related', 'doc_history', 'doc_sources'];
 
@@ -110,6 +110,14 @@ function button(container: HTMLElement, text: string): HTMLButtonElement {
 	return found as HTMLButtonElement;
 }
 
+/** Open the document in a new tab and mount that tab's step host, as the shell does. */
+function openRoom() {
+	tabs.open({ kind: 'resource', id: ID }, { where: 'new' });
+	const tab = tabs.active;
+	const view = render(StepHost, { props: { tabId: tab.id, step: tabs.current(tab) } });
+	return { ...view, step: () => tabs.current(tab) };
+}
+
 async function opened(container: HTMLElement): Promise<void> {
 	await waitFor(() => expect(container.querySelector('h1')?.textContent).toBe(OPENED.title));
 }
@@ -117,12 +125,12 @@ async function opened(container: HTMLElement): Promise<void> {
 describe('the document room', () => {
 	beforeEach(() => {
 		calls = [];
-		roomTitles.clear(`/r/${ID}`);
+		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
 		answering(DEFAULTS);
 	});
 
 	it('renders body-first: properties above the body, the panel closed, nothing else read (W3)', async () => {
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 		await waitFor(() => expect(container.querySelector('.md-body h1')?.textContent).toBe('Scope'));
 
@@ -135,7 +143,7 @@ describe('the document room', () => {
 	});
 
 	it('issues exactly one tab read per tab, on first open, and never again (W3)', async () => {
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 
 		await fireEvent.click(button(container, 'About this document'));
@@ -158,7 +166,7 @@ describe('the document room', () => {
 			doc_connections: present(edges(40)),
 			doc_related: present(neighbours(30))
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 
 		await fireEvent.click(button(container, 'About this document'));
@@ -183,7 +191,7 @@ describe('the document room', () => {
 
 	it('shows more on request, and the sentence follows what is shown (W4)', async () => {
 		answering({ ...DEFAULTS, doc_connections: present(edges(40)) });
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 		await fireEvent.click(button(container, 'About this document'));
 		await waitFor(() => expect(container.textContent).toContain('25 of 40 connections'));
@@ -196,7 +204,7 @@ describe('the document room', () => {
 			...DEFAULTS,
 			doc_history: async () => ({ state: 'failed', message: 'the trail read timed out' })
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 
 		await fireEvent.click(button(container, 'About this document'));
@@ -222,7 +230,7 @@ describe('the document room', () => {
 					? { state: 'failed', message: 'the trail read timed out' }
 					: { state: 'present', data: HISTORY }
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 		await fireEvent.click(button(container, 'About this document'));
 		await fireEvent.click(button(container, 'History'));
@@ -240,7 +248,7 @@ describe('the document room', () => {
 				throw 'temper is not connected';
 			}
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 		await fireEvent.click(button(container, 'About this document'));
 		await fireEvent.click(button(container, 'Sources'));
@@ -249,19 +257,18 @@ describe('the document room', () => {
 		);
 	});
 
-	it('names itself in the frame once it has read its title, and not before', async () => {
+	it('names its tab once it has read its title, and not before', async () => {
 		let settle: (value: DocOpened) => void = () => {};
 		answering({ ...DEFAULTS, doc_open: () => new Promise((resolve) => (settle = resolve)) });
-		const { container, unmount } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
-		expect(roomTitles.get(`/r/${ID}`)).toBeUndefined();
+		const { container, step } = openRoom();
+		expect(step().title).toBeNull();
 		expect(container.textContent).toContain('Loading the document…');
 
 		settle(OPENED);
 		await opened(container);
-		expect(roomTitles.get(`/r/${ID}`)).toBe(OPENED.title);
-
-		unmount();
-		expect(roomTitles.get(`/r/${ID}`)).toBeUndefined();
+		expect(step().title).toBe(OPENED.title);
+		expect(step().lens).toBe('core/document');
+		expect(step().docType).toBe('task');
 	});
 
 	it('an open that fails says so and still offers the panel', async () => {
@@ -269,11 +276,11 @@ describe('the document room', () => {
 			...DEFAULTS,
 			doc_open: async () => ({ state: 'failed', id: ID, message: 'offline' })
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container, step } = openRoom();
 		await waitFor(() =>
 			expect(container.textContent).toContain('This document unavailable — nothing was read.')
 		);
-		expect(roomTitles.get(`/r/${ID}`)).toBeUndefined();
+		expect(step().title).toBeNull();
 		expect(button(container, 'About this document')).toBeDefined();
 	});
 
@@ -282,15 +289,15 @@ describe('the document room', () => {
 			...DEFAULTS,
 			doc_open: async () => ({ state: 'unresolved', id: ID, reason: 'not found' })
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await waitFor(() => expect(container.textContent).toContain('No document at this reference.'));
 		expect(
 			[...container.querySelectorAll('button')].some((b) => b.textContent?.includes('About'))
 		).toBe(false);
 	});
 
-	it('a neighbour opens in the room, carrying the walk so the way out walks back', async () => {
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [FROM] } });
+	it('a neighbour links by its address alone — the tab, not the link, holds the trail', async () => {
+		const { container } = openRoom();
 		await opened(container);
 		await fireEvent.click(button(container, 'About this document'));
 		await fireEvent.click(button(container, 'Related'));
@@ -298,12 +305,10 @@ describe('the document room', () => {
 		const link = [...container.querySelectorAll('a')].find((a) =>
 			a.textContent?.includes('Neighbour 0')
 		);
-		expect(link?.getAttribute('href')).toBe(
-			`/r/01a0e2a1-34a8-7a63-8fd6-000000000000?walk=${FROM},${ID}`
-		);
+		expect(link?.getAttribute('href')).toBe('/r/01a0e2a1-34a8-7a63-8fd6-000000000000');
 	});
 
-	it('a connection to a resource links into its room with the walk; a blob stays inert', async () => {
+	it('a connection to a resource links into its room; a blob stays inert', async () => {
 		answering({
 			...DEFAULTS,
 			doc_connections: present<Connections>({
@@ -324,14 +329,14 @@ describe('the document room', () => {
 				}
 			]
 		});
-		const { container } = render(DocumentRoom, { props: { ident: ID, walk: [] } });
+		const { container } = openRoom();
 		await opened(container);
 		await fireEvent.click(button(container, 'About this document'));
 		await waitFor(() => expect(container.textContent).toContain('The peer'));
 		const link = [...container.querySelectorAll('a')].find((a) =>
 			a.textContent?.includes('The peer')
 		);
-		expect(link?.getAttribute('href')).toBe(`/r/the-peer-${PEER}?walk=${ID}`);
+		expect(link?.getAttribute('href')).toBe(`/r/the-peer-${PEER}`);
 		expect(container.textContent).toContain('← relates_to');
 		expect(container.textContent).toContain('blob · b0000000');
 	});

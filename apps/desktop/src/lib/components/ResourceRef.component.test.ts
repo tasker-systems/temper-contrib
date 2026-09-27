@@ -40,15 +40,13 @@ describe('ResourceRef', () => {
 		expect(container.textContent).toContain('A document');
 	});
 
-	it('lets a room carry its walk into the link', async () => {
+	it('lets a caller address the link otherwise', async () => {
 		answering(resolved);
 		const { container } = render(ResourceRef, {
-			props: { id: id(2), hrefFor: (ref: string) => `/r/${ref}?walk=here` }
+			props: { id: id(2), hrefFor: (ref: string) => `/q?text=${ref}` }
 		});
 		await waitFor(() => expect(container.querySelector('a')).not.toBeNull());
-		expect(container.querySelector('a')?.getAttribute('href')).toBe(
-			`/r/a-document-${id(2)}?walk=here`
-		);
+		expect(container.querySelector('a')?.getAttribute('href')).toBe(`/q?text=a-document-${id(2)}`);
 	});
 
 	it('stays inert while resolving', () => {

@@ -4,47 +4,41 @@
 	 * and nothing sits beside it; what the document is connected to, and how it came to be, is
 	 * in the about panel, read on request.
 	 *
-	 * The room reads the body and its hash once, on entry. Every other read is the panel's, and
-	 * each renders its own state, so a failed read elsewhere never blanks the body.
+	 * The room does not read its own body: the tab that hosts it reads the body and its hash once,
+	 * on opening, to learn which lens to show it through, and hands the answer here. Every other
+	 * read is the panel's, and each renders its own state, so a failed read elsewhere never blanks
+	 * the body. Once the answer names the document, the room names its tab.
 	 */
-	import { invoke } from '@tauri-apps/api/core';
-	import { onDestroy, untrack } from 'svelte';
-	import { type DocOpened, roomHref } from '$lib/document';
 	import { mergeProperties } from '$lib/properties';
-	import { roomTitles } from '$lib/room-title.svelte';
+	import type { DocOpened } from '$lib/document';
+	import type { TabHandle } from '$lib/shell/lenses';
 	import { ageWords } from '$lib/temper-views.svelte';
 	import AboutPanel from './AboutPanel.svelte';
 	import MarkdownRenderer from './MarkdownRenderer.svelte';
 	import PropertySet from './PropertySet.svelte';
 	import RegionState from './RegionState.svelte';
 
-	let { ident, walk }: { ident: string; walk: string[] } = $props();
+	let {
+		id,
+		opened,
+		tab
+	}: {
+		/** The reference the tab opened, whatever the read answered. */
+		id: string;
+		/** The host's open answer; absent while it is arriving. */
+		opened?: DocOpened;
+		tab?: TabHandle;
+	} = $props();
 
-	let opened = $state<DocOpened | null>(null);
-	let failure = $state('');
-
-	// One room per address: the route re-creates the room when the address changes, so the
-	// reference is read once. The frame's title is keyed by that address, not by the walk.
-	const asked = untrack(() => ident);
-	const path = roomHref(asked);
-
-	invoke<DocOpened>('doc_open', { id: asked }).then(
-		(answer) => {
-			opened = answer;
-			if (answer.state === 'opened') roomTitles.set(path, answer.title);
-		},
-		(err) => {
-			failure = String(err);
-		}
-	);
-
-	onDestroy(() => roomTitles.clear(path));
+	$effect(() => {
+		if (opened?.state === 'opened') tab?.setTitle(opened.title);
+	});
 
 	const doc = $derived(opened?.state === 'opened' ? opened : null);
 	const rows = $derived(doc ? mergeProperties(doc.managedMeta, doc.openMeta, doc.docType) : []);
 </script>
 
-<main class="page">
+<div class="page">
 	{#if doc}
 		<div class="ed-strip">
 			<span>{doc.docType}</span>
@@ -64,14 +58,12 @@
 		/>
 	{:else if opened?.state === 'failed'}
 		<RegionState state="failed" label="this document" detail={opened.message} />
-	{:else if failure}
-		<RegionState state="failed" label="this document" detail={failure} />
 	{:else}
 		<RegionState state="arriving" label="the document" />
 	{/if}
 
 	{#if opened?.state !== 'unresolved'}
-		<AboutPanel id={ident} {walk} />
+		<AboutPanel {id} />
 	{/if}
 
 	{#if doc}
@@ -79,7 +71,7 @@
 			<MarkdownRenderer markdown={doc.markdown} />
 		</article>
 	{/if}
-</main>
+</div>
 
 <style>
 	.page {

@@ -19,21 +19,35 @@
 
 <aside class="panel" aria-label="Agent">
 	<header class="head">
-		<p class="t-label">
-			{#if session.conversation}
-				{session.agentLabel()} <span aria-hidden="true">·</span> session
-				<span class="strip-em">{session.conversation.sessionId}</span>
-			{:else}
-				{session.agentLabel()}
-			{/if}
+		<div class="head-row">
+			<p class="t-label">the engagement</p>
+			<button
+				class="t-action close"
+				aria-label="Close the agent panel"
+				onclick={() => session.setPanelOpen(false)}
+			>
+				×</button
+			>
+		</div>
+		<p class="who">
+			<span class="agent-mark" aria-hidden="true">◆</span>
+			{session.agentLabel()}{#if session.conversation}
+				<span aria-hidden="true"> · </span>session
+				<span class="strip-em">{session.conversation.sessionId}</span>{/if}
 		</p>
-		<button
-			class="t-action close"
-			aria-label="Close the agent panel"
-			onclick={() => session.setPanelOpen(false)}
-		>
-			×</button
-		>
+		{#if session.conversation}
+			<!-- Reach reads here, beneath the agent's name, whatever room is in view. -->
+			<p class="t-strip reach">
+				{#if session.selection.modes}
+					mode ·
+					{session.selection.modes.availableModes.find(
+						(m) => m.id === session.selection.modes?.currentModeId
+					)?.name ?? session.selection.modes.currentModeId}
+				{:else}
+					reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes
+				{/if}
+			</p>
+		{/if}
 	</header>
 
 	{#if session.conversation}
@@ -85,16 +99,6 @@
 				{/if}
 			{/each}
 		</div>
-		<p class="t-strip reach">
-			{#if session.selection.modes}
-				mode ·
-				{session.selection.modes.availableModes.find(
-					(m) => m.id === session.selection.modes?.currentModeId
-				)?.name ?? session.selection.modes.currentModeId}
-			{:else}
-				reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes
-			{/if}
-		</p>
 		<Transcript messages={session.messages} pending={session.prompting ? session.agentLabel() : null} />
 		{#each session.asks as ask (ask.askId)}
 			<section class="ask" aria-label="Permission requested" aria-busy="true">
@@ -170,21 +174,35 @@
 		display: grid;
 		gap: 0.8rem;
 		align-content: start;
-		padding: 1.5rem 1.25rem 3rem;
-		border-left: 1px solid var(--tp-rule-strong);
-		min-width: 20rem;
-		max-width: 24rem;
-		height: 100%;
+		padding: 1.1rem 1.25rem 3rem;
+		border-left: 1px solid var(--tp-rule);
+		width: 23rem;
+		box-sizing: border-box;
+		background: var(--tp-surface);
 		overflow-y: auto;
 	}
 	.head {
+		display: grid;
+		gap: 0.35rem;
+		padding-bottom: 0.8rem;
+		border-bottom: 1px solid var(--tp-rule);
+	}
+	.head-row {
 		display: flex;
 		align-items: baseline;
 		gap: 0.6rem;
 	}
-	.head .t-label {
+	.head-row .t-label {
 		flex: 1;
 		margin: 0;
+	}
+	.who {
+		margin: 0;
+		font: 0.8rem var(--tp-font-doing);
+		color: var(--tp-text-muted);
+	}
+	.agent-mark {
+		color: var(--tp-author-agent);
 	}
 	.strip-em {
 		font-family: var(--tp-font-doing);
