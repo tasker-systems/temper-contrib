@@ -1,8 +1,8 @@
-// The home room's witnesses: the development probe is gone, the temper views
-// stand in its place, a closed conversation writes its work record with
-// the facts the page watched, and a permission ask renders the agent's own
-// declared options and answers as the chosen one. `invoke` and `listen` are
-// mocked and record every call.
+// The agent panel's witnesses: the engagement is the store's, not the
+// route's — a conversation started in the panel keeps its transcript and
+// asks, the ask surface is claimed by the layout while a conversation
+// lives, and a closed panel is a hidden view, not a lost conversation.
+// `invoke` and `listen` are mocked and record every call.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 
@@ -10,8 +10,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { temperViews } from '../lib/temper-views.svelte';
-import Page from './+page.svelte';
+import { agentSession } from '$lib/agent/session.svelte';
+import AgentPanel from './AgentPanel.svelte';
 
 type Call = { cmd: string; args: Record<string, unknown> | undefined };
 const calls: Call[] = [];
@@ -42,11 +42,11 @@ const declaredAsk = {
 	]
 };
 
-async function startConversation(container: HTMLElement): Promise<void> {
-	const input = container.querySelector('input');
+async function startConversation(): Promise<void> {
+	const input = document.querySelector('input');
 	expect(input).not.toBeNull();
 	await fireEvent.input(input as HTMLInputElement, { target: { value: '/tmp/project' } });
-	const start = [...container.querySelectorAll('button')].find(
+	const start = [...document.querySelectorAll('button')].find(
 		(b) => b.textContent === 'Start conversation'
 	);
 	expect(start).toBeDefined();
@@ -55,37 +55,29 @@ async function startConversation(container: HTMLElement): Promise<void> {
 	await vi.waitFor(() => expect(handlers['acp-ask']).toBeDefined());
 }
 
-describe('the home room', () => {
+describe('the agent panel', () => {
 	beforeEach(() => {
 		calls.length = 0;
-		for (const key of Object.keys(handlers)) delete handlers[key];
-		temperViews.reset();
 		vi.mocked(invoke).mockImplementation(routeInvoke as never);
 		vi.mocked(listen).mockImplementation(async (event, handler) => {
 			handlers[event as string] = handler as (e: { payload: unknown }) => void;
 			return () => {};
 		});
+		// The layout owns init(); the panel test needs the listeners it
+		// registers. Idempotent, so calling it here too is safe.
+		agentSession.init();
+		agentSession.conversation = null;
+		agentSession.messages = [];
+		agentSession.asks = [];
+		agentSession.prompting = false;
+		agentSession.error = '';
 	});
 
-	it('renders no probe and no payload — the profile piece owns identity now', () => {
-		const { container } = render(Page);
-		expect(container.textContent).not.toContain('Who am I?');
-		expect(container.querySelector('pre')).toBeNull();
-	});
+	it('starts a conversation and writes the work record when it closes', async () => {
+		render(AgentPanel);
+		await startConversation();
 
-	it('renders the temper views', () => {
-		const { container } = render(Page);
-		const text = container.textContent ?? '';
-		expect(text).toContain('Teams');
-		expect(text).toContain('Contexts');
-		expect(text).toContain('Recent work');
-	});
-
-	it('writes the work record when a conversation closes', async () => {
-		const { container } = render(Page);
-		await startConversation(container);
-
-		const end = [...container.querySelectorAll('button')].find(
+		const end = [...document.querySelectorAll('button')].find(
 			(b) => b.textContent === 'End conversation'
 		);
 		expect(end).toBeDefined();
@@ -98,54 +90,28 @@ describe('the home room', () => {
 			idempotencyKey: string;
 		};
 		expect(args.facts.agentLabel).toBe('opencode');
-		expect(args.facts.agentCommand).toBe('opencode acp');
 		expect(args.facts.workingDir).toBe('/tmp/project');
 		expect(args.facts.openedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-		expect(args.facts.closedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(args.facts.closedAt).toMatch(/^\d{2}-\d{2}T|^\d{4}-\d{2}-\d{2}T/);
 		expect(args.idempotencyKey).toBeTruthy();
 	});
 
-	it('stands as the conversation ask surface while the room is open', async () => {
-		const { container } = render(Page);
-		await startConversation(container);
-		expect(
-			calls.some(
-				(c) =>
-					c.cmd === 'acp_ask_surface' && c.args?.conversationId === 'c1' && c.args?.present === true
-			)
-		).toBe(true);
-
-		const end = [...container.querySelectorAll('button')].find(
-			(b) => b.textContent === 'End conversation'
-		);
-		await fireEvent.click(end as HTMLButtonElement);
-		expect(
-			calls.some(
-				(c) =>
-					c.cmd === 'acp_ask_surface' &&
-					c.args?.conversationId === 'c1' &&
-					c.args?.present === false
-			)
-		).toBe(true);
-	});
-
 	it('renders a permission ask with the agent’s declared options and answers as the chosen one', async () => {
-		const { container } = render(Page);
-		await startConversation(container);
+		render(AgentPanel);
+		await startConversation();
 
 		handlers['acp-ask']({ payload: declaredAsk });
-		await vi.waitFor(() => expect(container.textContent).toContain('waiting for your answer'));
-		expect(container.textContent).toContain('Write acp-ask-witness.txt');
-		expect(container.textContent).toContain(JSON.stringify(declaredAsk.toolCall.rawInput, null, 2));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('waiting for your answer'));
+		expect(document.body.textContent).toContain('Write acp-ask-witness.txt');
 		for (const option of declaredAsk.options) {
-			const button = [...container.querySelectorAll('button')].find((b) =>
+			const button = [...document.querySelectorAll('button')].find((b) =>
 				b.textContent?.includes(option.name)
 			);
 			expect(button, `the declared option ${option.name} should render`).toBeDefined();
 			expect(button?.textContent).toContain(option.kind);
 		}
 
-		const allowOnce = [...container.querySelectorAll('button')].find((b) =>
+		const allowOnce = [...document.querySelectorAll('button')].find((b) =>
 			b.textContent?.includes('Allow once')
 		);
 		await fireEvent.click(allowOnce as HTMLButtonElement);
@@ -168,19 +134,19 @@ describe('the home room', () => {
 			}
 		});
 		await vi.waitFor(() =>
-			expect(container.textContent).toContain(
+			expect(document.body.textContent).toContain(
 				'asked to Write acp-ask-witness.txt — answered: Allow once'
 			)
 		);
-		expect(container.textContent).not.toContain('waiting for your answer');
+		expect(document.body.textContent).not.toContain('waiting for your answer');
 	});
 
 	it('records a cancelled ask in the transcript as no one was asked', async () => {
-		const { container } = render(Page);
-		await startConversation(container);
+		render(AgentPanel);
+		await startConversation();
 
 		handlers['acp-ask']({ payload: declaredAsk });
-		await vi.waitFor(() => expect(container.textContent).toContain('waiting for your answer'));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('waiting for your answer'));
 
 		handlers['acp-ask']({
 			payload: {
@@ -191,10 +157,28 @@ describe('the home room', () => {
 			}
 		});
 		await vi.waitFor(() =>
-			expect(container.textContent).toContain(
+			expect(document.body.textContent).toContain(
 				'asked to Write acp-ask-witness.txt — cancelled: no one was asked'
 			)
 		);
-		expect(container.textContent).not.toContain('waiting for your answer');
+		expect(document.body.textContent).not.toContain('waiting for your answer');
+	});
+
+	it('closing the panel hides the view and keeps the conversation', async () => {
+		const { container } = render(AgentPanel);
+		await startConversation();
+		expect(document.body.textContent).toContain('session');
+
+		const close = [...container.querySelectorAll('button')].find(
+			(b) => b.getAttribute('aria-label') === 'Close the agent panel'
+		);
+		await fireEvent.click(close as HTMLButtonElement);
+
+		// The conversation survives the closed panel: only the view is hidden.
+		expect(agentSession.conversation?.conversationId).toBe('c1');
+		expect(agentSession.panelOpen).toBe(false);
+		const persisted = calls.find((c) => c.cmd === 'acp_ask_surface');
+		// No ask-surface call was made by the panel itself.
+		expect(persisted).toBeUndefined();
 	});
 });

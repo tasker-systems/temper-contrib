@@ -66,6 +66,7 @@ document.fonts.ready.then(() => {
     readingFont: document.fonts.check('16px "Source Serif 4 Variable"'),
     fontsLoaded: [...document.fonts].filter((f) => f.status === 'loaded').length,
     masthead: !!document.querySelector('header a[href="/"]'),
+    agentPanel: !!document.querySelector('aside[aria-label="Agent"]'),
     text: document.body.innerText.slice(0, 400)
   });
 });
@@ -184,6 +185,8 @@ def healthy(h: dict) -> list[str]:
         problems.append("the bundled reading font did not load (font-src?)")
     if not h["masthead"]:
         problems.append("the room frame did not render (a script was refused?)")
+    if not h.get("agentPanel"):
+        problems.append("the agent panel did not render (a script was refused?)")
     return problems
 
 
