@@ -105,6 +105,8 @@
 	{/if}
 {/snippet}
 
+<RoomFrame {rooms} {room} agentToggle={agentToggle} reach={reachSlot} pending={pendingSlot} profile={profileSlot} />
+
 <div class="body">
 	<main class="route">{@render children?.()}</main>
 	{#if agentSession.panelOpen}
