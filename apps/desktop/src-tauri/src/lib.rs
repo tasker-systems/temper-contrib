@@ -25,6 +25,7 @@ pub fn run() {
             temper::temper_resolve_refs,
             temper::temper_teams,
             temper::temper_contexts,
+            temper::temper_context_create,
             temper::temper_recent_work,
             work::temper_write_work_record,
             acp::acp_start,

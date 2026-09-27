@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import ChromeMenu from './ChromeMenu.svelte';
 
 	/**
 	 * The frame every room shares: the room's declared identity, the way out, and the
@@ -28,6 +29,7 @@
 </script>
 
 <header class="masthead">
+	<ChromeMenu />
 	{#if room?.wayOut}
 		<a class="t-way-out" href={room.wayOut.href}>
 			<span class="t-way-out-arrow" aria-hidden="true">←</span>
