@@ -71,6 +71,18 @@ document.fonts.ready.then(() => {
 });
 """
 
+# A document room, addressed by a well-formed reference that names nothing: the room must render
+# whole whatever temper answers, including when nothing answers at all.
+DOCUMENT_ROOM = "/r/00000000-0000-7000-8000-000000000000"
+
+FOLLOW_LINK = """
+const link = document.createElement('a');
+link.href = arguments[0];
+document.querySelector('header').append(link);
+link.click();
+link.remove();
+"""
+
 PROBES = """
 const done = arguments[arguments.length - 1];
 const out = {};
@@ -208,12 +220,19 @@ def main() -> int:
             )
 
             routes = []
-            for href in ["/settings", "/setup", "/"]:
+            for href in ["/settings", "/setup", DOCUMENT_ROOM, "/"]:
                 if href == "/setup":
                     # The setup room is reached only through the chrome menu — the
                     # witness opens it the way a person does before clicking the entry.
                     driver.find_element(By.CSS_SELECTOR, "header .chrome-menu button").click()
-                driver.find_element(By.CSS_SELECTOR, f'header a[href="{href}"]').click()
+                if href == DOCUMENT_ROOM:
+                    # A document room has no masthead entry; it is reached through a link to a
+                    # resource. The witness places one in the frame and follows it, so the room
+                    # renders through the app's own router. Without temper credentials the
+                    # room renders its failure regions, and must still be whole.
+                    driver.execute_script(FOLLOW_LINK, href)
+                else:
+                    driver.find_element(By.CSS_SELECTOR, f'header a[href="{href}"]').click()
                 WebDriverWait(driver, 10).until(
                     lambda d, h=href: d.execute_script("return location.pathname") == h
                 )

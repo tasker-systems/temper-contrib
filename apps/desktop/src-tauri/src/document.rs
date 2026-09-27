@@ -87,29 +87,36 @@ pub(crate) async fn open_consistent<S: DocSource>(
     Err(OpenError::KeptMoving { attempts })
 }
 
+/// A document as the room opens it: what temper calls it, where it lives, its properties as the
+/// server split them, and the body with the hash a later save is compared against.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedDoc {
+    id: String,
+    title: String,
+    doc_type: String,
+    context_ref: Option<String>,
+    decorated_ref: String,
+    owner_handle: String,
+    /// RFC 3339 — the webview words recency from it; the desktop adds no clock dependency.
+    created: String,
+    updated: String,
+    /// The two property tiers as the server split them at readback. The room merges them for
+    /// display and never decides a key's tier itself.
+    managed_meta: serde_json::Value,
+    open_meta: Option<serde_json::Value>,
+    pub(crate) markdown: String,
+    body_hash: String,
+}
+
 /// What opening a document came to. `Unresolved` is temper saying there is nothing the person
 /// can see at that reference; `Failed` is the open not completing, which verifies nothing.
 #[derive(Serialize, Debug)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum DocOpened {
-    #[serde(rename_all = "camelCase")]
-    Opened {
-        id: String,
-        title: String,
-        doc_type: String,
-        context_ref: Option<String>,
-        decorated_ref: String,
-        markdown: String,
-        body_hash: String,
-    },
-    Unresolved {
-        id: String,
-        reason: String,
-    },
-    Failed {
-        id: String,
-        message: String,
-    },
+    Opened(Box<OpenedDoc>),
+    Unresolved { id: String, reason: String },
+    Failed { id: String, message: String },
 }
 
 pub(crate) async fn open_one<S: DocSource>(source: &S, raw: String) -> DocOpened {
@@ -120,15 +127,21 @@ pub(crate) async fn open_one<S: DocSource>(source: &S, raw: String) -> DocOpened
         };
     };
     match open_consistent(source, id, OPEN_ATTEMPTS).await {
-        Ok(opened) => DocOpened::Opened {
+        Ok(opened) => DocOpened::Opened(Box::new(OpenedDoc {
             id: raw,
+            managed_meta: serde_json::to_value(&opened.view.managed_meta)
+                .unwrap_or(serde_json::Value::Null),
+            open_meta: opened.view.open_meta,
+            owner_handle: opened.view.owner_handle,
+            created: opened.view.created.to_rfc3339(),
+            updated: opened.view.updated.to_rfc3339(),
             title: opened.view.title,
             doc_type: opened.view.doc_type_name,
             context_ref: opened.view.context_ref,
             decorated_ref: opened.view.r#ref,
             markdown: opened.markdown,
             body_hash: opened.body_hash,
-        },
+        })),
         Err(OpenError::Read(err)) => match unresolved_reason(&err) {
             Some(reason) => DocOpened::Unresolved {
                 id: raw,
@@ -291,6 +304,25 @@ mod tests {
             matches!(opened, DocOpened::Failed { .. }),
             "an open with no base to compare against must not read as opened: {opened:?}"
         );
+    }
+
+    /// The properties strip renders what the server split, so the open carries both tiers as
+    /// they arrived — managed keys under `managedMeta`, open keys under `openMeta`, never merged
+    /// or re-tiered here.
+    #[tokio::test]
+    async fn an_open_carries_both_property_tiers_as_the_server_split_them() {
+        let mut read = view(Some("h1"), Some("text"));
+        read.managed_meta = serde_json::from_value(serde_json::json!({ "temper-stage": "done" }))
+            .expect("managed meta deserializes");
+        read.open_meta = Some(serde_json::json!({ "tags": ["a"] }));
+        let source = Scripted::default().pair(read, view(Some("h1"), None));
+        let opened = serde_json::to_value(open_one(&source, ID.to_string()).await).unwrap();
+        assert_eq!(opened["state"], "opened");
+        assert_eq!(opened["managedMeta"]["temper-stage"], "done");
+        assert_eq!(opened["openMeta"], serde_json::json!({ "tags": ["a"] }));
+        assert!(opened["managedMeta"].get("tags").is_none());
+        assert_eq!(opened["ownerHandle"], "someone");
+        assert_eq!(opened["updated"], "2026-09-27T00:00:00+00:00");
     }
 
     #[tokio::test]
