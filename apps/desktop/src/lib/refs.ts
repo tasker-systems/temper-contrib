@@ -30,7 +30,10 @@ export interface RefResolver {
 	readonly source: 'temper' | 'fixtures';
 }
 
-export function createRefResolver(batch: ResolveBatch, source: RefResolver['source'] = 'temper'): RefResolver {
+export function createRefResolver(
+	batch: ResolveBatch,
+	source: RefResolver['source'] = 'temper'
+): RefResolver {
 	const cache = new Map<string, Promise<Resolution>>();
 	let queue: { id: string; settle: (r: Resolution) => void }[] = [];
 
@@ -72,7 +75,9 @@ export function createRefResolver(batch: ResolveBatch, source: RefResolver['sour
 }
 
 /** Resolution through the Rust core (`temper_resolve_refs`), which holds the temper connection. */
-export const tauriResolver = createRefResolver((ids) => invoke<Resolution[]>('temper_resolve_refs', { ids }));
+export const tauriResolver = createRefResolver((ids) =>
+	invoke<Resolution[]>('temper_resolve_refs', { ids })
+);
 
 const KEY = Symbol('temper-ref-resolver');
 

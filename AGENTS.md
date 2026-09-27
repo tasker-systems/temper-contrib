@@ -17,7 +17,10 @@ plugins/<pkg>/               # self-contained plugin packages
 themes/                      # theme contract (contract/theme.schema.json) + data-only themes
   <theme>/theme.json         # source of truth; theme.css beside it is generated
 apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src/, Rust core in src-tauri/)
-.github/workflows/           # plugin checks + desktop frontend/cargo checks
+Makefile.toml                # cargo-make: `check`, `test`, `fix`, `setup` across every package
+githooks/                    # selective pre-commit, pre-push test suites (core.hooksPath)
+tools/setup-claude-web.sh    # cloud-session SessionStart hook: toolchain + hooks
+.github/workflows/ci.yml     # the same gates, fanned into `CI Success`
 ```
 
 ## Conventions
@@ -36,9 +39,11 @@ apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src
 - Public repo — a change must not narrate the gap it closes in commits, PR
   text, or doc diffs; in-progress reasoning lives in the temper vault.
 - Branch `<initials>/<scope>`; commit messages carry no temper resource ids.
-- Verify before pushing — plugins: `bash -n`, shellcheck, and
-  `<pkg>/scripts/lint.sh --self-check` (a conforming payload passes, a
-  hand-broken one fails); themes: `themes/scripts/themes.sh build` after any
-  `theme.json` or contract change, then `--self-check`; desktop app: `npm run check`, `npm test`, `npm run guard:colours` and `cargo check`
-  in `apps/desktop` (+ `cargo test -- --ignored` for the witnesses that
-  need credentials or an agent binary). CI is the final gate, not the first.
+- Verify before pushing: `cargo make check` and `cargo make test` run every
+  package's gates, the ones CI runs. `cargo make fix` applies rustfmt,
+  clippy --fix, Biome and Ruff; formatting is the tools', never hand-tuned.
+  After any `theme.json` or contract change run `themes/scripts/themes.sh build`
+  first. `cargo test -- --ignored` in `apps/desktop/src-tauri` runs the
+  witnesses that need credentials or an agent binary. In a cloud session the
+  Rust gates need `tools/setup-claude-web.sh --full` once (Tauri Linux
+  packages). CI is the final gate, not the first.

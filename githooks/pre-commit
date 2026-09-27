@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Selective pre-commit: run only the batteries the STAGED change can affect, so a docs commit
+# returns instantly and a one-file change pays for its own package, not the whole repository.
+# A hook that is slow on every commit trains `--no-verify`, and a bypassed hook protects nothing.
+#
+#   secrets   gitleaks over the staged change — always, since a key can ride any file
+#   rust      rustfmt --check + clippy           — apps/desktop/src-tauri/ staged
+#   desktop   biome + svelte-check + colours     — apps/desktop/ (outside src-tauri/) staged
+#   python    ruff check + ruff format --check   — a .py file or ruff.toml staged
+#   shell     bash -n + shellcheck               — a .sh file or a githook staged
+#   plugins   author-tools --self-check          — plugins/author-tools/ staged
+#   themes    themes --self-check                — themes/ staged
+#
+# A battery whose tool is not installed skips LOUDLY (an unset-up machine is not a broken
+# commit), and CI runs every gate regardless: this hook is a fast local pre-filter, not the
+# authority. `cargo make check` runs the whole battery; `git commit --no-verify` skips this.
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+# Added / copied / modified / renamed: a staged deletion alone cannot break a gate.
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$STAGED" ]; then
+  echo "==> pre-commit: nothing staged — skipping."
+  exit 0
+fi
+
+staged() { echo "$STAGED" | grep -E "$1" || true; }
+skip() { echo "  ! $1 — SKIPPING. CI runs it regardless." >&2; }
+
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "  secrets (gitleaks, staged)..."
+  gitleaks git --pre-commit --staged -c .gitleaks.toml --no-banner --redact
+else
+  skip "gitleaks not on PATH (brew install gitleaks)"
+fi
+
+RUST="$(staged '^apps/desktop/src-tauri/')"
+DESKTOP="$(staged '^apps/desktop/' | grep -v '^apps/desktop/src-tauri/' || true)"
+PYTHON="$(staged '\.py$|^ruff\.toml$')"
+SHELL_FILES="$(staged '\.sh$|^githooks/')"
+PLUGINS="$(staged '^plugins/author-tools/')"
+THEMES="$(staged '^themes/')"
+
+if [ -n "$RUST" ]; then
+  echo "  rust: rustfmt + clippy..."
+  (cd apps/desktop/src-tauri && cargo fmt --all -- --check && cargo clippy --all-targets --all-features --quiet -- -D warnings)
+fi
+
+if [ -n "$DESKTOP" ]; then
+  if [ ! -d apps/desktop/node_modules ]; then
+    skip "apps/desktop staged but node_modules is absent (cargo make desktop-install)"
+  else
+    echo "  desktop: biome + svelte-check + literal colours..."
+    (cd apps/desktop && npm run --silent lint -- --diagnostic-level=error && npm run --silent check && npm run --silent guard:colours)
+  fi
+fi
+
+if [ -n "$PYTHON" ]; then
+  if command -v ruff >/dev/null 2>&1; then
+    echo "  python: ruff..."
+    ruff check .
+    ruff format --check .
+  else
+    skip "ruff not on PATH (uv tool install ruff)"
+  fi
+fi
+
+if [ -n "$SHELL_FILES" ]; then
+  echo "  shell: bash -n + shellcheck..."
+  for f in $SHELL_FILES; do bash -n "$f"; done
+  if command -v shellcheck >/dev/null 2>&1; then
+    # shellcheck disable=SC2086
+    shellcheck $SHELL_FILES
+  else
+    skip "shellcheck not on PATH (brew install shellcheck)"
+  fi
+fi
+
+if [ -n "$PLUGINS" ]; then
+  echo "  plugins: author-tools --self-check..."
+  ./plugins/author-tools/scripts/lint.sh --self-check >/dev/null
+fi
+
+if [ -n "$THEMES" ]; then
+  echo "  themes: --self-check..."
+  ./themes/scripts/themes.sh --self-check >/dev/null
+fi
+
+echo "==> pre-commit: applicable checks passed."

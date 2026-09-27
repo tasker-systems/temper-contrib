@@ -19,12 +19,17 @@ const themes: [string, Set<string>][] = Object.entries(themeFiles).map(([path, t
 	path.split('/').at(-2) ?? path,
 	new Set(
 		Object.entries(theme.tokens).flatMap(([group, tokens]) =>
-			Object.keys(tokens).map((name) => (group === 'color' ? `--tp-${name}` : `--tp-${group}-${name}`))
+			Object.keys(tokens).map((name) =>
+				group === 'color' ? `--tp-${name}` : `--tp-${group}-${name}`
+			)
 		)
 	)
 ]);
 
-const style = (renderer.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? '').replace(/\/\*[\s\S]*?\*\//g, '');
+const style = (renderer.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? '').replace(
+	/\/\*[\s\S]*?\*\//g,
+	''
+);
 
 describe('the rendered-document stylesheet', () => {
 	it('finds the themes and the stylesheet it witnesses', () => {
@@ -45,7 +50,9 @@ describe('the rendered-document stylesheet', () => {
 
 	it('paints colour only through roles', () => {
 		const painted = [
-			...style.matchAll(/(?:^|[;{\s])((?:background|border[a-z-]*|color|outline[a-z-]*|fill|stroke)\s*:\s*[^;}]+)/g)
+			...style.matchAll(
+				/(?:^|[;{\s])((?:background|border[a-z-]*|color|outline[a-z-]*|fill|stroke)\s*:\s*[^;}]+)/g
+			)
 		].map((m) => m[1]);
 		const literal = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color-mix)\(/;
 		expect(painted.filter((decl) => literal.test(decl))).toEqual([]);

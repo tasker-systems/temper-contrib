@@ -1,0 +1,22 @@
+# Gitleaks configuration — the in-tree secret scanner (CI, `cargo make secrets`, pre-commit).
+#
+# Field of view: tracked and working-tree content at the scanned path (CI: a fresh checkout;
+# pre-commit: the staged change via `gitleaks git --pre-commit --staged`). It does not watch git
+# history; GitHub push protection is that layer.
+#
+# The allowlist below names every exception with its reason. An exception without a reason is a
+# hole wearing an allowlist's clothes.
+
+[extend]
+# The default ruleset (cloud keys, generic API keys, private keys, ...).
+useDefault = true
+
+[allowlist]
+description = "Build output, vendored dependencies and lockfiles — never source"
+paths = [
+  # Build output and vendored dependencies. `gitleaks dir` does not honour .gitignore, so without
+  # these a local scan grinds through target/ and node_modules/ and flags compiled metadata.
+  '''(^|/)(target|node_modules|build|\.svelte-kit|\.venv|gen/schemas)/''',
+  # Lockfiles carry integrity hashes and checksums that the generic rules read as keys.
+  '''(^|/)(package-lock\.json|Cargo\.lock|uv\.lock)$''',
+]

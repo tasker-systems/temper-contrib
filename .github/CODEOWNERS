@@ -1,0 +1,24 @@
+# CODEOWNERS — segmented by concern. Today every line resolves to the same owner; the
+# segmentation is the point: it declares which areas are distinct concerns, so a second owner
+# can take one without re-drawing the map. Last matching pattern wins.
+
+*                       @jcoletaylor
+
+# Plugins: agent-facing skills, vocabularies (schemas are contracts), scripts
+/plugins/               @jcoletaylor
+
+# Themes: the role contract and the themes that fill it
+/themes/                @jcoletaylor
+
+# Desktop: SvelteKit UI and the Rust core
+/apps/desktop/          @jcoletaylor
+/apps/desktop/src-tauri/ @jcoletaylor
+
+# Build, CI, hooks and developer tooling
+/.github/               @jcoletaylor
+/.claude/               @jcoletaylor
+/githooks/              @jcoletaylor
+/tools/                 @jcoletaylor
+/Makefile.toml          @jcoletaylor
+/ruff.toml              @jcoletaylor
+/.gitleaks.toml         @jcoletaylor

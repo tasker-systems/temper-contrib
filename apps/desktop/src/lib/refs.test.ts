@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { createRefResolver, type Resolution } from './refs';
 
 const resolved = (id: string): Resolution => ({
-	state: 'resolved', id, title: `title ${id}`, docType: 'goal', contextRef: '+temper-dev/contrib', decoratedRef: id
+	state: 'resolved',
+	id,
+	title: `title ${id}`,
+	docType: 'goal',
+	contextRef: '+temper-dev/contrib',
+	decoratedRef: id
 });
 
 describe('createRefResolver', () => {
@@ -17,7 +22,12 @@ describe('createRefResolver', () => {
 
 	it('caches answers, including unresolved ones', async () => {
 		const batch = vi.fn(async (ids: string[]) =>
-			ids.map((id): Resolution => (id === 'gone' ? { state: 'unresolved', id, reason: 'no resource at this reference' } : resolved(id)))
+			ids.map(
+				(id): Resolution =>
+					id === 'gone'
+						? { state: 'unresolved', id, reason: 'no resource at this reference' }
+						: resolved(id)
+			)
 		);
 		const r = createRefResolver(batch);
 		await r.resolve('gone');
