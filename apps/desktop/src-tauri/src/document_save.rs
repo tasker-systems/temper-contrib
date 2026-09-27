@@ -17,6 +17,9 @@
 //! "Show changes" is a line-over-line diff grouped by markdown section, computed here so the
 //! page renders a result rather than diffing text itself.
 
+use std::sync::OnceLock;
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use similar::{capture_diff_slices, Algorithm, ChangeTag, DiffOp, TextDiff};
 use temper_client::error::ClientError;
@@ -42,27 +45,32 @@ pub(crate) struct Section {
     pub text: String,
 }
 
-/// Splits markdown at its ATX headings. Lines inside fenced code are never headings.
+/// The heading rule temper uses to cut a body into sections and blocks — the same pattern,
+/// applied to the same trimmed line, as `chunk::heading_re` in temper's ingest crate
+/// (`crates/temper-ingest/src/chunk.rs`), which its chunker, streaming segmenter and re-block
+/// slicer all share. Matching it keeps a section here aligned with a section there, so "these
+/// sections changed" reads as "these blocks were rewritten". Change it only together with
+/// temper's rule; the parity test pins the cases where markdown readers could disagree.
+fn heading_re() -> &'static Regex {
+    static HEADING_RE: OnceLock<Regex> = OnceLock::new();
+    HEADING_RE.get_or_init(|| Regex::new(r"^(#{1,6})\s+(.+)$").expect("heading regex is valid"))
+}
+
+fn is_heading(line: &str) -> bool {
+    heading_re().is_match(line.trim_end())
+}
+
+/// Splits markdown at its headings, by temper's heading rule (see [`heading_re`]).
 pub(crate) fn split_sections(markdown: &str) -> Vec<Section> {
     let mut sections: Vec<Section> = Vec::new();
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut fence: Option<&str> = None;
     let mut current = Section {
         heading: None,
         key: String::from("\u{0}preamble"),
         text: String::new(),
     };
     for line in markdown.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        let marker = ["```", "~~~"].into_iter().find(|m| trimmed.starts_with(m));
-        if let Some(marker) = marker {
-            fence = match fence {
-                Some(open) if open == marker => None,
-                None => Some(marker),
-                other => other,
-            };
-        }
-        if fence.is_none() && marker.is_none() && is_heading(trimmed) {
+        if is_heading(line) {
             if current.heading.is_some() || !current.text.is_empty() {
                 sections.push(current);
             }
@@ -81,15 +89,6 @@ pub(crate) fn split_sections(markdown: &str) -> Vec<Section> {
         sections.push(current);
     }
     sections
-}
-
-fn is_heading(line: &str) -> bool {
-    let hashes = line.chars().take_while(|c| *c == '#').count();
-    (1..=6).contains(&hashes)
-        && line[hashes..]
-            .chars()
-            .next()
-            .is_none_or(|c| c == ' ' || c == '\t' || c == '\n')
 }
 
 /// How a section fared between two versions.
@@ -639,23 +638,40 @@ mod tests {
         .is_ok());
     }
 
-    const BASE: &str =
-        "Intro line.\n\n# Goals\nShip it.\n\n# Risks\nNone yet.\n\n```\n# not a heading\n```\n";
+    const BASE: &str = "Intro line.\n\n# Goals\nShip it.\n\n# Risks\nNone yet.\n";
 
+    /// The heading rule matches temper's line for line, including the cases where markdown
+    /// readers disagree: a heading must start in the first column, needs whitespace and a title
+    /// after its marks, and a matching line inside fenced code counts, as it does in temper.
     #[test]
-    fn sections_split_at_headings_but_never_inside_code() {
-        let headings: Vec<Option<String>> = split_sections(BASE)
+    fn the_heading_rule_matches_temper() {
+        let cases: &[(&str, bool)] = &[
+            ("# Title\n", true),
+            ("###### Six\n", true),
+            ("##\tTabbed\n", true),
+            ("####### Seven\n", false),
+            ("#hashtag\n", false),
+            ("#\n", false),
+            ("#   \n", false),
+            ("   # Indented\n", false),
+            ("Not # a heading\n", false),
+        ];
+        for (line, expected) in cases {
+            assert_eq!(is_heading(line), *expected, "is_heading({line:?})");
+        }
+        let fenced = "Intro\n```sh\n# a shell comment\n```\n";
+        let headings: Vec<Option<String>> = split_sections(fenced)
             .into_iter()
             .map(|s| s.heading)
             .collect();
-        assert_eq!(
-            headings,
-            vec![None, Some("# Goals".into()), Some("# Risks".into())]
-        );
-        assert!(
-            !is_heading("#hashtag"),
-            "a heading needs a space after its marks"
-        );
+        assert_eq!(headings, vec![None, Some("# a shell comment".into())]);
+    }
+
+    #[test]
+    fn sections_rejoin_to_the_source_byte_for_byte() {
+        let text = "Intro\n\n# A\none\n## B\ntwo\n# A\nthree";
+        let rejoined: String = split_sections(text).into_iter().map(|s| s.text).collect();
+        assert_eq!(rejoined, text);
     }
 
     #[test]

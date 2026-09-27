@@ -1019,6 +1019,7 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "regex",
  "serde",
  "serde_json",
  "similar",
