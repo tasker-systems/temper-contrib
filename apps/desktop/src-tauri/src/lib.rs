@@ -2,6 +2,8 @@ mod acp;
 mod document;
 mod document_panel;
 mod document_save;
+mod hub;
+mod person_context;
 mod settings;
 mod temper;
 mod work;
@@ -39,6 +41,8 @@ pub fn run() {
             temper::temper_context_create,
             temper::temper_recent_work,
             work::temper_write_work_record,
+            hub::hub_commit_recent_work,
+            hub::hub_recent_work,
             acp::acp_start,
             acp::acp_prompt,
             acp::acp_close,

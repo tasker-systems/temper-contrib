@@ -15,6 +15,7 @@ use uuid::Uuid;
 use temper_client::TemperClient;
 use temper_core::types::ingest::IngestPayload;
 
+use crate::person_context::persons_context_id;
 use crate::settings::SettingsState;
 use crate::temper::TemperState;
 
@@ -38,19 +39,6 @@ pub struct WrittenRecord {
     pub id: Uuid,
     pub decorated_ref: String,
     pub title: String,
-}
-
-/// The context is the person's when it is profile-owned AND carries the
-/// configured name — a team's context of the same name is someone else's
-/// home and must never receive this person's records.
-fn is_persons_context(
-    owner_table: &str,
-    owner_id: Uuid,
-    name: &str,
-    wanted: &str,
-    profile_id: Uuid,
-) -> bool {
-    owner_table == "kb_profiles" && owner_id == profile_id && name == wanted
 }
 
 fn record_title(facts: &WorkRecordFacts) -> String {
@@ -117,30 +105,6 @@ fn record_payload(
         act: Default::default(),
         segmented: None,
     }
-}
-
-/// The person's configured context: found by owner and name, created on
-/// first write. Creation races are harmless — the next write finds it.
-async fn persons_context_id(client: &TemperClient, context_name: &str) -> Result<Uuid, String> {
-    let profile = client.profile().get().await.map_err(|e| e.to_string())?;
-    let contexts = client.contexts().list().await.map_err(|e| e.to_string())?;
-    if let Some(existing) = contexts.iter().find(|c| {
-        is_persons_context(
-            &c.kb_owner_table,
-            c.kb_owner_id,
-            &c.name,
-            context_name,
-            profile.id,
-        )
-    }) {
-        return Ok(existing.id.0);
-    }
-    let created = client
-        .contexts()
-        .create(context_name, None)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(created.id.0)
 }
 
 /// Writes the record and returns what landed, as the surface addresses it.
@@ -220,42 +184,6 @@ mod tests {
         let mut f = facts();
         f.working_dir = "/".to_string();
         assert_eq!(record_title(&f), "opencode — / — 2026-09-27");
-    }
-
-    #[test]
-    fn the_context_is_the_persons_own_by_owner_and_configured_name() {
-        let me = Uuid::nil();
-        assert!(is_persons_context(
-            "kb_profiles",
-            me,
-            "temper-desktop",
-            "temper-desktop",
-            me
-        ));
-        // Same name, team-owned: not this person's home.
-        assert!(!is_persons_context(
-            "kb_teams",
-            me,
-            "temper-desktop",
-            "temper-desktop",
-            me
-        ));
-        // Same owner, different name: not the configured context.
-        assert!(!is_persons_context(
-            "kb_profiles",
-            me,
-            "other",
-            "temper-desktop",
-            me
-        ));
-        // Same name, someone else's profile: not this person's home either.
-        assert!(!is_persons_context(
-            "kb_profiles",
-            Uuid::new_v4(),
-            "temper-desktop",
-            "temper-desktop",
-            me
-        ));
     }
 
     #[test]
