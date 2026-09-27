@@ -102,6 +102,7 @@ the trees a branch changed. Missing tools skip loudly; CI runs everything.
 | Theme checks | Themes against the contract, contrast floors, generated CSS in sync |
 | Desktop | Biome, svelte-check, vitest, literal colours, frontend build; rustfmt, clippy, cargo test, rustdoc |
 | Repo hygiene | gitleaks, ruff, shellcheck over every script and hook, actionlint |
+| Desktop CSP witness | A production build in WebKitGTK: routes render with no CSP violations; injection probes are refused |
 | CI Success | Fans every job in — the one context the branch ruleset needs to require |
 
 ## Contributing

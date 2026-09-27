@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
+import type { Plugin } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 // @ts-expect-error process is a nodejs global
@@ -9,9 +10,46 @@ const host = process.env.TAURI_DEV_HOST;
 // never copied: one source for every consumer. Vite resolves this against the project root.
 const themes = '../../themes';
 
+// The dev server's Content-Security-Policy. The shipped policy lives in tauri.conf.json
+// (`app.security.csp`) and Tauri applies it to the bundled assets; under `tauri dev` on desktop the
+// webview loads this server directly, so Tauri applies no policy and `devCsp` would be inert.
+// This header is the dev policy instead: the shipped one, loosened only where Vite's dev runtime
+// needs it — inline bootstrap scripts and injected <style> tags, and the HMR websocket.
+const hmrHost = host || 'localhost';
+const devCsp = [
+	"default-src 'none'",
+	"script-src 'self' 'unsafe-inline'",
+	"style-src 'self' 'unsafe-inline'",
+	"font-src 'self'",
+	"img-src 'self' data:",
+	`connect-src 'self' ipc: http://ipc.localhost ws://${hmrHost}:1420 ws://${hmrHost}:1421`,
+	"base-uri 'none'",
+	"form-action 'none'"
+].join('; ');
+
+// Set on every dev response. Vite's `server.headers` does not reach the pages SvelteKit's
+// middleware serves, and the page is the document the policy has to govern.
+const devCspHeader: Plugin = {
+	name: 'temper-dev-csp',
+	apply: 'serve',
+	configureServer(server) {
+		server.middlewares.use((_req, res, next) => {
+			res.setHeader('Content-Security-Policy', devCsp);
+			next();
+		});
+	}
+};
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-	plugins: [tailwindcss(), sveltekit()],
+	plugins: [devCspHeader, tailwindcss(), sveltekit()],
+
+	// Fonts ship as files, never inlined as `data:` URIs: the webview's CSP admits fonts from the
+	// app's own origin only (`font-src 'self'`, tauri.conf.json). Other small assets keep Vite's
+	// default inlining, which `img-src 'self' data:` admits.
+	build: {
+		assetsInlineLimit: (file: string) => (/\.woff2?$/.test(file) ? false : undefined)
+	},
 
 	// Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
 	//
