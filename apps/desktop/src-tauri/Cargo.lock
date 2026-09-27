@@ -1014,6 +1014,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "temperkb-client",
+ "temperkb-core",
  "temperkb-workflow",
  "tokio",
  "uuid",

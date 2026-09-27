@@ -1,6 +1,7 @@
 mod acp;
 mod settings;
 mod temper;
+mod work;
 
 use tauri::Manager;
 
@@ -24,6 +25,7 @@ pub fn run() {
             temper::temper_teams,
             temper::temper_contexts,
             temper::temper_recent_work,
+            work::temper_write_work_record,
             acp::acp_start,
             acp::acp_prompt,
             acp::acp_close

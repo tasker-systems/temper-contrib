@@ -33,6 +33,11 @@ impl TemperState {
         }
     }
 
+    /// The connected client, when the machine's credentials resolved to one.
+    pub fn client(&self) -> Option<&TemperClient> {
+        self.client.as_deref()
+    }
+
     fn try_connect() -> Result<TemperClient, String> {
         let store = Arc::new(DiskTokenStore::default_path());
         build_client(store, Surface::Sdk).map_err(|e| e.to_string())
