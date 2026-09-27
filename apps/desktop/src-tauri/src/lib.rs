@@ -19,6 +19,7 @@ pub fn run() {
             settings::settings_get,
             settings::settings_set_working_dir,
             settings::settings_set_theme,
+            settings::settings_set_temper_context,
             temper::temper_connection_status,
             temper::temper_whoami,
             temper::temper_resolve_refs,

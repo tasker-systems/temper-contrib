@@ -1,10 +1,13 @@
 //! The conversation work record: one temper resource per ACP conversation,
-//! written at close into the person's desktop context. Raw ACP continuity —
+//! written at close into the person's temper context. Raw ACP continuity —
 //! the agent process session and the live transcript buffer — stays
 //! device-local; the record is what survives losing it.
 //!
 //! Every fact rides in as an argument: nothing is read from this machine,
 //! so the record names the work on a device that holds no continuity.
+//! The context it lands in is the device setting
+//! (`DeviceSettings::temper_context_name`), found by profile owner and
+//! configured name, created on first write.
 
 use serde::Serialize;
 use uuid::Uuid;
@@ -12,10 +15,8 @@ use uuid::Uuid;
 use temper_client::TemperClient;
 use temper_core::types::ingest::IngestPayload;
 
+use crate::settings::SettingsState;
 use crate::temper::TemperState;
-
-/// The person-facts context this build owns. Created on first write.
-const DESKTOP_CONTEXT_NAME: &str = "desktop";
 
 /// The record's doc type: the conversation as work done, not the transcript.
 pub const WORK_RECORD_DOC_TYPE: &str = "work record";
@@ -39,15 +40,16 @@ pub struct WrittenRecord {
 }
 
 /// The context is the person's when it is profile-owned AND carries the
-/// desktop name — a team's `desktop` context is someone else's home and
-/// must never receive this person's records.
-fn is_persons_desktop_context(
+/// configured name — a team's context of the same name is someone else's
+/// home and must never receive this person's records.
+fn is_persons_context(
     owner_table: &str,
     owner_id: Uuid,
     name: &str,
+    wanted: &str,
     profile_id: Uuid,
 ) -> bool {
-    owner_table == "kb_profiles" && owner_id == profile_id && name == DESKTOP_CONTEXT_NAME
+    owner_table == "kb_profiles" && owner_id == profile_id && name == wanted
 }
 
 fn record_title(facts: &WorkRecordFacts) -> String {
@@ -118,20 +120,19 @@ fn record_payload(
     }
 }
 
-/// The person's desktop context: found by owner and name, created on first
-/// write. Creation races are harmless — the next write finds it.
-async fn desktop_context_id(client: &TemperClient) -> Result<Uuid, String> {
+/// The person's configured context: found by owner and name, created on
+/// first write. Creation races are harmless — the next write finds it.
+async fn persons_context_id(client: &TemperClient, context_name: &str) -> Result<Uuid, String> {
     let profile = client.profile().get().await.map_err(|e| e.to_string())?;
     let contexts = client.contexts().list().await.map_err(|e| e.to_string())?;
-    if let Some(existing) = contexts
-        .iter()
-        .find(|c| is_persons_desktop_context(&c.kb_owner_table, c.kb_owner_id, &c.name, profile.id))
-    {
+    if let Some(existing) = contexts.iter().find(|c| {
+        is_persons_context(&c.kb_owner_table, c.kb_owner_id, &c.name, context_name, profile.id)
+    }) {
         return Ok(existing.id.0);
     }
     let created = client
         .contexts()
-        .create(DESKTOP_CONTEXT_NAME, None)
+        .create(context_name, None)
         .await
         .map_err(|e| e.to_string())?;
     Ok(created.id.0)
@@ -142,8 +143,9 @@ pub async fn write_work_record(
     client: &TemperClient,
     facts: WorkRecordFacts,
     idempotency_key: Uuid,
+    context_name: &str,
 ) -> Result<WrittenRecord, String> {
-    let context_id = desktop_context_id(client).await?;
+    let context_id = persons_context_id(client, context_name).await?;
     let view = client
         .ingest()
         .create(&record_payload(&facts, context_id, idempotency_key))
@@ -157,10 +159,12 @@ pub async fn write_work_record(
 }
 
 /// Writes the conversation work record at close. Every fact arrives from
-/// the surface; the core adds nothing from this machine.
+/// the surface; the core adds nothing from this machine beyond the
+/// configured context name.
 #[tauri::command]
 pub async fn temper_write_work_record(
     state: tauri::State<'_, TemperState>,
+    settings: tauri::State<'_, SettingsState>,
     agent_label: String,
     agent_command: String,
     working_dir: String,
@@ -171,6 +175,7 @@ pub async fn temper_write_work_record(
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
+    let context_name = settings.get().temper_context_name().to_string();
     write_work_record(
         client,
         WorkRecordFacts {
@@ -181,6 +186,7 @@ pub async fn temper_write_work_record(
             closed_at,
         },
         idempotency_key,
+        &context_name,
     )
     .await
 }
@@ -228,18 +234,19 @@ mod tests {
     }
 
     #[test]
-    fn the_desktop_context_is_the_persons_own_by_owner_and_name() {
+    fn the_context_is_the_persons_own_by_owner_and_configured_name() {
         let me = Uuid::nil();
-        assert!(is_persons_desktop_context("kb_profiles", me, "desktop", me));
+        assert!(is_persons_context("kb_profiles", me, "temper-desktop", "temper-desktop", me));
         // Same name, team-owned: not this person's home.
-        assert!(!is_persons_desktop_context("kb_teams", me, "desktop", me));
-        // Same owner, different name: not the desktop context.
-        assert!(!is_persons_desktop_context("kb_profiles", me, "other", me));
+        assert!(!is_persons_context("kb_teams", me, "temper-desktop", "temper-desktop", me));
+        // Same owner, different name: not the configured context.
+        assert!(!is_persons_context("kb_profiles", me, "other", "temper-desktop", me));
         // Same name, someone else's profile: not this person's home either.
-        assert!(!is_persons_desktop_context(
+        assert!(!is_persons_context(
             "kb_profiles",
             Uuid::new_v4(),
-            "desktop",
+            "temper-desktop",
+            "temper-desktop",
             me
         ));
     }
@@ -258,10 +265,11 @@ mod tests {
     }
 
     /// Witness for the record clause: a write against the real API lands a
-    /// readable record in the person's desktop context, then removes itself.
-    /// Ignored by default — it needs the machine's temper credentials and
-    /// network, and it performs one real write and one real delete.
-    /// Run locally: `cargo test -p desktop -- --ignored writes_a_readable_work_record`
+    /// readable record in the person's configured context, then removes
+    /// itself. Ignored by default — it needs the machine's temper
+    /// credentials and network, and it performs one real write and one real
+    /// delete. Run locally:
+    /// `cargo test -p desktop -- --ignored writes_a_readable_work_record`
     #[tokio::test]
     #[ignore = "requires temper credentials, network, and performs a real write"]
     async fn writes_a_readable_work_record() {
@@ -271,7 +279,8 @@ mod tests {
             .expect("machine temper credentials should resolve to a client");
 
         let key = Uuid::new_v4();
-        let written = write_work_record(client, facts(), key)
+        let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;
+        let written = write_work_record(client, facts(), key, context_name)
             .await
             .expect("the work record should land in temper");
 

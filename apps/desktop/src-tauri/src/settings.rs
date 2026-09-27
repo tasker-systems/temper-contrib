@@ -26,6 +26,20 @@ pub struct DeviceSettings {
     pub working_dir: Option<String>,
     pub agents: BTreeMap<String, AgentLaunch>,
     pub theme: Option<serde_json::Value>,
+    /// The name of the temper context this app stores the person's facts in,
+    /// profile-owned (`@<handle>/<name>`). Unset means the default; an
+    /// app-setup flow will own choosing and validating it.
+    pub temper_context: Option<String>,
+}
+
+/// The context name used until a setting says otherwise.
+pub const DEFAULT_TEMPER_CONTEXT: &str = "temper-desktop";
+
+impl DeviceSettings {
+    /// The configured context name — the setting, or the default when unset.
+    pub fn temper_context_name(&self) -> &str {
+        self.temper_context.as_deref().unwrap_or(DEFAULT_TEMPER_CONTEXT)
+    }
 }
 
 const FILE_NAME: &str = "device-settings.json";
@@ -62,6 +76,14 @@ impl SettingsState {
 
     pub fn set_theme(&self, theme: serde_json::Value) -> Result<(), String> {
         self.persist(|s| s.theme = Some(theme))
+    }
+
+    pub fn set_temper_context(&self, name: String) -> Result<(), String> {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            return Err("a temper context name is required".to_string());
+        }
+        self.persist(|s| s.temper_context = Some(name))
     }
 
     /// Persists first, then commits to memory: a failed write leaves the
@@ -113,6 +135,14 @@ pub fn settings_set_theme(
     theme: serde_json::Value,
 ) -> Result<(), String> {
     state.set_theme(theme)
+}
+
+#[tauri::command]
+pub fn settings_set_temper_context(
+    state: tauri::State<SettingsState>,
+    name: String,
+) -> Result<(), String> {
+    state.set_temper_context(name)
 }
 
 #[cfg(test)]
@@ -198,6 +228,29 @@ mod tests {
             "{not json",
             "a malformed store is not silently replaced at load"
         );
+    }
+
+    /// The context name reads as the default until set, and a set name
+    /// survives a restart — it is what the record writes will match against.
+    #[test]
+    fn the_temper_context_name_defaults_then_survives_a_restart() {
+        let dir = temp_dir();
+        {
+            let first = SettingsState::load(dir.clone());
+            assert_eq!(first.get().temper_context_name(), DEFAULT_TEMPER_CONTEXT);
+            first
+                .set_temper_context("my-desktop".to_string())
+                .expect("save the context name");
+        }
+        let second = SettingsState::load(dir);
+        assert_eq!(second.get().temper_context_name(), "my-desktop");
+    }
+
+    #[test]
+    fn an_empty_context_name_is_refused_and_changes_nothing() {
+        let state = SettingsState::load(temp_dir());
+        assert!(state.set_temper_context("   ".to_string()).is_err());
+        assert_eq!(state.get().temper_context, None);
     }
 
     #[test]
