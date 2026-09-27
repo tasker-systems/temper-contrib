@@ -165,6 +165,17 @@ cwd = "${DESKTOP}"
 command = "npm"
 args = ["run", "build"]
 
+[tasks.desktop-csp-witness]
+description = "CSP witness: a production build in the real webview (needs tauri-driver, WebKitWebDriver, a display)"
+cwd = "${DESKTOP}"
+script = '''
+set -e
+npx tauri build --debug --no-bundle
+run="uv run -q --with selenium>=4.20,<5 scripts/csp-witness.py"
+if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then run="xvfb-run -a $run"; fi
+$run
+'''
+
 # =============================================================================
 # Python (ruff.toml at the root covers every .py file)
 # =============================================================================

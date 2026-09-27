@@ -38,6 +38,21 @@ core in `src-tauri/`.
   batched and cached per session (`src/lib/refs.ts`). An id that does not
   resolve reads as unresolved, never as the title a spec suggested.
 
+## Content-Security-Policy
+
+- **Shipped** — `app.security.csp` in `src-tauri/tauri.conf.json`: `default-src 'none'`;
+  scripts, styles and fonts from the app's own origin (Tauri adds hashes for the inline
+  scripts it and SvelteKit emit); images from the app or `data:`; `connect-src` for Tauri IPC
+  only. No inline style attributes (styling through the CSSOM, as Svelte's `style:` does, is
+  unaffected). Fonts are never inlined as `data:` (`vite.config.ts`).
+- **Dev** — `tauri dev` loads the Vite server directly and Tauri applies no policy there, so
+  `vite.config.ts` sends the dev policy itself: the shipped one plus the inline scripts and
+  styles Vite's runtime injects and the HMR websocket.
+- **Witness** — `cargo make desktop-csp-witness` builds for production and drives the real
+  webview through `tauri-driver` (`scripts/csp-witness.py`): every route renders with no
+  violations, and injected scripts, eval, inline handlers and style attributes, remote images
+  and remote fetches are all refused. Verify against a production build, never the dev server.
+
 ## Development
 
 ```bash
