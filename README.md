@@ -69,8 +69,8 @@ From a fresh clone:
 
 ```bash
 cd apps/desktop
-npm install
-npm run tauri dev   # builds the Rust core and opens the app window
+bun install
+bun run tauri dev   # builds the Rust core and opens the app window (bun installs; node runs the toolchain)
 ```
 
 Verification is repository-wide; see [Development](#development). The desktop's
@@ -83,7 +83,7 @@ One entry point runs every package's gates, the same ones CI runs
 ([cargo-make](https://github.com/sagiegurari/cargo-make)):
 
 ```bash
-cargo make setup    # npm ci, uv sync, and point git at githooks/
+cargo make setup    # bun install, uv sync, and point git at githooks/
 cargo make check    # rustfmt, clippy, rustdoc, biome, svelte-check, literal colours,
                     # ruff, shellcheck, plugin + theme self-checks, actionlint, gitleaks
 cargo make test     # cargo test + vitest (unit and component)

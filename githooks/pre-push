@@ -23,7 +23,7 @@ fi
 if echo "$CHANGED" | grep '^apps/desktop/' | grep -qv '^apps/desktop/src-tauri/'; then
   if [ -d apps/desktop/node_modules ]; then
     echo "==> pre-push: vitest (apps/desktop)..."
-    (cd apps/desktop && npm test --silent)
+    (cd apps/desktop && bun run test --silent)
   else
     echo "  ! apps/desktop changed but node_modules is absent — SKIPPING vitest. CI runs it regardless." >&2
   fi
