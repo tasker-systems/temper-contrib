@@ -243,7 +243,7 @@ pub async fn temper_contexts(
 
 /// A context the app just created, as the create read it back. It carries no
 /// resource count — a count is a read's fact, and this command made no read.
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemperCreatedContext {
     pub id: uuid::Uuid,

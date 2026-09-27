@@ -30,16 +30,15 @@
 	<button
 		type="button"
 		class="trigger"
-		aria-haspopup="menu"
 		aria-expanded={open}
 		onclick={() => (open = !open)}
 	>
 		<span class="glyph" aria-hidden="true">≡</span>menu
 	</button>
 	{#if open}
-		<ul class="entries" role="menu">
-			<li role="none">
-				<a role="menuitem" href="/setup" onclick={() => (open = false)}>app setup…</a>
+		<ul class="entries">
+			<li>
+				<a href="/setup" onclick={() => (open = false)}>app setup…</a>
 			</li>
 		</ul>
 	{/if}

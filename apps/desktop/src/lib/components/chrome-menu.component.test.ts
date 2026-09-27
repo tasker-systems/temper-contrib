@@ -14,7 +14,7 @@ function renderFrame() {
 describe('the chrome menu', () => {
 	it('is closed on render — nothing opens it on the app’s behalf', () => {
 		const { container } = renderFrame();
-		const trigger = container.querySelector('button[aria-haspopup="menu"]');
+		const trigger = container.querySelector('button.trigger');
 		expect(trigger).not.toBeNull();
 		expect(trigger?.getAttribute('aria-expanded')).toBe('false');
 		expect(container.querySelector('a[href="/setup"]')).toBeNull();
@@ -22,7 +22,7 @@ describe('the chrome menu', () => {
 
 	it('reaches the setup room once opened', async () => {
 		const { container } = renderFrame();
-		const trigger = container.querySelector('button[aria-haspopup="menu"]') as HTMLButtonElement;
+		const trigger = container.querySelector('button.trigger') as HTMLButtonElement;
 		await fireEvent.click(trigger);
 		const entry = container.querySelector('a[href="/setup"]');
 		expect(entry).not.toBeNull();
@@ -31,7 +31,7 @@ describe('the chrome menu', () => {
 
 	it('closes on Escape', async () => {
 		const { container } = renderFrame();
-		const trigger = container.querySelector('button[aria-haspopup="menu"]') as HTMLButtonElement;
+		const trigger = container.querySelector('button.trigger') as HTMLButtonElement;
 		await fireEvent.click(trigger);
 		expect(container.querySelector('a[href="/setup"]')).not.toBeNull();
 		await fireEvent.keyDown(document, { key: 'Escape' });

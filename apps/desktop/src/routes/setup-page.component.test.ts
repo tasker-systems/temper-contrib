@@ -158,4 +158,33 @@ describe('the setup room', () => {
 		await vi.waitFor(() => expect(temperViews.contexts).not.toBeNull());
 		expect(saves).toEqual([]);
 	});
+
+	it("refuses to save on a stale cache — this session's reads failed", async () => {
+		// Warm the store the way a previous session's cache would: reads succeed,
+		// identity and contexts land.
+		contexts = [ownContext('temper-desktop')];
+		await temperViews.refreshProfile();
+		await temperViews.refreshContexts();
+		expect(temperViews.contextsFresh).toBe(true);
+
+		// This session's re-reads fail; the cache survives them, labeled stale.
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'temper_whoami' || cmd === 'temper_contexts') {
+				return Promise.reject(new Error('read failed'));
+			}
+			if (cmd === 'temper_connection_status') {
+				return Promise.resolve({ connected: true, error: null });
+			}
+			if (cmd === 'settings_get') {
+				return Promise.resolve({ workingDir: null, temperContext: null });
+			}
+			return Promise.resolve(null);
+		}) as never);
+
+		const { container } = render(Page);
+		await vi.waitFor(() => expect(container.textContent).toContain('stopped waiting'));
+		const save = saveButton(container);
+		expect(save?.disabled).toBe(true);
+		expect(saves).toEqual([]);
+	});
 });

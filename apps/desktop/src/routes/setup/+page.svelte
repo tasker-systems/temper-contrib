@@ -12,11 +12,11 @@
 	import { onMount } from 'svelte';
 	import { invoke } from '@tauri-apps/api/core';
 	import RegionState from '$lib/components/RegionState.svelte';
-	import { temperViews } from '$lib/temper-views.svelte';
-
-	// The store's default until a setting says otherwise. The Rust core owns the
-	// value (DeviceSettings::DEFAULT_TEMPER_CONTEXT); this is its echo, offered.
-	const DEFAULT_CONTEXT = 'temper-desktop';
+	import {
+		DEFAULT_TEMPER_CONTEXT,
+		ownContextsOf,
+		temperViews
+	} from '$lib/temper-views.svelte';
 
 	let configured = $state<string | null>(null);
 	let name = $state('');
@@ -32,18 +32,19 @@
 
 	const handle = $derived(temperViews.profileIdentity?.handle ?? null);
 	/** The person's own contexts — the only ones that can be the person context. `null` until a read says. */
-	const ownContexts = $derived.by(() => {
-		if (!handle || temperViews.contexts === null) return null;
-		return temperViews.contexts
-			.filter((c) => c.ownerRef === `@${handle}`)
-			.sort((a, b) => a.name.localeCompare(b.name));
-	});
+	const ownContexts = $derived(ownContextsOf(temperViews.profileIdentity, temperViews.contexts));
+	/** This session's reads: a save is validated against what temper said *now*,
+	 * never against a cache a failed re-read left behind. */
+	const readsFresh = $derived(temperViews.profileFresh && temperViews.contextsFresh);
 	const readingFailed = $derived(Boolean(temperViews.profileError || temperViews.contextsError));
+	const identityMissing = $derived(
+		temperViews.contextsFresh && !temperViews.profileFresh && !temperViews.profileError
+	);
 
 	type Resolution = 'unreachable' | 'unknown' | 'empty' | 'resolves' | 'missing';
 	const resolution = $derived.by<Resolution>(() => {
 		if (temperViews.connected === false) return 'unreachable';
-		if (ownContexts === null) return 'unknown';
+		if (ownContexts === null || !readsFresh) return 'unknown';
 		if (!effectiveName) return 'empty';
 		return ownContexts.some((c) => c.name === effectiveName) ? 'resolves' : 'missing';
 	});
@@ -57,7 +58,7 @@
 		try {
 			const settings = await invoke<{ temperContext?: string | null }>('settings_get');
 			configured = settings.temperContext ?? null;
-			name = configured ?? DEFAULT_CONTEXT;
+			name = configured ?? DEFAULT_TEMPER_CONTEXT;
 		} catch (e) {
 			loadError = String(e);
 		}
@@ -121,7 +122,7 @@
 	<section class="ed-rail">
 		<label class="field">
 			<span class="t-strip">Context name</span>
-			<input bind:value={name} placeholder={DEFAULT_CONTEXT} />
+			<input bind:value={name} placeholder={DEFAULT_TEMPER_CONTEXT} />
 		</label>
 
 		{#if resolution === 'unreachable'}
@@ -131,11 +132,17 @@
 				when the connection is back, or use the settings room's raw field if you must.
 			</p>
 		{:else if resolution === 'unknown'}
-			{#if readingFailed}
+			{#if identityMissing || temperViews.profileError}
+				<RegionState state="gave-up" label="your identity" />
+			{:else if temperViews.contextsError}
 				<RegionState state="gave-up" label="your contexts" />
-				<button class="ed-action" onclick={refreshReads}>Try again</button>
+			{:else if temperViews.profileError && temperViews.contextsError}
+				<RegionState state="gave-up" label="temper" />
 			{:else}
 				<RegionState state="arriving" label="your contexts" />
+			{/if}
+			{#if readingFailed || identityMissing}
+				<button class="ed-action" onclick={refreshReads}>Try again</button>
 			{/if}
 		{:else if resolution === 'empty'}
 			<p class="t-strip" role="status">Name a context, or choose one below.</p>
@@ -190,7 +197,7 @@
 		{#if resolution === 'missing' || (ownContexts !== null && ownContexts.length === 0)}
 			<div class="actions">
 				<button class="ed-action" onclick={createContext} disabled={creating || !effectiveName}>
-					{creating ? 'Creating…' : `create ${effectiveName || DEFAULT_CONTEXT}`}
+					{creating ? 'Creating…' : `create ${effectiveName || DEFAULT_TEMPER_CONTEXT}`}
 				</button>
 			</div>
 			{#if createError}
