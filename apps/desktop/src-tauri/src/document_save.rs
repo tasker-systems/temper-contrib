@@ -397,7 +397,7 @@ pub async fn doc_save_body(
         Ok(Guarded::Moved) => {
             let current = open_one(client, id).await;
             let changed_sections = match &current {
-                DocOpened::Opened { markdown, .. } => changed_headings(&base_markdown, markdown),
+                DocOpened::Opened(doc) => changed_headings(&base_markdown, &doc.markdown),
                 _ => Vec::new(),
             };
             Ok(BodySaved::Refused {

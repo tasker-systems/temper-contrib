@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { roomHref } from '$lib/document';
 	import { ageWords, temperViews } from '$lib/temper-views.svelte';
 	import BoundedList from './BoundedList.svelte';
 	import type { RegionStateName } from './RegionState.svelte';
@@ -74,12 +75,12 @@
 		onmore={() => v.showMoreRecent()}
 	>
 		{#each v.recent?.rows ?? [] as row (row.id)}
-			<span class="entry">
+			<a class="entry" href={roomHref(row.decoratedRef)}>
 				<span class="main">{row.title}</span>
 				<span class="sub">
 					{row.docType}{#if row.contextRef} · {row.contextRef}{/if} · {dateWords(row.updated)}
 				</span>
-			</span>
+			</a>
 		{/each}
 	</BoundedList>
 	{#if v.recent !== null && !v.recentFresh && v.recentFetchedAt !== null}
@@ -95,6 +96,12 @@
 	.entry {
 		display: grid;
 		gap: 0.1rem;
+	}
+	a.entry {
+		text-decoration: none;
+	}
+	a.entry:hover .main {
+		color: var(--tp-accent);
 	}
 	.main {
 		color: var(--tp-text);
