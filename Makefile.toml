@@ -8,7 +8,7 @@
 #   cargo make check     Every quality gate: format, lint, types, self-checks, secrets
 #   cargo make test      Every test suite (desktop Rust + vitest)
 #   cargo make fix       Apply every auto-fix (rustfmt, clippy --fix, biome, ruff)
-#   cargo make setup     Install dependencies (npm ci, uv sync) and the git hooks
+#   cargo make setup     Install dependencies (bun install, uv sync) and the git hooks
 #   cargo make hooks     Point git at githooks/ only
 #
 # Install: `cargo install cargo-make` (or `brew install cargo-make`). Individual tasks are
@@ -31,7 +31,7 @@ echo ""
 echo "  cargo make check    format, lint, types, self-checks, secrets"
 echo "  cargo make test     desktop Rust tests + vitest (unit and component)"
 echo "  cargo make fix      rustfmt, clippy --fix, biome --write, ruff"
-echo "  cargo make setup    npm ci, uv sync, git hooks"
+echo "  cargo make setup    bun install, uv sync, git hooks"
 echo "  cargo make hooks    git config core.hooksPath githooks"
 echo ""
 echo "  cargo make --list-all-steps   every task"
@@ -124,45 +124,45 @@ args = ["test"]
 # =============================================================================
 
 [tasks.desktop-install]
-description = "npm ci"
+description = "bun install (frozen lockfile)"
 cwd = "${DESKTOP}"
-command = "npm"
-args = ["ci"]
+command = "bun"
+args = ["install", "--frozen-lockfile"]
 
 [tasks.desktop-lint]
 description = "biome: lint + format + import order, check only"
 cwd = "${DESKTOP}"
-command = "npm"
+command = "bun"
 args = ["run", "lint"]
 
 [tasks.desktop-lint-fix]
 description = "biome: apply safe fixes and formatting"
 cwd = "${DESKTOP}"
-command = "npm"
+command = "bun"
 args = ["run", "lint:fix"]
 
 [tasks.desktop-typecheck]
 description = "svelte-check"
 cwd = "${DESKTOP}"
-command = "npm"
+command = "bun"
 args = ["run", "check"]
 
 [tasks.desktop-guard-colours]
 description = "no literal colours under src/"
 cwd = "${DESKTOP}"
-command = "npm"
+command = "bun"
 args = ["run", "guard:colours"]
 
 [tasks.desktop-test]
 description = "vitest: unit (node) + component (jsdom)"
 cwd = "${DESKTOP}"
-command = "npm"
-args = ["test"]
+command = "bun"
+args = ["run", "test"]
 
 [tasks.desktop-build]
 description = "vite build (the frontend Tauri bundles)"
 cwd = "${DESKTOP}"
-command = "npm"
+command = "bun"
 args = ["run", "build"]
 
 [tasks.desktop-csp-witness]
@@ -170,7 +170,7 @@ description = "CSP witness: a production build in the real webview (needs tauri-
 cwd = "${DESKTOP}"
 script = '''
 set -e
-npx tauri build --debug --no-bundle
+bun run tauri build --debug --no-bundle
 run="uv run -q --with selenium>=4.20,<5 scripts/csp-witness.py"
 if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then run="xvfb-run -a $run"; fi
 $run

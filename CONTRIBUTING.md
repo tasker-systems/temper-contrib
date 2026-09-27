@@ -15,7 +15,7 @@ temper — keep your contribution inside one package's boundaries.
 ```bash
 cargo install cargo-make           # or: brew install cargo-make
 brew install shellcheck gitleaks actionlint ruff uv
-cargo make setup                   # npm ci, uv sync, git config core.hooksPath githooks
+cargo make setup                   # bun install, uv sync, git config core.hooksPath githooks
 ```
 
 `githooks/pre-commit` runs only the checks a staged change can affect and scans

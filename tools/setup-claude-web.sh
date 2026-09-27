@@ -121,8 +121,8 @@ fi
 
 if [ -d apps/desktop/node_modules ]; then
   ok "apps/desktop/node_modules"
-elif has npm; then
-  if (cd apps/desktop && npm ci --silent >/dev/null 2>&1); then ok "npm ci: apps/desktop"; else warn "npm ci failed: apps/desktop"; fi
+elif has bun; then
+  if (cd apps/desktop && bun install --frozen-lockfile --silent >/dev/null 2>&1); then ok "bun install: apps/desktop"; else warn "bun install failed: apps/desktop"; fi
 fi
 
 if [ "${1:-}" = "--full" ]; then

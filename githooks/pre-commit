@@ -52,7 +52,7 @@ if [ -n "$DESKTOP" ]; then
     skip "apps/desktop staged but node_modules is absent (cargo make desktop-install)"
   else
     echo "  desktop: biome + svelte-check + literal colours..."
-    (cd apps/desktop && npm run --silent lint -- --diagnostic-level=error && npm run --silent check && npm run --silent guard:colours)
+    (cd apps/desktop && bun run --silent lint -- --diagnostic-level=error && bun run --silent check && bun run --silent guard:colours)
   fi
 fi
 

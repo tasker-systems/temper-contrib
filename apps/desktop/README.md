@@ -17,7 +17,7 @@ core in `src-tauri/`.
 
 - **Theme roles** — `src/app.css` imports the repository's `themes/` contract and
   every theme in place (never copied). Components read `--tp-*` roles or `tp-`
-  utilities only; `npm run guard:colours` fails on a literal colour. Fonts are
+  utilities only; `bun run guard:colours` fails on a literal colour. Fonts are
   bundled (`@fontsource-variable/*`), never fetched. `data-theme` on `<html>`
   selects the theme; "follow system" switches between a theme and its
   `counterpart` with the OS appearance (`src/lib/theme.ts`).
@@ -70,8 +70,8 @@ core in `src-tauri/`.
 ## Development
 
 ```bash
-npm install
-npm run tauri dev   # builds the Rust core and opens the app window
+bun install
+bun run tauri dev   # builds the Rust core and opens the app window (bun installs; node runs the toolchain)
 ```
 
 ## Verification
@@ -79,11 +79,11 @@ npm run tauri dev   # builds the Rust core and opens the app window
 `cargo make check` and `cargo make test` at the repository root run all of these.
 
 ```bash
-npm run lint                # biome: lint + format + import order (lint:fix writes)
-npm run check               # svelte-check
-npm test                    # unit (node) + component (jsdom) witnesses
-npm run guard:colours       # no literal colours under src/
-npm run build               # static frontend build
+bun run lint                # biome: lint + format + import order (lint:fix writes)
+bun run check               # svelte-check
+bun run test                # unit (node) + component (jsdom) witnesses
+bun run guard:colours       # no literal colours under src/
+bun run build               # static frontend build
 cargo clippy --all-targets -- -D warnings   # in src-tauri/ (cargo fmt, cargo test too)
 cargo test -- --ignored     # witnesses needing credentials or an agent binary:
                             # temper profile round-trip, ACP initialize handshake,
