@@ -3,11 +3,16 @@
 import { describe, expect, it } from 'vitest';
 import {
 	type AskedNotice,
+	applyConfigUpdate,
+	applyModeUpdate,
 	applyNotice,
 	applyUpdate,
 	askLabel,
 	type ChatMessage,
-	chunkText
+	chunkText,
+	type DeclaredConfigOption,
+	declaredSelection,
+	EMPTY_SELECTION
 } from './reducers';
 
 const ask = (askId: string, title = 'Write witness.txt'): AskedNotice => ({
@@ -90,5 +95,73 @@ describe('applyNotice', () => {
 			chunkText({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'x' } })
 		).toBe('x');
 		expect(chunkText({ sessionUpdate: 'tool_call' })).toBeNull();
+	});
+});
+
+// --- The declared selection ------------------------------------------------
+
+const selectOption = (id: string, name: string, currentValue: string): DeclaredConfigOption => ({
+	id,
+	name,
+	category: null,
+	select: { currentValue, options: [{ value: currentValue, name: `${name} value` }] }
+});
+
+describe('declaredSelection', () => {
+	it('carries what session/new declared, verbatim', () => {
+		const selection = declaredSelection({
+			modes: { currentModeId: 'code', availableModes: [{ id: 'code', name: 'Code' }] },
+			configOptions: [selectOption('model', 'Model', 'sonnet')]
+		});
+		expect(selection.modes).toEqual({
+			currentModeId: 'code',
+			availableModes: [{ id: 'code', name: 'Code' }]
+		});
+		expect(selection.configOptions).toHaveLength(1);
+	});
+
+	it('an agent that declares nothing is the empty selection, not an error', () => {
+		expect(declaredSelection({})).toEqual(EMPTY_SELECTION);
+		expect(declaredSelection({ modes: null, configOptions: null })).toEqual(EMPTY_SELECTION);
+	});
+});
+
+describe('applyModeUpdate', () => {
+	it('a declared mode change lands on the declared current mode', () => {
+		const selection = declaredSelection({
+			modes: {
+				currentModeId: 'ask',
+				availableModes: [
+					{ id: 'ask', name: 'Ask' },
+					{ id: 'code', name: 'Code' }
+				]
+			}
+		});
+		applyModeUpdate(selection, 'code');
+		expect(selection.modes?.currentModeId).toBe('code');
+	});
+
+	it('a mode update on an agent that declared no modes changes nothing', () => {
+		const selection = declaredSelection({});
+		applyModeUpdate(selection, 'code');
+		expect(selection.modes).toBeNull();
+	});
+});
+
+describe('applyConfigUpdate', () => {
+	it('the full declared set replaces the one rendered', () => {
+		const selection = declaredSelection({
+			configOptions: [selectOption('model', 'Model', 'sonnet')]
+		});
+		applyConfigUpdate(selection, [selectOption('model', 'Model', 'opus')]);
+		expect(selection.configOptions[0].select?.currentValue).toBe('opus');
+	});
+
+	it('an agent revoking its options clears them — nothing stale is kept', () => {
+		const selection = declaredSelection({
+			configOptions: [selectOption('model', 'Model', 'sonnet')]
+		});
+		applyConfigUpdate(selection, []);
+		expect(selection.configOptions).toEqual([]);
 	});
 });

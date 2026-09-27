@@ -86,7 +86,16 @@
 
 {#snippet reachSlot()}
 	{#if agentSession.conversation}
-		<span class="t-strip">reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes</span>
+		{#if agentSession.selection.modes}
+			<span class="t-strip">
+				mode ·
+				{agentSession.selection.modes.availableModes.find(
+					(m) => m.id === agentSession.selection.modes?.currentModeId
+				)?.name ?? agentSession.selection.modes.currentModeId}
+			</span>
+		{:else}
+			<span class="t-strip">reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes</span>
+		{/if}
 	{/if}
 {/snippet}
 

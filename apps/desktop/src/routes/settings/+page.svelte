@@ -26,6 +26,17 @@
 	let justSavedContext = $state(false);
 	let saveContextError = $state('');
 
+	// Agents by configuration: the store's roster, and the form for adding or
+	// changing one. `agentKey` names the entry being edited; an empty key means
+	// the form is adding a new one under the key the person typed.
+	type AgentLaunch = { label?: string | null; command?: string | null; binaryPath?: string | null };
+	let agents = $state<Record<string, AgentLaunch>>({});
+	let agentKey = $state('');
+	let agentLabel = $state('');
+	let agentCommand = $state('');
+	let agentsError = $state('');
+	let agentNotice = $state('');
+
 	const dirty = $derived(workingDir !== stored);
 	// "saved" holds only while the field still shows what was saved; an edit retracts it.
 	const saved = $derived(justSaved && !dirty);
@@ -56,9 +67,11 @@
 			const settings = await invoke<{
 				workingDir?: string | null;
 				temperContext?: string | null;
+				agents?: Record<string, AgentLaunch>;
 			}>('settings_get');
 			workingDir = stored = settings.workingDir ?? '';
 			temperContext = storedContext = settings.temperContext ?? '';
+			agents = settings.agents ?? {};
 		} catch (e) {
 			loadError = String(e);
 		}
@@ -94,6 +107,55 @@
 		} finally {
 			savingContext = false;
 		}
+	}
+
+	/** Saves one agent's launch facts under its key, then re-reads the roster
+	 *  through the same store the panel reads — the picker and this room
+	 *  agree, because both read the device store. */
+	async function saveAgent(): Promise<void> {
+		agentsError = '';
+		agentNotice = '';
+		const key = agentKey.trim();
+		if (!key) {
+			agentsError = 'An agent needs a key — the word the picker shows it by.';
+			return;
+		}
+		try {
+			await invoke('settings_set_agent', {
+				key,
+				launch: { label: agentLabel.trim() || key, command: agentCommand.trim() }
+			});
+			const settings = await invoke<{ agents?: Record<string, AgentLaunch> }>('settings_get');
+			agents = settings.agents ?? {};
+			agentNotice = `saved ${key}`;
+			agentKey = '';
+			agentLabel = '';
+			agentCommand = '';
+		} catch (e) {
+			agentsError = String(e);
+		}
+	}
+
+	async function removeAgent(key: string): Promise<void> {
+		agentsError = '';
+		agentNotice = '';
+		try {
+			await invoke('settings_remove_agent', { key });
+			const settings = await invoke<{ agents?: Record<string, AgentLaunch> }>('settings_get');
+			agents = settings.agents ?? {};
+			agentNotice = `removed ${key}`;
+		} catch (e) {
+			agentsError = String(e);
+		}
+	}
+
+	function editAgent(key: string): void {
+		const a = agents[key];
+		agentKey = key;
+		agentLabel = a?.label ?? key;
+		agentCommand = a?.command ?? '';
+		agentNotice = '';
+		agentsError = '';
 	}
 </script>
 
@@ -131,6 +193,58 @@
 				Not saved — the working directory on this machine is unchanged. {saveError}
 			</p>
 		{/if}
+	</section>
+
+	<p class="t-label">Configured agents</p>
+	<section class="ed-rail">
+		<p class="t-strip">
+			{#if Object.keys(agents).length === 0}
+				none configured — the agent panel offers nothing until one is added here
+			{:else}
+				{Object.keys(agents).length} configured{Object.keys(agents).length === 1 ? '' : 's'} —
+				launch specs and labels live in this machine's device store
+			{/if}
+		</p>
+		<ul class="agent-list">
+			{#each Object.entries(agents) as [key, launch] (key)}
+				<li>
+					<span class="agent-name">{launch.label ?? key}</span>
+					<code class="agent-command">{launch.command}</code>
+					<button class="t-action" onclick={() => editAgent(key)}>edit</button>
+					<button class="t-action" onclick={() => removeAgent(key)}>remove</button>
+				</li>
+			{/each}
+		</ul>
+		<div class="agent-form" aria-label="Add or change an agent">
+			<label class="field">
+				<span class="t-strip">Key</span>
+				<input bind:value={agentKey} placeholder="opencode" />
+			</label>
+			<label class="field">
+				<span class="t-strip">Label</span>
+				<input bind:value={agentLabel} placeholder="shown in the picker (defaults to the key)" />
+			</label>
+			<label class="field">
+				<span class="t-strip">Launch command</span>
+				<input
+					bind:value={agentCommand}
+					placeholder="opencode acp — or a JSON object with command, args, env"
+				/>
+			</label>
+			<div class="actions">
+				<button
+					class="ed-action ed-action--primary"
+					onclick={saveAgent}
+					disabled={!agentKey.trim() || !agentCommand.trim()}
+				>
+					Save agent
+				</button>
+				{#if agentNotice}<span class="t-strip" role="status">{agentNotice}</span>{/if}
+			</div>
+			{#if agentsError}
+				<p class="ed-notice" role="alert">Not saved — the store's agents are unchanged. {agentsError}</p>
+			{/if}
+		</div>
 	</section>
 
 	<p class="t-label">Temper</p>
@@ -200,5 +314,34 @@
 		display: flex;
 		align-items: baseline;
 		gap: 1rem;
+	}
+	.agent-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+		gap: 0.4rem;
+		width: 100%;
+	}
+	.agent-list li {
+		display: flex;
+		align-items: baseline;
+		gap: 0.6rem;
+	}
+	.agent-name {
+		color: var(--tp-text);
+	}
+	.agent-command {
+		flex: 1;
+		overflow-wrap: anywhere;
+		color: var(--tp-text-muted);
+		font-family: var(--tp-font-doing);
+	}
+	.agent-form {
+		display: grid;
+		gap: 0.8rem;
+		width: 100%;
+		padding-top: 0.8rem;
+		border-top: 1px solid var(--tp-rule);
 	}
 </style>

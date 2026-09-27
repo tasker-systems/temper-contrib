@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { AGENTS, agentSession } from '$lib/agent/session.svelte';
+	import { agentSession } from '$lib/agent/session.svelte';
 	import { askLabel } from '$lib/agent/reducers';
 	import RegionState from '$lib/components/RegionState.svelte';
 	import Transcript from '$lib/components/Transcript.svelte';
@@ -8,6 +8,13 @@
 	 *  state of its own. Closing it hides the view — the store, the listeners
 	 *  and the conversation carry on. */
 	const session = agentSession;
+
+	/** What the agent's own category reads as: its word, whatever it is.
+	 *  `model_config` and `thought_level` carry their underscore; the words
+	 *  are the agent's declared vocabulary, never a desktop rewrite. */
+	function categoryLabel(category: string | null): string {
+		return category ?? 'option';
+	}
 </script>
 
 <aside class="panel" aria-label="Agent">
@@ -30,7 +37,64 @@
 	</header>
 
 	{#if session.conversation}
-		<p class="t-strip reach">reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes</p>
+		<div class="selection" aria-label="The agent's declared selection">
+			{#if session.selection.modes}
+				<div class="modes" role="group" aria-label="Modes the agent declared">
+					<span class="t-strip">mode</span>
+					{#each session.selection.modes.availableModes as mode (mode.id)}
+						<button
+							class="t-action"
+							aria-pressed={session.selection.modes?.currentModeId === mode.id}
+							title={mode.description ?? undefined}
+							onclick={() => session.setMode(mode.id)}
+						>
+							{mode.name}
+						</button>
+					{/each}
+				</div>
+			{/if}
+			{#each session.selection.configOptions as option (option.id)}
+				{#if option.select}
+					<label class="selector">
+						<span class="t-strip">{option.name}{#if option.category}
+								<span aria-hidden="true"> · </span>{categoryLabel(option.category)}{/if}</span>
+						<select
+							onchange={(e) =>
+								option.select && session.setConfigOption(option.id, e.currentTarget.value)}
+						>
+							{#each option.select.options as choice (choice.value)}
+								<option
+									value={choice.value}
+									selected={option.select.currentValue === choice.value}
+								>
+									{choice.name}
+								</option>
+							{/each}
+						</select>
+					</label>
+				{:else if option.boolean}
+					<label class="selector">
+						<span class="t-strip">{option.name}</span>
+						<input
+							type="checkbox"
+							checked={option.boolean.currentValue}
+							onchange={(e) =>
+								option.boolean && session.setConfigOption(option.id, e.currentTarget.checked)}
+						/>
+					</label>
+				{/if}
+			{/each}
+		</div>
+		<p class="t-strip reach">
+			{#if session.selection.modes}
+				mode ·
+				{session.selection.modes.availableModes.find(
+					(m) => m.id === session.selection.modes?.currentModeId
+				)?.name ?? session.selection.modes.currentModeId}
+			{:else}
+				reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes
+			{/if}
+		</p>
 		<Transcript messages={session.messages} pending={session.prompting ? session.agentLabel() : null} />
 		{#each session.asks as ask (ask.askId)}
 			<section class="ask" aria-label="Permission requested" aria-busy="true">
@@ -71,14 +135,16 @@
 	{:else}
 		<div class="agents" role="group" aria-label="Agent">
 			<span class="t-strip">Agent</span>
-			{#each AGENTS as agent (agent.command)}
+			{#each session.agents as agent (agent.key)}
 				<button
 					class="t-action"
-					aria-pressed={session.agentCommand === agent.command}
-					onclick={() => (session.agentCommand = agent.command)}
+					aria-pressed={session.agentKey === agent.key}
+					onclick={() => session.selectAgent(agent.key)}
 				>
 					{agent.label}
 				</button>
+			{:else}
+				<span class="t-strip">no agent is configured — add one in the settings room</span>
 			{/each}
 		</div>
 		<label class="field">
@@ -88,7 +154,7 @@
 		<button
 			class="ed-action ed-action--primary"
 			onclick={() => session.start()}
-			disabled={session.starting || !session.agentCommand.trim()}
+			disabled={session.starting || !session.agentKey}
 		>
 			{session.starting ? `Starting ${session.agentLabel()}…` : 'Start conversation'}
 		</button>
@@ -162,6 +228,32 @@
 	}
 	.composer input {
 		flex: 1;
+	}
+	.selector {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+	}
+	.selector select {
+		padding: 0.3rem 0.5rem;
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		color: var(--tp-text);
+		font: 0.85rem var(--tp-font-doing);
+	}
+	.selection {
+		display: grid;
+		gap: 0.5rem;
+	}
+	.modes {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.8rem;
+	}
+	.modes :global(button[aria-pressed='true']) {
+		color: var(--tp-text);
 	}
 	.ask {
 		display: grid;

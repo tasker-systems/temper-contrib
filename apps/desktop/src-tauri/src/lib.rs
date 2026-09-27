@@ -25,6 +25,8 @@ pub fn run() {
             settings::settings_set_working_dir,
             settings::settings_set_theme,
             settings::settings_set_temper_context,
+            settings::settings_set_agent,
+            settings::settings_remove_agent,
             temper::temper_connection_status,
             temper::temper_whoami,
             temper::temper_resolve_refs,
@@ -45,6 +47,8 @@ pub fn run() {
             hub::hub_recent_work,
             acp::acp_start,
             acp::acp_prompt,
+            acp::acp_set_mode,
+            acp::acp_set_config_option,
             acp::acp_close,
             acp::acp_ask_surface,
             acp::acp_answer_permission
