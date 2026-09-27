@@ -41,7 +41,9 @@ pub fn run() {
             work::temper_write_work_record,
             acp::acp_start,
             acp::acp_prompt,
-            acp::acp_close
+            acp::acp_close,
+            acp::acp_ask_surface,
+            acp::acp_answer_permission
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

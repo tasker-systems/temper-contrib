@@ -16,6 +16,24 @@
 	};
 	type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate };
 
+	// The permission ask passes through exactly as the agent declared it —
+	// option ids, names, and kinds are the agent's own, never a desktop vocabulary.
+	type DeclaredOption = { optionId: string; name: string; kind: string };
+	type AskedNotice = {
+		kind: 'asked';
+		conversationId: string;
+		askId: string;
+		toolCall: { toolCallId?: string; title?: string; name?: string; rawInput?: unknown };
+		options: DeclaredOption[];
+	};
+	type ResolvedNotice = {
+		kind: 'resolved';
+		conversationId: string;
+		askId: string;
+		outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
+	};
+	type AskNotice = AskedNotice | ResolvedNotice;
+
 	const AGENTS = [
 		{ label: 'opencode', command: 'opencode acp' },
 		{ label: 'claude code', command: 'npx -y @zed-industries/claude-code-acp' }
@@ -27,10 +45,12 @@
 	let workingDir = $state<string>('');
 	let conversation = $state<ConversationInfo | null>(null);
 	let messages = $state<ChatMessage[]>([]);
+	let asks = $state<AskedNotice[]>([]);
 	let draft = $state<string>('');
 	let prompting = $state<boolean>(false);
 	let starting = $state<boolean>(false);
 	let unlisten: UnlistenFn | null = null;
+	let unlistenAsk: UnlistenFn | null = null;
 	// The work record's open facts — set when the conversation opens, written when it closes.
 	let openedAt = $state<string>('');
 	let recordKey = $state<string>('');
@@ -58,7 +78,28 @@
 		}).then((u) => {
 			unlisten = u;
 		});
-		return () => unlisten?.();
+		listen<AskNotice>('acp-ask', (event) => {
+			const current = untrack(() => conversation);
+			if (!current || event.payload.conversationId !== current.conversationId) return;
+			applyNotice(event.payload);
+		}).then((u) => {
+			unlistenAsk = u;
+		});
+		return () => {
+			unlisten?.();
+			unlistenAsk?.();
+		};
+	});
+
+	// This room is the conversation's ask surface while it stands: the backend
+	// parks permission asks here and cancels them the moment no one can answer.
+	$effect(() => {
+		const id = conversation?.conversationId;
+		if (!id) return;
+		invoke('acp_ask_surface', { conversationId: id, present: true }).catch(() => {});
+		return () => {
+			invoke('acp_ask_surface', { conversationId: id, present: false }).catch(() => {});
+		};
 	});
 
 	function chunkText(update: AcpUpdate): string | null {
@@ -98,6 +139,49 @@
 		}
 	}
 
+	function askLabel(ask: AskedNotice): string {
+		return ask.toolCall.title ?? ask.toolCall.name ?? ask.toolCall.toolCallId ?? 'a tool call';
+	}
+
+	/** What happened to an ask lands in the transcript: answered, or cancelled
+	 *  because no one could be asked — visible either way, never dropped. */
+	function applyNotice(notice: AskNotice): void {
+		if (notice.kind === 'asked') {
+			if (!asks.some((a) => a.askId === notice.askId)) asks.push(notice);
+			return;
+		}
+		const index = asks.findIndex((a) => a.askId === notice.askId);
+		const asked = index >= 0 ? asks.splice(index, 1)[0] : null;
+		const label = asked ? askLabel(asked) : 'an ask';
+		const outcome = notice.outcome;
+		if (outcome.outcome === 'selected') {
+			const chosen = asked?.options.find((o) => o.optionId === outcome.optionId);
+			messages.push({
+				role: 'system',
+				text: `asked to ${label} — answered: ${chosen?.name ?? outcome.optionId}`
+			});
+		} else {
+			messages.push({
+				role: 'system',
+				text: `asked to ${label} — cancelled: no one was asked`
+			});
+		}
+	}
+
+	async function answer(ask: AskedNotice, option: DeclaredOption): Promise<void> {
+		if (!conversation) return;
+		try {
+			await invoke('acp_answer_permission', {
+				conversationId: conversation.conversationId,
+				askId: ask.askId,
+				optionId: option.optionId
+			});
+		} catch {
+			// The ask is already resolved elsewhere (the room closed); its
+			// resolution event carries the outcome.
+		}
+	}
+
 	function agentLabel(): string {
 		return AGENTS.find((a) => a.command === agentCommand)?.label ?? agentCommand;
 	}
@@ -116,6 +200,7 @@
 		});
 		conversation = info;
 		messages = [];
+		asks = [];
 		rememberWorkingDir();
 		openedAt = new Date().toISOString();
 		recordKey = crypto.randomUUID();
@@ -156,6 +241,7 @@
 		const key = recordKey;
 		conversation = null;
 		messages = [];
+		asks = [];
 		try {
 			await invoke('acp_close', { conversationId: id });
 		} catch {
@@ -213,6 +299,22 @@
 				{agentLabel()} <span aria-hidden="true">·</span> session <span class="ed-strip-em">{conversation.sessionId}</span>
 			</p>
 			<Transcript {messages} pending={prompting ? agentLabel() : null} />
+			{#each asks as ask (ask.askId)}
+				<section class="ask" aria-label="Permission requested" aria-busy="true">
+					<p class="t-strip">asked to run <span aria-hidden="true">·</span> waiting for your answer</p>
+					<p class="ask-what">{askLabel(ask)}</p>
+					{#if ask.toolCall.rawInput !== undefined && ask.toolCall.rawInput !== null}
+						<pre class="ask-input">{JSON.stringify(ask.toolCall.rawInput, null, 2)}</pre>
+					{/if}
+					<div class="ask-options" role="group" aria-label="Declared options">
+						{#each ask.options as option (option.optionId)}
+							<button class="t-action ask-option" onclick={() => answer(ask, option)}>
+								{option.name} <span class="ask-kind">{option.kind}</span>
+							</button>
+						{/each}
+					</div>
+				</section>
+			{/each}
 			<form
 				class="composer"
 				onsubmit={(event) => {
@@ -289,5 +391,38 @@
 	}
 	.composer input {
 		flex: 1;
+	}
+	.ask {
+		display: grid;
+		gap: 0.6rem;
+		width: 100%;
+		padding: 0.8rem;
+		border: 1px solid var(--tp-accent-line);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+	}
+	.ask-what {
+		margin: 0;
+		color: var(--tp-text);
+	}
+	.ask-input {
+		margin: 0;
+		padding: 0.5rem 0.6rem;
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		color: var(--tp-text-muted);
+		font: 0.8rem var(--tp-font-doing);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+	.ask-options {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.ask-kind {
+		opacity: 0.6;
+		font-size: 0.85em;
 	}
 </style>
