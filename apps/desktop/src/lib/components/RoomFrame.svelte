@@ -18,6 +18,9 @@
 		/** The rooms that exist — the building's map, bounded and honest about what it holds. */
 		rooms: RoomLink[];
 		room?: Room;
+		/** The agent panel's toggle: shown when the panel is closed, carrying the
+		 *  pending-ask count so an ask is always somewhere being put to the person. */
+		agentToggle?: Snippet;
 		/** Slots other builds own. An unfilled slot renders nothing — never a placeholder claiming a state. */
 		reach?: Snippet;
 		pending?: Snippet;
@@ -25,7 +28,7 @@
 		profile?: Snippet;
 	}
 
-	let { rooms, room, reach, pending, cacheAge, profile }: Props = $props();
+	let { rooms, room, agentToggle, reach, pending, cacheAge, profile }: Props = $props();
 </script>
 
 <header class="masthead">
@@ -51,6 +54,9 @@
 		{/each}
 	</nav>
 	<span class="spacer"></span>
+	{#if agentToggle}
+		<span class="t-slot-agentToggle">{@render agentToggle()}</span>
+	{/if}
 	{#if reach}
 		<span class="t-slot-reach">{@render reach()}</span>
 	{/if}
