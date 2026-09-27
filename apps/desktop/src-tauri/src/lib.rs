@@ -1,6 +1,7 @@
 mod acp;
 mod document;
 mod document_panel;
+mod document_save;
 mod settings;
 mod temper;
 mod work;
@@ -30,6 +31,9 @@ pub fn run() {
             document_panel::doc_related,
             document_panel::doc_history,
             document_panel::doc_sources,
+            document_save::doc_save_body,
+            document_save::doc_save_meta,
+            document_save::doc_show_changes,
             temper::temper_teams,
             temper::temper_contexts,
             temper::temper_context_create,

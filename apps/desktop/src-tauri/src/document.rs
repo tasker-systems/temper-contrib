@@ -112,7 +112,7 @@ pub enum DocOpened {
     },
 }
 
-async fn open_one<S: DocSource>(source: &S, raw: String) -> DocOpened {
+pub(crate) async fn open_one<S: DocSource>(source: &S, raw: String) -> DocOpened {
     let Some(id) = parse_ref(&raw) else {
         return DocOpened::Unresolved {
             id: raw,

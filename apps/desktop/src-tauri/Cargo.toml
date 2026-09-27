@@ -24,6 +24,8 @@ temperkb-client = "0.5.4"
 temperkb-core = "0.5.4"
 temperkb-workflow = "0.5.4"
 uuid = "1"
+similar = { version = "3", features = ["inline"] }
+regex = "1"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
 
