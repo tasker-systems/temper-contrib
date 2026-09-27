@@ -48,10 +48,15 @@ core in `src-tauri/`.
 - **Dev** — `tauri dev` loads the Vite server directly and Tauri applies no policy there, so
   `vite.config.ts` sends the dev policy itself: the shipped one plus the inline scripts and
   styles Vite's runtime injects and the HMR websocket.
+- **Capabilities** — `src-tauri/capabilities/default.json` grants `core:event:default` and
+  nothing else; the UI's own commands need no permission. No plugins beyond Tauri's core, and
+  `withGlobalTauri` is off (the UI imports `@tauri-apps/api`). Widening either is a reviewed
+  change.
 - **Witness** — `cargo make desktop-csp-witness` builds for production and drives the real
   webview through `tauri-driver` (`scripts/csp-witness.py`): every route renders with no
-  violations, and injected scripts, eval, inline handlers and style attributes, remote images
-  and remote fetches are all refused. Verify against a production build, never the dev server.
+  violations; injected scripts, eval, inline handlers and style attributes, remote images and
+  remote fetches are all refused; the `__TAURI__` global is absent and a command outside the
+  capability is refused. Verify against a production build, never the dev server.
 
 ## Development
 

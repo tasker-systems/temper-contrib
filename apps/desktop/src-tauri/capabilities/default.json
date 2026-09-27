@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window: event listening only. The UI's own commands (generate_handler! in lib.rs) need no permission here; nothing else is granted.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
-    "core:default",
-    "opener:default"
+    "core:event:default"
   ]
 }

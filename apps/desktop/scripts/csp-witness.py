@@ -7,6 +7,9 @@ Content-Security-Policy in tauri.conf.json both ways.
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
    as a violation naming its directive. Styling through the CSSOM, which Svelte's `style:`
    directive uses and CSP does not govern, still applies.
+3. The capability boundary holds: the `__TAURI__` global is not exposed, event listening is
+   granted, and a command outside `capabilities/default.json` (or from the dropped opener) is
+   refused.
 
 Production build, never the dev server: `tauri dev` runs under `devCsp`, which is looser by design.
 
@@ -111,6 +114,33 @@ Promise.all([imageSettled, fetched]).then(([image, fetch]) => {
 });
 """
 
+# The capability boundary, probed through the IPC internals Tauri always injects (the public
+# `window.__TAURI__` global is off). Listening to events is the one plugin permission granted;
+# anything else — a core plugin command, the dropped opener — must be refused.
+IPC = """
+const done = arguments[arguments.length - 1];
+const ipc = window.__TAURI_INTERNALS__;
+const attempt = (cmd, args) => ipc.invoke(cmd, args).then(() => 'allowed', (e) => 'refused: ' + e);
+const handler = ipc.transformCallback(() => {});
+Promise.all([
+  attempt('plugin:event|listen', { event: 'csp-witness', target: { kind: 'Any' }, handler }),
+  attempt('plugin:app|version', {}),
+  attempt('plugin:opener|open_url', { url: 'https://example.com' })
+]).then(([listen, appVersion, opener]) => done({
+  globalTauri: typeof window.__TAURI__,
+  listen, appVersion, opener
+}));
+"""
+
+CAPABILITIES = {
+    "the __TAURI__ global is not exposed": lambda i: i["globalTauri"] == "undefined",
+    "event listening is granted": lambda i: i["listen"] == "allowed",
+    "a core command outside the capability is refused": lambda i: i["appVersion"].startswith(
+        "refused"
+    ),
+    "the opener is gone": lambda i: i["opener"].startswith("refused"),
+}
+
 HELD = {
     "inline script is refused": lambda p, v: not p["inlineScriptRan"] and "script-src" in v,
     "eval is refused": lambda p, v: not p["evalRan"] and "evalError" in p,
@@ -197,6 +227,10 @@ def main() -> int:
             held = {name: bool(check(probes, directives)) for name, check in HELD.items()}
             failures += [f"backstop did not hold: {name}" for name, ok in held.items() if not ok]
 
+            ipc = driver.execute_async_script(IPC)
+            capabilities = {name: bool(check(ipc)) for name, check in CAPABILITIES.items()}
+            failures += [f"capability: {name}" for name, ok in capabilities.items() if not ok]
+
             report = {
                 "binary": str(binary),
                 "routes": routes,
@@ -204,6 +238,8 @@ def main() -> int:
                 "probes": probes,
                 "violations_from_probes": violations,
                 "held": held,
+                "ipc": ipc,
+                "capabilities": capabilities,
             }
         finally:
             driver.quit()
@@ -217,7 +253,10 @@ def main() -> int:
     if failures:
         print("\nCSP witness FAILED:", *failures, sep="\n  - ", file=sys.stderr)
         return 1
-    print("\nCSP witness held: routes whole with no violations; every probe refused.")
+    print(
+        "\nCSP witness held: routes whole with no violations; every probe refused;"
+        " the capability boundary holds."
+    )
     return 0
 
 
