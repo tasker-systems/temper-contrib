@@ -36,7 +36,16 @@ core in `src-tauri/`.
 - **Reference resolution** — `ResourceRef` shows what temper says a resource is:
   the `temper_resolve_refs` command resolves ids through `temperkb-client`,
   batched and cached per session (`src/lib/refs.ts`). An id that does not
-  resolve reads as unresolved, never as the title a spec suggested.
+  resolve reads as unresolved, never as the title a spec suggested, and only a
+  resolved reference is a link.
+- **The document room** — `/r/<ref>` opens a document by address, body first:
+  what temper calls it, its properties (`src/lib/properties.ts`, ported from
+  temper-ui) and the rendered body. Connections, related resources one step
+  away, history and recorded sources sit in an "about this document" panel,
+  closed by default, each tab read only when first opened and failing on its
+  own. Walking from room to room carries the walk in the address (`?walk=`),
+  so the way out returns room by room and a room entered directly exits home.
+  The core commands are `src-tauri/src/document*.rs`.
 
 ## Content-Security-Policy
 

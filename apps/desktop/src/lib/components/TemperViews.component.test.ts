@@ -63,6 +63,14 @@ describe('TemperViews', () => {
 		expect(text).toContain('Show 10 more');
 	});
 
+	it('each recent-work row opens its document room at the address temper gave it', () => {
+		temperViews.recent = { total: 2, rows: [ROW(1), ROW(2)] };
+		temperViews.recentFresh = true;
+		const { container } = render(Views);
+		const links = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
+		expect(links).toEqual(['/r/work-item-1', '/r/work-item-2']);
+	});
+
 	it('offers no Show more when the page holds everything', () => {
 		temperViews.recent = { total: 3, rows: [ROW(1), ROW(2), ROW(3)] };
 		temperViews.recentFresh = true;

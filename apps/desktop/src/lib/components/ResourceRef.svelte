@@ -5,13 +5,26 @@
 	 * unresolved — never as the hint — so no author can make a ref that reads as one resource
 	 * and is another.
 	 *
-	 * Not a link yet: the desktop has no resource view to follow into, and a link to nowhere
-	 * would overstate itself. A long title is truncated to one line, so the tooltip leads with
-	 * the whole title, then the home and the decorated ref.
+	 * A resolved reference is a link into the document room at the address temper gave it.
+	 * Resolving, unresolved and failed references stay inert: a link to what temper did not
+	 * answer for would overstate itself. `hrefFor` lets a room carry its walk into the link. A long
+	 * title is truncated to one line, so the tooltip leads with the whole title, then the home and
+	 * the decorated ref.
 	 */
+	import { roomHref } from '$lib/document';
 	import { getRefResolver, type Resolution } from '$lib/refs';
 
-	let { id, titleHint, block }: { id: string; titleHint?: string | null; block?: string | null } = $props();
+	let {
+		id,
+		titleHint,
+		block,
+		hrefFor = (decoratedRef: string) => roomHref(decoratedRef)
+	}: {
+		id: string;
+		titleHint?: string | null;
+		block?: string | null;
+		hrefFor?: (decoratedRef: string) => string;
+	} = $props();
 
 	const resolver = getRefResolver();
 	let resolution = $state<Resolution | null>(null);
@@ -35,14 +48,15 @@
 		<span class="title">{titleHint ?? 'resolving reference'}…</span>
 	</span>
 {:else if resolution.state === 'resolved'}
-	<span
+	<a
 		class="ref"
+		href={hrefFor(resolution.decoratedRef)}
 		title={[resolution.title, resolution.contextRef, resolution.decoratedRef].filter(Boolean).join('\n')}
 	>
 		<span class="type" style:color={typeColour(resolution.docType)}>{resolution.docType}</span>
 		<span class="title">{resolution.title}</span>
 		{#if block}<span class="block">¶ {block}</span>{/if}
-	</span>
+	</a>
 {:else if resolution.state === 'unresolved'}
 	<span class="ref unresolved" title={id}>
 		<span class="type" aria-hidden="true">⊘</span>
@@ -65,6 +79,13 @@
 		border: 1px solid var(--tp-rule);
 		background: var(--tp-surface-raised);
 		border-radius: var(--tp-radius-chip);
+	}
+	a.ref {
+		text-decoration: none;
+		transition: border-color var(--tp-motion-quick) var(--tp-motion-easing);
+	}
+	a.ref:hover {
+		border-color: var(--tp-accent-line);
 	}
 	.type {
 		flex: none;

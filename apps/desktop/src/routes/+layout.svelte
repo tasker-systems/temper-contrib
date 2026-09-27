@@ -11,6 +11,7 @@
 	import RoomFrame from '$lib/components/RoomFrame.svelte';
 	import TemperProfile from '$lib/components/TemperProfile.svelte';
 	import { temperViews } from '$lib/temper-views.svelte';
+	import { roomTitles } from '$lib/room-title.svelte';
 
 	let { children } = $props();
 
@@ -27,8 +28,13 @@
 		{ href: '/settings', label: 'settings' }
 	];
 
-	// Rooms declare their identity through their load; the merged route data carries it to the frame.
-	const room = $derived(page.data.room);
+	// Rooms declare their identity through their load; the merged route data carries it to the
+	// frame. A room that learns its title from a read names it once the read lands.
+	const room = $derived.by(() => {
+		const declared = page.data.room;
+		const resolved = roomTitles.get(page.url.pathname);
+		return declared && resolved ? { ...declared, title: resolved } : declared;
+	});
 </script>
 
 <svelte:head>
