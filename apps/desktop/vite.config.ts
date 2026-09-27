@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import { sveltekit } from "@sveltejs/kit/vite";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -39,7 +39,30 @@ export default defineConfig(async () => ({
 	},
 
 	test: {
-		include: ["src/**/*.test.ts"],
-		environment: "node"
+		// Two projects because the two kinds of test want different environments: pure modules
+		// run in node; `*.component.test.ts` mounts real components in jsdom. Without the
+		// `browser` condition Svelte resolves to its server build, where `render()` throws and
+		// `$state` does not proxy — a probe there proves nothing.
+		projects: [
+			{
+				extends: true,
+				test: {
+					name: "unit",
+					include: ["src/**/*.test.ts"],
+					exclude: [...configDefaults.exclude, "src/**/*.component.test.ts"],
+					environment: "node"
+				}
+			},
+			{
+				extends: true,
+				resolve: { conditions: ["browser"] },
+				test: {
+					name: "component",
+					include: ["src/**/*.component.test.ts"],
+					environment: "jsdom",
+					setupFiles: ["src/test/component-setup.ts"]
+				}
+			}
+		]
 	}
 }));

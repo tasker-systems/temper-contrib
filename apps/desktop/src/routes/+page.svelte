@@ -3,6 +3,7 @@
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { untrack } from 'svelte';
 	import RegionState from '$lib/components/RegionState.svelte';
+	import Transcript, { type ChatMessage } from '$lib/components/Transcript.svelte';
 
 	type ConnectionStatus = { connected: boolean; error: string | null };
 	type ConversationInfo = { conversationId: string; sessionId: string; agentInfo: unknown };
@@ -14,12 +15,6 @@
 		status?: string;
 	};
 	type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate };
-	type ChatMessage = {
-		role: 'user' | 'assistant' | 'system';
-		text: string;
-		toolCallId?: string;
-		status?: string;
-	};
 
 	const AGENTS = [
 		{ label: 'opencode', command: 'opencode acp' },
@@ -235,16 +230,7 @@
 			<p class="t-strip">
 				{agentLabel()} <span aria-hidden="true">·</span> session <span class="ed-strip-em">{conversation.sessionId}</span>
 			</p>
-			<div class="transcript">
-			{#each messages as message, i (i)}
-				<p class={message.role}>
-					{message.text}{message.status ? ` · ${message.status}` : ''}
-				</p>
-			{/each}
-				{#if prompting}
-					<p class="pending" role="status"><span aria-hidden="true">◌</span> {agentLabel()} is responding…</p>
-				{/if}
-			</div>
+			<Transcript {messages} pending={prompting ? agentLabel() : null} />
 			<form
 				class="composer"
 				onsubmit={(event) => {
@@ -315,39 +301,6 @@
 	input:focus {
 		border-color: var(--tp-accent-line);
 		outline: none;
-	}
-	.transcript {
-		box-sizing: border-box;
-		width: 100%;
-		max-height: 360px;
-		overflow-y: auto;
-		display: flex;
-		flex-direction: column;
-		gap: 0.6rem;
-		padding: 0.9rem 1rem;
-		background: var(--tp-surface);
-		border: 1px solid var(--tp-rule);
-	}
-	.transcript p {
-		margin: 0;
-		white-space: pre-wrap;
-	}
-	.transcript .user {
-		font: 500 0.9rem/1.6 var(--tp-font-ui);
-		color: var(--tp-text);
-	}
-	.transcript .assistant {
-		font: 1rem/1.7 var(--tp-font-reading);
-		color: var(--tp-text-muted);
-	}
-	.transcript .system {
-		font: 0.68rem var(--tp-font-doing);
-		letter-spacing: 0.04em;
-		color: var(--tp-text-subtle);
-	}
-	.pending {
-		font: italic 0.85rem var(--tp-font-reading);
-		color: var(--tp-region-arriving);
 	}
 	.composer {
 		display: flex;

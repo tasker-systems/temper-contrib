@@ -77,7 +77,7 @@ Verification:
 
 ```bash
 npm run check               # svelte-check, in apps/desktop
-npm test                    # catalog witnesses, theme selection, ref resolution
+npm test                    # unit (node) + component (jsdom) witnesses
 npm run guard:colours       # components read theme roles, never literal colours
 npm run build               # static frontend build
 cargo check                 # in apps/desktop/src-tauri

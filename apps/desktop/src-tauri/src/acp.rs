@@ -83,7 +83,10 @@ pub async fn acp_start(
     let agent = AcpAgent::from_str(&command).map_err(|e| e.to_string())?;
     let cwd = expand_cwd(&cwd)?;
 
-    let conversation_id = format!("conversation-{}", state.next_id.fetch_add(1, Ordering::Relaxed));
+    let conversation_id = format!(
+        "conversation-{}",
+        state.next_id.fetch_add(1, Ordering::Relaxed)
+    );
     let (commands, command_rx) = mpsc::unbounded_channel::<ConversationCommand>();
     let (ready_tx, ready_rx) = oneshot::channel::<Result<ConversationReady, String>>();
 
@@ -136,10 +139,11 @@ pub async fn acp_start(
         .map_err(|_| "agent did not answer the handshake within 60s".to_string())?
         .map_err(|_| "conversation ended before it was ready".to_string())??;
 
-    state.conversations.lock().unwrap().insert(
-        conversation_id.clone(),
-        ConversationHandle { commands },
-    );
+    state
+        .conversations
+        .lock()
+        .unwrap()
+        .insert(conversation_id.clone(), ConversationHandle { commands });
     Ok(ConversationInfo {
         conversation_id,
         session_id: info.session_id,
@@ -360,10 +364,7 @@ mod tests {
         (commands, recorded, info)
     }
 
-    async fn prompt(
-        commands: &mpsc::UnboundedSender<ConversationCommand>,
-        text: &str,
-    ) -> String {
+    async fn prompt(commands: &mpsc::UnboundedSender<ConversationCommand>, text: &str) -> String {
         let (reply_tx, reply_rx) = oneshot::channel();
         commands
             .send(ConversationCommand::Prompt {
@@ -403,8 +404,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires opencode on PATH"]
     async fn opencode_answers_prompts_on_one_live_conversation() {
-        let (commands, recorded, info) =
-            start_test_conversation(opencode_witness_agent()).await;
+        let (commands, recorded, info) = start_test_conversation(opencode_witness_agent()).await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
 
         let first = prompt(&commands, "Reply with exactly: OK").await;
@@ -443,12 +443,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires npx and local claude auth"]
     async fn claude_code_answers_a_prompt() {
-        let (commands, recorded, info) =
-            start_test_conversation(
-                AcpAgent::from_str("npx -y @zed-industries/claude-code-acp")
-                    .expect("agent command should parse"),
-            )
-            .await;
+        let (commands, recorded, info) = start_test_conversation(
+            AcpAgent::from_str("npx -y @zed-industries/claude-code-acp")
+                .expect("agent command should parse"),
+        )
+        .await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
 
         let stop_reason = prompt(&commands, "Reply with exactly: OK").await;

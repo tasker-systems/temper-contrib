@@ -93,7 +93,7 @@ jobs:
         run: npm run check
         working-directory: apps/desktop
 
-      - name: Unit tests (catalog witnesses, theme selection, ref resolution)
+      - name: Unit and component tests
         run: npm test
         working-directory: apps/desktop
 
