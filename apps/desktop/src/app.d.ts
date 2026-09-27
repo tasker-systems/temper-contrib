@@ -4,7 +4,10 @@ declare global {
 	namespace App {
 		// interface Error {}
 		// interface Locals {}
-		// interface PageData {}
+		interface PageData {
+			/** The room's declared identity, read by the layout's frame. The root declares no way out. */
+			room?: { title?: string; wayOut?: { href: string; label: string } };
+		}
 		// interface PageState {}
 		// interface Platform {}
 	}

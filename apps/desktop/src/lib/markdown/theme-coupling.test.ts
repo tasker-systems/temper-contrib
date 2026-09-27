@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import renderer from '../components/MarkdownRenderer.svelte?raw';
+import roomFrame from '../components/RoomFrame.svelte?raw';
 
 /**
  * The theme-coupling witness (rendering-baseline design): the rendered-document stylesheet
  * resolves only through `--tp-*` roles that every theme defines. `guard:colours` already
  * refuses literal colours; this goes further, because the baseline's own stylesheet shows the
  * gap — it styled through `--color-quiet-*` custom properties, which carry no literal and would
- * pass the guard while resolving to nothing on the desktop.
+ * pass the guard while resolving to nothing on the desktop. The room frame's stylesheet rides
+ * the same witness — chrome styles through the contract like everything else.
  */
 // Each theme's `theme.json` is its source of truth; its `theme.css` is generated from it. A
 // colour token `x` is the role `--tp-x`; every other group `g` token `x` is `--tp-g-x`.
@@ -26,15 +28,23 @@ const themes: [string, Set<string>][] = Object.entries(themeFiles).map(([path, t
 	)
 ]);
 
-const style = (renderer.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? '').replace(
-	/\/\*[\s\S]*?\*\//g,
-	''
-);
+const components: [string, string, RegExp][] = [
+	[
+		'the rendered-document stylesheet',
+		renderer.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? '',
+		/\.md-body/
+	],
+	[
+		'the room frame stylesheet',
+		roomFrame.match(/<style>([\s\S]*)<\/style>/)?.[1] ?? '',
+		/\.masthead/
+	]
+];
 
-describe('the rendered-document stylesheet', () => {
+describe.each(components)('%s', (_name, style, marker) => {
 	it('finds the themes and the stylesheet it witnesses', () => {
 		expect(themes.length).toBeGreaterThanOrEqual(2);
-		expect(style).toContain('.md-body');
+		expect(style).toMatch(marker);
 	});
 
 	it('references only --tp-* roles', () => {
