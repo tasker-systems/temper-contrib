@@ -28,7 +28,7 @@
 	</svg>
 	<a class="t-wordmark" href="/">temper</a>
 	<nav class="t-strip">
-		<a href="/">home</a><span aria-hidden="true">·</span><a href="/catalog">catalog</a><span aria-hidden="true">·</span><a href="/settings">settings</a>
+		<a href="/">home</a><span aria-hidden="true">·</span><a href="/settings">settings</a>
 	</nav>
 	<span class="spacer"></span>
 </header>

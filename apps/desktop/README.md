@@ -26,7 +26,13 @@ core in `src-tauri/`.
   component, loaded into zod with `z.fromJSONSchema`. `checkSpec` is the gate
   (json-render's own `validate` checks structure and names but not per-component
   props); `TemperView` renders a spec only once it passes, and otherwise shows
-  every reason it was refused. `/catalog` renders sample specs through it.
+  every reason it was refused. The catalog is held for plugin rendering surfaces;
+  no route renders it (`themes/preview/` is where the components are previewed).
+- **Rendered markdown** — `src/lib/markdown/` is temper-ui's pipeline, ported by
+  copy-with-citation: a bounded parse that refuses rather than throws, core
+  highlight.js where an unknown fence language is plaintext, and a client-only
+  DOMPurify pass that `MarkdownRenderer` gates `{@html}` on. Remote images are
+  withheld and say so. The chat transcript renders agent replies through it.
 - **Reference resolution** — `ResourceRef` shows what temper says a resource is:
   the `temper_resolve_refs` command resolves ids through `temperkb-client`,
   batched and cached per session (`src/lib/refs.ts`). An id that does not
@@ -43,7 +49,7 @@ npm run tauri dev   # builds the Rust core and opens the app window
 
 ```bash
 npm run check               # svelte-check
-npm test                    # catalog witnesses, theme selection, ref resolution
+npm test                    # unit (node) + component (jsdom) witnesses
 npm run guard:colours       # no literal colours under src/
 npm run build               # static frontend build
 cargo check                 # in src-tauri/
