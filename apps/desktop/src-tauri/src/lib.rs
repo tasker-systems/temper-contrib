@@ -1,5 +1,6 @@
 mod acp;
 mod document;
+mod document_panel;
 mod settings;
 mod temper;
 mod work;
@@ -25,6 +26,10 @@ pub fn run() {
             temper::temper_whoami,
             temper::temper_resolve_refs,
             document::doc_open,
+            document_panel::doc_connections,
+            document_panel::doc_related,
+            document_panel::doc_history,
+            document_panel::doc_sources,
             temper::temper_teams,
             temper::temper_contexts,
             temper::temper_context_create,
