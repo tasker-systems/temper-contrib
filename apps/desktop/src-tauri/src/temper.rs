@@ -125,24 +125,27 @@ async fn resolve_one(client: &TemperClient, raw: String) -> RefResolution {
             context_ref: view.context_ref,
             decorated_ref: view.r#ref,
         },
-        Err(ClientError::NotFound { .. }) => RefResolution::Unresolved {
-            id: raw,
-            reason: "no resource at this reference".into(),
-        },
-        Err(ClientError::Gone { .. }) => RefResolution::Unresolved {
-            id: raw,
-            reason: "this resource is gone".into(),
-        },
-        Err(ClientError::Forbidden | ClientError::ForbiddenDetail { .. }) => {
-            RefResolution::Unresolved {
+        Err(err) => match unresolved_reason(&err) {
+            Some(reason) => RefResolution::Unresolved {
                 id: raw,
-                reason: "not visible to you".into(),
-            }
-        }
-        Err(err) => RefResolution::Failed {
-            id: raw,
-            message: err.to_string(),
+                reason: reason.into(),
+            },
+            None => RefResolution::Failed {
+                id: raw,
+                message: err.to_string(),
+            },
         },
+    }
+}
+
+/// Why a read found nothing the person can see, when that is what the error says. `None` means
+/// the read did not complete — a failure that verifies nothing either way, never an absence.
+pub(crate) fn unresolved_reason(err: &ClientError) -> Option<&'static str> {
+    match err {
+        ClientError::NotFound { .. } => Some("no resource at this reference"),
+        ClientError::Gone { .. } => Some("this resource is gone"),
+        ClientError::Forbidden | ClientError::ForbiddenDetail { .. } => Some("not visible to you"),
+        _ => None,
     }
 }
 
