@@ -141,6 +141,136 @@ async fn resolve_one(client: &TemperClient, raw: String) -> RefResolution {
     }
 }
 
+/// One team the signed-in person belongs to, as the teams view reads it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperTeam {
+    pub id: uuid::Uuid,
+    pub slug: String,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+/// One visible context, as the contexts view reads it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperContext {
+    pub id: uuid::Uuid,
+    pub name: String,
+    pub slug: String,
+    pub owner_ref: String,
+    pub resource_count: i64,
+    /// RFC 3339 — the webview words recency from it; the desktop adds no clock dependency.
+    pub updated: String,
+}
+
+/// One row of the recent-work list: what the thing is and where it lives, never its body.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperRecentRow {
+    pub id: uuid::Uuid,
+    pub decorated_ref: String,
+    pub title: String,
+    pub doc_type: String,
+    pub context_ref: Option<String>,
+    /// RFC 3339, same shape as the contexts view's `updated`.
+    pub updated: String,
+}
+
+/// One bounded page of the recent-work list. `total` is every row the read
+/// could see — what the view's omission sentence is composed from.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemperRecentWork {
+    pub total: i64,
+    pub rows: Vec<TemperRecentRow>,
+}
+
+fn temper_client<'a>(
+    state: &'a tauri::State<'_, TemperState>,
+) -> Result<&'a TemperClient, String> {
+    state
+        .client
+        .as_ref()
+        .map(|client| client.as_ref())
+        .ok_or_else(|| "temper is not connected".to_string())
+}
+
+/// The teams the signed-in person belongs to, read from temper.
+#[tauri::command]
+pub async fn temper_teams(state: tauri::State<'_, TemperState>) -> Result<Vec<TemperTeam>, String> {
+    let rows = temper_client(&state)?.teams().list().await.map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|t| TemperTeam {
+            id: t.id,
+            slug: t.slug,
+            name: t.name,
+            description: t.description,
+        })
+        .collect())
+}
+
+/// Every context the signed-in person can see, with their resource counts.
+#[tauri::command]
+pub async fn temper_contexts(
+    state: tauri::State<'_, TemperState>,
+) -> Result<Vec<TemperContext>, String> {
+    let rows = temper_client(&state)?
+        .contexts()
+        .list()
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|c| TemperContext {
+            id: c.id.0,
+            name: c.name,
+            slug: c.slug,
+            owner_ref: c.owner_ref,
+            resource_count: c.resource_count,
+            updated: c.updated.to_rfc3339(),
+        })
+        .collect())
+}
+
+/// One bounded page of the person's recent work: visible resources, newest
+/// update first. `offset` walks further into the same ordering.
+#[tauri::command]
+pub async fn temper_recent_work(
+    state: tauri::State<'_, TemperState>,
+    limit: i64,
+    offset: i64,
+) -> Result<TemperRecentWork, String> {
+    let params = temper_workflow::types::resource::ResourceListParams {
+        sort: Some(temper_workflow::types::resource::ResourceSortField::Updated),
+        order: Some(temper_workflow::types::resource::SortOrder::Desc),
+        limit: Some(limit),
+        offset: Some(offset),
+        ..Default::default()
+    };
+    let page = temper_client(&state)?
+        .resources()
+        .list_meta(&params)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(TemperRecentWork {
+        total: page.total,
+        rows: page
+            .rows
+            .into_iter()
+            .map(|r| TemperRecentRow {
+                id: r.id.0,
+                decorated_ref: r.r#ref,
+                title: r.title,
+                doc_type: r.doc_type_name,
+                context_ref: r.context_ref,
+                updated: r.updated.to_rfc3339(),
+            })
+            .collect(),
+    })
+}
+
 /// Resolves references for display: title, doc type and home, read from temper. The webview
 /// never shows a title an author typed as if it were the resource's own.
 #[tauri::command]
@@ -204,6 +334,44 @@ mod tests {
             ),
             "a ref to nothing must read as unresolved, not failed"
         );
+    }
+
+    /// Witness for the three temper reads the views stand on: teams, contexts,
+    /// and one page of recent work against the real API. Ignored by default —
+    /// it needs the machine's temper credentials and network.
+    /// Run locally: `cargo test -p desktop -- --ignored temper_reads_round_trip`
+    #[tokio::test]
+    #[ignore = "requires temper credentials and network"]
+    async fn temper_reads_round_trip() {
+        let state = super::TemperState::connect();
+        let client = state
+            .client
+            .expect("machine temper credentials should resolve to a client");
+
+        let teams = client.teams().list().await.expect("teams list");
+        let contexts = client.contexts().list().await.expect("contexts list");
+        for context in &contexts {
+            assert!(!context.slug.is_empty(), "every visible context has a slug");
+            assert!(!context.owner_ref.is_empty(), "every visible context has an owner ref");
+        }
+
+        let params = temper_workflow::types::resource::ResourceListParams {
+            sort: Some(temper_workflow::types::resource::ResourceSortField::Updated),
+            order: Some(temper_workflow::types::resource::SortOrder::Desc),
+            limit: Some(5),
+            offset: Some(0),
+            ..Default::default()
+        };
+        let page = client.resources().list_meta(&params).await.expect("recent work");
+        assert!(page.total >= 0);
+        for row in &page.rows {
+            assert!(!row.title.is_empty(), "a recent row names its resource");
+            assert!(
+                !row.r#ref.is_empty(),
+                "a recent row carries its decorated address"
+            );
+        }
+        let _ = teams; // presence of the teams read is the assertion: it answered
     }
 
     /// Witness for the temperkb-client integration: builds the client the way

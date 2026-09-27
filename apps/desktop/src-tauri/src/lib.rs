@@ -21,6 +21,9 @@ pub fn run() {
             temper::temper_connection_status,
             temper::temper_whoami,
             temper::temper_resolve_refs,
+            temper::temper_teams,
+            temper::temper_contexts,
+            temper::temper_recent_work,
             acp::acp_start,
             acp::acp_prompt,
             acp::acp_close
