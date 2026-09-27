@@ -84,6 +84,7 @@ struct AskBoardInner {
 
 struct PendingAsk {
     conversation_id: String,
+    option_ids: HashSet<String>,
     sender: oneshot::Sender<AskAnswer>,
 }
 
@@ -147,25 +148,40 @@ impl AskBoard {
         };
         ask_sink(notice);
 
-        let can_ask = self
-            .inner
-            .surfaces
-            .lock()
-            .unwrap()
-            .contains(conversation_id);
-        if !can_ask {
+        // The surface check and the park are one critical section: a surface
+        // released between them must cancel this ask, not strand it — a
+        // parked ask without a surface is one no path can answer or record.
+        let parked = {
+            let mut pending = self.inner.pending.lock().unwrap();
+            if self
+                .inner
+                .surfaces
+                .lock()
+                .unwrap()
+                .contains(conversation_id)
+            {
+                let (tx, rx) = oneshot::channel();
+                pending.insert(
+                    ask_id.clone(),
+                    PendingAsk {
+                        conversation_id: conversation_id.to_string(),
+                        option_ids: request
+                            .options
+                            .iter()
+                            .map(|o| o.option_id.to_string())
+                            .collect(),
+                        sender: tx,
+                    },
+                );
+                Some(rx)
+            } else {
+                None
+            }
+        };
+        let Some(rx) = parked else {
             Self::resolved(conversation_id, &ask_id, AskResolution::Cancelled, ask_sink);
             return AskAnswer::Cancel;
-        }
-
-        let (tx, rx) = oneshot::channel();
-        self.inner.pending.lock().unwrap().insert(
-            ask_id.clone(),
-            PendingAsk {
-                conversation_id: conversation_id.to_string(),
-                sender: tx,
-            },
-        );
+        };
         match rx.await {
             Ok(AskAnswer::Choose(option_id)) => AskAnswer::Choose(option_id),
             // The board itself resolved (the person answered, or released the
@@ -197,6 +213,17 @@ impl AskBoard {
         if parked.conversation_id != conversation_id {
             pending.insert(ask_id.to_string(), parked);
             return Err(format!("ask {ask_id} does not belong to {conversation_id}"));
+        }
+        // Only an option the agent declared may be relayed as a selection:
+        // the answer side carries the same non-widening guarantee as the
+        // ask side. The ask stays parked and nothing is recorded.
+        if let AskAnswer::Choose(option_id) = &answer {
+            if !parked.option_ids.contains(option_id) {
+                pending.insert(ask_id.to_string(), parked);
+                return Err(format!(
+                    "option {option_id} is not one of the declared options for ask {ask_id}"
+                ));
+            }
         }
         let resolution = match &answer {
             AskAnswer::Choose(option_id) => AskResolution::Selected {
@@ -314,24 +341,21 @@ pub async fn acp_start(
             agent_client_protocol::on_receive_notification!(),
         )
         .on_receive_request(
-            async move |request: RequestPermissionRequest, responder, _connection| {
+            async move |request: RequestPermissionRequest, responder, connection| {
                 // The ask goes to the conversation's room, which offers the
                 // agent's own declared options; when no one can be asked, the
-                // board cancels and records it.
-                let answer = ask_board
-                    .ask(&ask_conversation_id, &request, &ask_sink)
-                    .await;
-                let response = match answer {
-                    AskAnswer::Choose(option_id) => {
-                        RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-                            SelectedPermissionOutcome::new(option_id),
-                        ))
-                    }
-                    AskAnswer::Cancel => {
-                        RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
-                    }
-                };
-                responder.respond(response)
+                // board cancels and records it. The deliberation is offloaded
+                // onto the connection — the event loop must keep serving
+                // notifications and further requests while the person thinks.
+                let ask_board = ask_board.clone();
+                let ask_conversation_id = ask_conversation_id.clone();
+                let ask_sink = ask_sink.clone();
+                connection.spawn(async move {
+                    let answer = ask_board
+                        .ask(&ask_conversation_id, &request, &ask_sink)
+                        .await;
+                    responder.respond(permission_response_for(answer))
+                })
             },
             agent_client_protocol::on_receive_request!(),
         )
@@ -359,6 +383,17 @@ pub async fn acp_start(
         session_id: info.session_id,
         agent_info: info.agent_info,
     })
+}
+
+/// Maps the board's answer onto the wire response: the person's choice is
+/// relayed as exactly that option; only an unanswerable ask is cancelled.
+fn permission_response_for(answer: AskAnswer) -> RequestPermissionResponse {
+    match answer {
+        AskAnswer::Choose(option_id) => RequestPermissionResponse::new(
+            RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id)),
+        ),
+        AskAnswer::Cancel => RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled),
+    }
 }
 
 async fn run_conversation(
@@ -423,13 +458,23 @@ pub fn acp_close(state: tauri::State<'_, AcpState>, conversation_id: String) -> 
 /// Marks whether the conversation's room is mounted and able to put a
 /// permission ask to the person. Releasing the surface cancels that
 /// conversation's parked asks — a question nobody can answer must not strand
-/// the agent.
+/// the agent. Claiming a surface for a conversation that does not exist is
+/// refused: a ghost surface would park every later ask forever.
 #[tauri::command]
 pub fn acp_ask_surface(
     state: tauri::State<'_, AcpState>,
     conversation_id: String,
     present: bool,
 ) -> Result<(), String> {
+    if present
+        && !state
+            .conversations
+            .lock()
+            .unwrap()
+            .contains_key(&conversation_id)
+    {
+        return Err(format!("unknown conversation {conversation_id}"));
+    }
     state.ask_board.set_surface(&conversation_id, present);
     Ok(())
 }
@@ -595,21 +640,15 @@ mod tests {
                 agent_client_protocol::on_receive_notification!(),
             )
             .on_receive_request(
-                async move |request: RequestPermissionRequest, responder, _connection| {
-                    let answer = ask_board
-                        .ask("test-conversation", &request, &ask_sink)
-                        .await;
-                    let response = match answer {
-                        AskAnswer::Choose(option_id) => {
-                            RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-                                SelectedPermissionOutcome::new(option_id),
-                            ))
-                        }
-                        AskAnswer::Cancel => {
-                            RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
-                        }
-                    };
-                    responder.respond(response)
+                async move |request: RequestPermissionRequest, responder, connection| {
+                    let ask_board = ask_board.clone();
+                    let ask_sink = ask_sink.clone();
+                    connection.spawn(async move {
+                        let answer = ask_board
+                            .ask("test-conversation", &request, &ask_sink)
+                            .await;
+                        responder.respond(permission_response_for(answer))
+                    })
                 },
                 agent_client_protocol::on_receive_request!(),
             )
@@ -709,6 +748,33 @@ mod tests {
             .collect()
     }
 
+    /// Waits until a parked ask has been announced, and returns its ask id,
+    /// its tool call, and its declared options.
+    async fn wait_asked(recorded: &AskRecorded) -> (String, serde_json::Value, serde_json::Value) {
+        tokio::time::timeout(Duration::from_millis(100), async {
+            loop {
+                let found = {
+                    let notices = recorded.lock().unwrap();
+                    notices.iter().find_map(|n| match n {
+                        AskNotice::Asked {
+                            ask_id,
+                            tool_call,
+                            options,
+                            ..
+                        } => Some((ask_id.clone(), tool_call.clone(), options.clone())),
+                        _ => None,
+                    })
+                };
+                if let Some(found) = found {
+                    return found;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the parked ask should be announced")
+    }
+
     /// Witness for the seam's cancel clause: an ask arriving where no one can
     /// be asked is cancelled — immediately, not after a wait — and the
     /// cancellation is recorded beside the ask, never dropped.
@@ -745,27 +811,7 @@ mod tests {
             tokio::spawn(async move { board.ask("conversation-1", &request, &ask_sink).await })
         };
 
-        let asked = tokio::time::timeout(Duration::from_millis(100), async {
-            loop {
-                let found = {
-                    let notices = recorded.lock().unwrap();
-                    notices.iter().find_map(|n| match n {
-                        AskNotice::Asked {
-                            tool_call, options, ..
-                        } => Some((tool_call.clone(), options.clone())),
-                        _ => None,
-                    })
-                };
-                if let Some(found) = found {
-                    return found;
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("the parked ask should be announced");
-
-        let (tool_call, options) = asked;
+        let (_ask_id, tool_call, options) = wait_asked(&recorded).await;
         assert_eq!(
             tool_call["title"],
             serde_json::json!("Write acp-ask-witness.txt"),
@@ -808,6 +854,73 @@ mod tests {
                 option_id: "allow-once".to_string()
             }],
             "exactly one resolution is recorded per ask"
+        );
+    }
+
+    /// Witness for the answer side's non-widening guarantee: the wire
+    /// response relays the person's choice as exactly that option, and an
+    /// option the agent did not declare is refused — the ask stays parked and
+    /// no selection is recorded.
+    #[test]
+    fn the_choice_is_relayed_as_selected_and_an_undeclared_option_is_refused() {
+        let chosen = permission_response_for(AskAnswer::Choose("allow-once".to_string()));
+        assert!(matches!(
+            chosen.outcome,
+            RequestPermissionOutcome::Selected(ref picked) if picked.option_id.to_string() == "allow-once"
+        ));
+        let cancelled = permission_response_for(AskAnswer::Cancel);
+        assert!(matches!(
+            cancelled.outcome,
+            RequestPermissionOutcome::Cancelled
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_undeclared_option_is_refused_not_relayed() {
+        let board = AskBoard::default();
+        board.set_surface("conversation-1", true);
+        let (ask_sink, recorded) = recording_ask_sink();
+
+        let parking = {
+            let board = board.clone();
+            let request = permission_request();
+            let ask_sink = ask_sink.clone();
+            tokio::spawn(async move { board.ask("conversation-1", &request, &ask_sink).await })
+        };
+        let (ask_id, _tool_call, _options) = wait_asked(&recorded).await;
+
+        let refused = board.resolve(
+            "conversation-1",
+            &ask_id,
+            AskAnswer::Choose("invented".to_string()),
+            &ask_sink,
+        );
+        assert!(
+            refused.is_err(),
+            "an option the agent never declared must be refused"
+        );
+
+        // The ask is still parked: the declared option still answers it, and
+        // the refused attempt recorded nothing.
+        board
+            .resolve(
+                "conversation-1",
+                &ask_id,
+                AskAnswer::Choose("allow-once".to_string()),
+                &ask_sink,
+            )
+            .expect("the declared option should still resolve the parked ask");
+        let answer = tokio::time::timeout(Duration::from_millis(100), parking)
+            .await
+            .expect("the ask should end once answered")
+            .expect("the parked task should not panic");
+        assert!(matches!(&answer, AskAnswer::Choose(id) if id == "allow-once"));
+        assert_eq!(
+            resolutions(&recorded),
+            vec![AskResolution::Selected {
+                option_id: "allow-once".to_string()
+            }],
+            "the refused attempt must not appear as a resolution"
         );
     }
 
@@ -1033,6 +1146,15 @@ mod tests {
         );
     }
 
+    /// Removes the witness config dir — the copied credentials with it —
+    /// whenever the witness ends, panic or not.
+    struct WitnessConfigDir(PathBuf);
+    impl Drop for WitnessConfigDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     /// Verifies live against Claude Code's permission model that a tool call
     /// the person's harness configuration pre-approves never reaches the
     /// client as a permission ask. The witness pre-approves Write through
@@ -1045,6 +1167,7 @@ mod tests {
     async fn claude_code_preapproved_tools_never_ask() {
         let config_dir = std::env::temp_dir().join("temper-desktop-acp-preapproved-config");
         std::fs::create_dir_all(&config_dir).expect("claude config directory");
+        let _cleanup = WitnessConfigDir(config_dir.clone());
         std::fs::write(
             config_dir.join("settings.json"),
             r#"{ "permissions": { "allow": ["Write"] } }"#,
