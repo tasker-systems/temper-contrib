@@ -33,8 +33,16 @@ FLOORS = [
     ("author-human", ["ground"], 3.0),
     ("author-agent", ["ground"], 3.0),
 ]
-for _role in ["notice", "success", "danger", "pending",
-              "region-arriving", "region-empty", "region-gave-up", "region-failed"]:
+for _role in [
+    "notice",
+    "success",
+    "danger",
+    "pending",
+    "region-arriving",
+    "region-empty",
+    "region-gave-up",
+    "region-failed",
+]:
     FLOORS.append((_role, [f"{_role}-wash"], 4.5))
 for _d in ["research", "task", "session", "concept", "goal", "decision", "memory"]:
     FLOORS.append((f"doctype-{_d}", ["ground"], 4.5))
@@ -75,6 +83,7 @@ def luminance(c):
     def channel(v):
         v /= 255
         return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
+
     return 0.2126 * channel(c[0]) + 0.7152 * channel(c[1]) + 0.0722 * channel(c[2])
 
 
@@ -88,12 +97,15 @@ def lab(c):
     def lin(v):
         v /= 255
         return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+
     r, g, b = (lin(c[i]) for i in range(3))
     x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047
     y = 0.2126 * r + 0.7152 * g + 0.0722 * b
     z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883
+
     def f(t):
         return t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+
     fx, fy, fz = f(x), f(y), f(z)
     return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
 
@@ -133,7 +145,7 @@ def legibility_errors(theme):
                 errors.append(f"contrast {role} on {bg_role}: {ratio:.2f}:1 < {floor}:1")
     for label, roles, threshold in DISTINCT:
         for i, a in enumerate(roles):
-            for b in roles[i + 1:]:
+            for b in roles[i + 1 :]:
                 d = delta_e(paint[a], paint[b])
                 if d < threshold:
                     errors.append(f"distinct {label}: {a} vs {b} ΔE {d:.1f} < {threshold}")
@@ -284,10 +296,16 @@ def contract_css_failures():
         literal = re.search(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(|oklch\(", text)
         unknown = sorted(set(re.findall(r"--tp-[a-z0-9-]+", text)) - known)
         if literal:
-            print(f"FAIL contract/{css.name} carries a literal colour ({literal.group(0)})", file=sys.stderr)
+            print(
+                f"FAIL contract/{css.name} carries a literal colour ({literal.group(0)})",
+                file=sys.stderr,
+            )
             failures += 1
         if unknown:
-            print(f"FAIL contract/{css.name} references roles the contract lacks: {', '.join(unknown)}", file=sys.stderr)
+            print(
+                f"FAIL contract/{css.name} references roles the contract lacks: {', '.join(unknown)}",
+                file=sys.stderr,
+            )
             failures += 1
         if not literal and not unknown:
             print(f"ok   contract/{css.name} consumes contract roles only")
@@ -300,14 +318,19 @@ def cmd_self_check():
     print("ok   contract/theme.schema.json is a valid draft 2020-12 schema")
     tw = ROOT / "contract" / "tailwind.css"
     if not tw.exists() or tw.read_text() != tailwind_css():
-        print("FAIL contract/tailwind.css is stale or missing - run themes.sh build", file=sys.stderr)
+        print(
+            "FAIL contract/tailwind.css is stale or missing - run themes.sh build", file=sys.stderr
+        )
         failures += 1
     else:
         print("ok   contract/tailwind.css covers every role in the contract")
     failures += contract_css_failures()
     themes = theme_paths()
     if len(themes) < 2:
-        print("FAIL fewer than two themes - the contract is only proven by more than one", file=sys.stderr)
+        print(
+            "FAIL fewer than two themes - the contract is only proven by more than one",
+            file=sys.stderr,
+        )
         failures += 1
     failures += cmd_check([str(p) for p in themes])
     for fixture in sorted((ROOT / "tests" / "fixtures" / "broken").glob("*.json")):
@@ -315,11 +338,17 @@ def cmd_self_check():
         if errors:
             print(f"ok   {fixture.relative_to(ROOT)} fails as required ({errors[0]})")
         else:
-            print(f"FAIL {fixture.relative_to(ROOT)} was accepted but must be refused", file=sys.stderr)
+            print(
+                f"FAIL {fixture.relative_to(ROOT)} was accepted but must be refused",
+                file=sys.stderr,
+            )
             failures += 1
     for svg in sorted((ROOT / "brand").glob("*.svg")):
         if re.search(r"#[0-9a-fA-F]{3,6}\b", svg.read_text()):
-            print(f"FAIL {svg.relative_to(ROOT)} hard-codes a colour; brand marks paint in currentColor", file=sys.stderr)
+            print(
+                f"FAIL {svg.relative_to(ROOT)} hard-codes a colour; brand marks paint in currentColor",
+                file=sys.stderr,
+            )
             failures += 1
         else:
             print(f"ok   {svg.relative_to(ROOT)} paints in currentColor")

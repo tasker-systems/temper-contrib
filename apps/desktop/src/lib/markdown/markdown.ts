@@ -33,8 +33,8 @@ const marked = new Marked(
 		langPrefix: 'hljs language-',
 		highlight(code, lang) {
 			return highlightCode(code, lang || undefined);
-		},
-	}),
+		}
+	})
 );
 
 /** Parse markdown to HTML, with fenced code blocks highlighted per the registered set. */

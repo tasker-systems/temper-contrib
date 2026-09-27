@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { THEMES, DEFAULT_PREFERENCE, coercePreference, resolveTheme } from './theme';
+import { coercePreference, DEFAULT_PREFERENCE, resolveTheme, THEMES } from './theme';
 
 describe('theme discovery', () => {
 	it('finds every theme in themes/, paired as counterparts', () => {
@@ -23,11 +23,15 @@ describe('resolveTheme', () => {
 		expect(resolveTheme(paper, true)).toBe('quiet-instrument');
 	});
 	it('holds a fixed theme regardless of the system', () => {
-		expect(resolveTheme({ follow: 'fixed', name: 'quiet-instrument-paper' }, true)).toBe('quiet-instrument-paper');
+		expect(resolveTheme({ follow: 'fixed', name: 'quiet-instrument-paper' }, true)).toBe(
+			'quiet-instrument-paper'
+		);
 	});
 	it('never returns a theme that does not exist', () => {
 		expect(resolveTheme({ follow: 'fixed', name: 'neon' }, true)).toBe('quiet-instrument');
-		expect(resolveTheme({ follow: 'system', family: 'neon' }, false)).toBe('quiet-instrument-paper');
+		expect(resolveTheme({ follow: 'system', family: 'neon' }, false)).toBe(
+			'quiet-instrument-paper'
+		);
 	});
 });
 

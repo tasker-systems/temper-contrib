@@ -63,7 +63,8 @@ export function checkSpec(spec: unknown): SpecCheck {
 	}
 	// Keep going where the shape allows it, so a refusal lists every reason, not the first.
 	const shaped = spec as Partial<Spec> | null;
-	const elements = shaped && typeof shaped.elements === 'object' && shaped.elements ? shaped.elements : null;
+	const elements =
+		shaped && typeof shaped.elements === 'object' && shaped.elements ? shaped.elements : null;
 	if (!elements) return { ok: false, errors: errors.length ? errors : ['spec has no elements'] };
 
 	for (const [key, el] of Object.entries(elements)) {
@@ -72,16 +73,21 @@ export function checkSpec(spec: unknown): SpecCheck {
 		const props = component.safeParse(el.props);
 		if (!props.success) {
 			for (const i of props.error.issues)
-				errors.push(`elements/${key}/props${i.path.length ? '/' + i.path.join('/') : ''}: ${i.message}`);
+				errors.push(
+					`elements/${key}/props${i.path.length ? `/${i.path.join('/')}` : ''}: ${i.message}`
+				);
 			continue;
 		}
 		for (const child of el.children ?? [])
-			if (!(child in elements)) errors.push(`elements/${key}: names a child "${child}" that does not exist`);
+			if (!(child in elements))
+				errors.push(`elements/${key}: names a child "${child}" that does not exist`);
 		if (el.type === 'BoundedList') {
 			const p = el.props as { total: number; shown: number; state: string };
 			if (p.shown > p.total) errors.push(`elements/${key}: shows ${p.shown} of ${p.total}`);
 			if (p.state === 'present' && (el.children ?? []).length !== p.shown)
-				errors.push(`elements/${key}: says it shows ${p.shown} but has ${(el.children ?? []).length} rows`);
+				errors.push(
+					`elements/${key}: says it shows ${p.shown} but has ${(el.children ?? []).length} rows`
+				);
 		}
 	}
 	if (typeof shaped?.root === 'string' && !(shaped.root in elements))

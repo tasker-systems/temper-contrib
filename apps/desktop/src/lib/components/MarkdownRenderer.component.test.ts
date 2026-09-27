@@ -39,7 +39,7 @@ describe('MarkdownRenderer', () => {
 
 	it('keeps style attributes and non-allowlisted classes out of the rendered document', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '<p style="color:red;position:fixed" class="lead">stay</p>' },
+			props: { markdown: '<p style="color:red;position:fixed" class="lead">stay</p>' }
 		});
 		await waitFor(() => expect(container.querySelector('p')).not.toBeNull());
 		expect(container.textContent).toContain('stay');
@@ -51,7 +51,7 @@ describe('MarkdownRenderer', () => {
 
 	it('keeps positioning utilities out of the rendered document — content survives, styling does not', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '<div class="fixed inset-0 z-50 bg-black/80">overlay</div>' },
+			props: { markdown: '<div class="fixed inset-0 z-50 bg-black/80">overlay</div>' }
 		});
 		await waitFor(() => expect(container.textContent).toContain('overlay'));
 		for (const utility of ['fixed', 'inset-0', 'z-50', 'bg-black']) {
@@ -61,7 +61,7 @@ describe('MarkdownRenderer', () => {
 
 	it('preserves the classes the markdown pipeline legitimately emits', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '```json\n{"a":1}\n```' },
+			props: { markdown: '```json\n{"a":1}\n```' }
 		});
 		await waitFor(() => expect(container.querySelector('code')).not.toBeNull());
 		const html = container.innerHTML;
@@ -72,7 +72,7 @@ describe('MarkdownRenderer', () => {
 	it('keeps an element but drops its event-handler attribute', async () => {
 		const src = 'data:image/png;base64,iVBORw0KGgo=';
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: `<img src="${src}" onerror="alert(1)">` },
+			props: { markdown: `<img src="${src}" onerror="alert(1)">` }
 		});
 		await waitFor(() => expect(container.querySelector('img')?.getAttribute('src')).toBe(src));
 		expect(container.innerHTML).not.toContain('onerror');
@@ -82,8 +82,8 @@ describe('MarkdownRenderer', () => {
 		const { container } = render(MarkdownRenderer, {
 			props: {
 				markdown:
-					'![the plan](https://example.com/plan.png)\n\n<img src="//cdn.example/x.png" onerror="alert(1)">',
-			},
+					'![the plan](https://example.com/plan.png)\n\n<img src="//cdn.example/x.png" onerror="alert(1)">'
+			}
 		});
 		await waitFor(() => expect(container.querySelector('.md-withheld')).not.toBeNull());
 		expect(container.querySelector('img')).toBeNull();
@@ -97,7 +97,7 @@ describe('MarkdownRenderer', () => {
 
 	it('does not let authored content forge a withheld-image refusal', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '<span class="md-withheld">remote image withheld</span>' },
+			props: { markdown: '<span class="md-withheld">remote image withheld</span>' }
 		});
 		await waitFor(() => expect(container.querySelector('.md-body')).not.toBeNull());
 		expect(container.querySelector('.md-withheld')).toBeNull();
@@ -105,7 +105,7 @@ describe('MarkdownRenderer', () => {
 
 	it('defuses namespace-confusion mXSS across math/style boundaries', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '<math><mtext><form><mglyph><style></math><img src onerror=alert(1)>' },
+			props: { markdown: '<math><mtext><form><mglyph><style></math><img src onerror=alert(1)>' }
 		});
 		await waitFor(() => expect(container.querySelector('img')).toBeNull());
 		expect(container.innerHTML).not.toContain('onerror');
@@ -116,8 +116,8 @@ describe('MarkdownRenderer', () => {
 		const { container } = render(MarkdownRenderer, {
 			props: {
 				markdown:
-					'<a href="jav&#x09;ascript:alert(1)">x</a>\n\n[x](data:text/html;base64,PHNjcmlwdD4=)',
-			},
+					'<a href="jav&#x09;ascript:alert(1)">x</a>\n\n[x](data:text/html;base64,PHNjcmlwdD4=)'
+			}
 		});
 		await waitFor(() => expect(container.querySelector('a')).not.toBeNull());
 		expect(container.innerHTML).not.toContain('javascript:');
@@ -127,7 +127,7 @@ describe('MarkdownRenderer', () => {
 
 	it('strips DOM-clobbering name attributes from form controls', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: '<form><input name="attributes"><input name="tagName"></form>' },
+			props: { markdown: '<form><input name="attributes"><input name="tagName"></form>' }
 		});
 		await waitFor(() => expect(container.querySelector('form')).not.toBeNull());
 		expect(container.innerHTML).not.toContain('name="attributes"');
@@ -138,8 +138,8 @@ describe('MarkdownRenderer', () => {
 		const { container } = render(MarkdownRenderer, {
 			props: {
 				markdown:
-					'<template><script>alert(1)</script></template><iframe srcdoc="<script>alert(1)</script>"></iframe><base href="https://evil.example/">',
-			},
+					'<template><script>alert(1)</script></template><iframe srcdoc="<script>alert(1)</script>"></iframe><base href="https://evil.example/">'
+			}
 		});
 		await waitFor(() => expect(container.querySelector('.md-body')).not.toBeNull());
 		// DOMPurify keeps an inert empty <template> shell but strips everything inside it;
@@ -156,7 +156,7 @@ describe('MarkdownRenderer', () => {
 	// deterministic everywhere.
 	it('renders the refusal for a body it cannot render, after the gate', async () => {
 		const { container } = render(MarkdownRenderer, {
-			props: { markdown: 'a'.repeat(MAX_SOURCE_LENGTH + 1) },
+			props: { markdown: 'a'.repeat(MAX_SOURCE_LENGTH + 1) }
 		});
 		await waitFor(() => expect(container.querySelector('.md-refusal')).not.toBeNull());
 	});

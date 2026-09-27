@@ -25,7 +25,9 @@ describe('Transcript', () => {
 		const reply = () => container.querySelector('.assistant .md-body');
 		await waitFor(() => expect(reply()).not.toBeNull());
 		expect(reply()?.querySelector('h2')?.textContent).toBe('Plan');
-		expect(reply()?.querySelector('pre code.hljs.language-rust .hljs-keyword')?.textContent).toBe('fn');
+		expect(reply()?.querySelector('pre code.hljs.language-rust .hljs-keyword')?.textContent).toBe(
+			'fn'
+		);
 		expect(reply()?.querySelector('a')?.getAttribute('href')).toBe('https://temperkb.io');
 		expect(reply()?.textContent).not.toContain('##');
 		expect(reply()?.textContent).not.toContain('```');

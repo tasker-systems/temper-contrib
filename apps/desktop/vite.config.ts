@@ -1,13 +1,13 @@
-import { configDefaults, defineConfig } from "vitest/config";
-import { sveltekit } from "@sveltejs/kit/vite";
-import tailwindcss from "@tailwindcss/vite";
+import { sveltekit } from '@sveltejs/kit/vite';
+import tailwindcss from '@tailwindcss/vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
 // The theme contract and themes live at the repository root (`themes/`) and are read in place,
 // never copied: one source for every consumer. Vite resolves this against the project root.
-const themes = "../../themes";
+const themes = '../../themes';
 
 // https://vite.dev/config/
 export default defineConfig(async () => ({
@@ -24,17 +24,17 @@ export default defineConfig(async () => ({
 		host: host || false,
 		hmr: host
 			? {
-					protocol: "ws",
+					protocol: 'ws',
 					host,
 					port: 1421
 				}
 			: undefined,
 		watch: {
 			// 3. tell Vite to ignore watching `src-tauri`
-			ignored: ["**/src-tauri/**"]
+			ignored: ['**/src-tauri/**']
 		},
 		fs: {
-			allow: [".", themes]
+			allow: ['.', themes]
 		}
 	},
 
@@ -47,20 +47,20 @@ export default defineConfig(async () => ({
 			{
 				extends: true,
 				test: {
-					name: "unit",
-					include: ["src/**/*.test.ts"],
-					exclude: [...configDefaults.exclude, "src/**/*.component.test.ts"],
-					environment: "node"
+					name: 'unit',
+					include: ['src/**/*.test.ts'],
+					exclude: [...configDefaults.exclude, 'src/**/*.component.test.ts'],
+					environment: 'node'
 				}
 			},
 			{
 				extends: true,
-				resolve: { conditions: ["browser"] },
+				resolve: { conditions: ['browser'] },
 				test: {
-					name: "component",
-					include: ["src/**/*.component.test.ts"],
-					environment: "jsdom",
-					setupFiles: ["src/test/component-setup.ts"]
+					name: 'component',
+					include: ['src/**/*.component.test.ts'],
+					environment: 'jsdom',
+					setupFiles: ['src/test/component-setup.ts']
 				}
 			}
 		]

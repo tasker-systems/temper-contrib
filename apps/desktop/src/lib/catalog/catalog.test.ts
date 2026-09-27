@@ -12,11 +12,21 @@ function list(props: Record<string, unknown>, rows = 1) {
 	return { root: 'list', elements };
 }
 
-const good = { total: 41, shown: 1, scope: 'since you last engaged', label: 'activity', state: 'present' };
+const good = {
+	total: 41,
+	shown: 1,
+	scope: 'since you last engaged',
+	label: 'activity',
+	state: 'present'
+};
 
 describe('the temper catalog', () => {
 	it('names exactly the foundation components', () => {
-		expect(temperCatalog.componentNames.sort()).toEqual(['BoundedList', 'RegionState', 'ResourceRef']);
+		expect(temperCatalog.componentNames.sort()).toEqual([
+			'BoundedList',
+			'RegionState',
+			'ResourceRef'
+		]);
 	});
 
 	it('accepts a conforming spec', () => {
@@ -31,12 +41,24 @@ describe('the temper catalog', () => {
 
 	it('refuses a colour prop on any component', () => {
 		expect(checkSpec(list({ ...good, color: '#ff0000' })).ok).toBe(false);
-		const region = { root: 'a', elements: { a: { type: 'RegionState', props: { state: 'empty', label: 'history', tint: 'red' }, children: [] } } };
+		const region = {
+			root: 'a',
+			elements: {
+				a: {
+					type: 'RegionState',
+					props: { state: 'empty', label: 'history', tint: 'red' },
+					children: []
+				}
+			}
+		};
 		expect(checkSpec(region).ok).toBe(false);
 	});
 
 	it('refuses a component outside the catalog', () => {
-		const spec = { root: 'a', elements: { a: { type: 'ReachIndicator', props: { level: 'none' }, children: [] } } };
+		const spec = {
+			root: 'a',
+			elements: { a: { type: 'ReachIndicator', props: { level: 'none' }, children: [] } }
+		};
 		expect(checkSpec(spec).ok).toBe(false);
 	});
 
@@ -66,7 +88,11 @@ describe('the temper catalog', () => {
 		const spec = {
 			root: 'list',
 			elements: {
-				list: { type: 'BoundedList', props: { shown: 1, scope: 's', label: 'l', state: 'present', color: '#f00' }, children: ['x'] },
+				list: {
+					type: 'BoundedList',
+					props: { shown: 1, scope: 's', label: 'l', state: 'present', color: '#f00' },
+					children: ['x']
+				},
 				x: { type: 'ReachIndicator', props: {}, children: [] }
 			}
 		};
@@ -79,7 +105,10 @@ describe('the temper catalog', () => {
 	});
 
 	it('refuses a reference that is not a resource id', () => {
-		const spec = { root: 'a', elements: { a: { type: 'ResourceRef', props: { id: 'https://example.com' }, children: [] } } };
+		const spec = {
+			root: 'a',
+			elements: { a: { type: 'ResourceRef', props: { id: 'https://example.com' }, children: [] } }
+		};
 		expect(checkSpec(spec).ok).toBe(false);
 	});
 

@@ -1,0 +1,9 @@
+# Ruff — lint and format for every Python file in the repository (today: themes/scripts/).
+# One root config so a new package's Python is covered without opting in.
+line-length = 100
+target-version = "py39"   # the floor both pyproject.toml files declare
+
+[lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade. E501 is the formatter's job, not the linter's.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
