@@ -191,9 +191,7 @@ pub struct TemperRecentWork {
     pub rows: Vec<TemperRecentRow>,
 }
 
-fn temper_client<'a>(
-    state: &'a tauri::State<'_, TemperState>,
-) -> Result<&'a TemperClient, String> {
+fn temper_client<'a>(state: &'a tauri::State<'_, TemperState>) -> Result<&'a TemperClient, String> {
     state
         .client
         .as_ref()
@@ -204,7 +202,11 @@ fn temper_client<'a>(
 /// The teams the signed-in person belongs to, read from temper.
 #[tauri::command]
 pub async fn temper_teams(state: tauri::State<'_, TemperState>) -> Result<Vec<TemperTeam>, String> {
-    let rows = temper_client(&state)?.teams().list().await.map_err(|e| e.to_string())?;
+    let rows = temper_client(&state)?
+        .teams()
+        .list()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
         .map(|t| TemperTeam {
@@ -357,7 +359,10 @@ mod tests {
         let contexts = client.contexts().list().await.expect("contexts list");
         for context in &contexts {
             assert!(!context.slug.is_empty(), "every visible context has a slug");
-            assert!(!context.owner_ref.is_empty(), "every visible context has an owner ref");
+            assert!(
+                !context.owner_ref.is_empty(),
+                "every visible context has an owner ref"
+            );
         }
 
         let params = temper_workflow::types::resource::ResourceListParams {
@@ -367,7 +372,11 @@ mod tests {
             offset: Some(0),
             ..Default::default()
         };
-        let page = client.resources().list_meta(&params).await.expect("recent work");
+        let page = client
+            .resources()
+            .list_meta(&params)
+            .await
+            .expect("recent work");
         assert!(page.total >= 0);
         for row in &page.rows {
             assert!(!row.title.is_empty(), "a recent row names its resource");

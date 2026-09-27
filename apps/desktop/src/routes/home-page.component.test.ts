@@ -64,12 +64,15 @@ describe('the home room', () => {
 
 		const record = calls.find((c) => c.cmd === 'temper_write_work_record');
 		expect(record).toBeDefined();
-		const args = record?.args as Record<string, string>;
-		expect(args.agentLabel).toBe('opencode');
-		expect(args.agentCommand).toBe('opencode acp');
-		expect(args.workingDir).toBe('/tmp/project');
-		expect(args.openedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-		expect(args.closedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		const args = record?.args as {
+			facts: Record<string, string>;
+			idempotencyKey: string;
+		};
+		expect(args.facts.agentLabel).toBe('opencode');
+		expect(args.facts.agentCommand).toBe('opencode acp');
+		expect(args.facts.workingDir).toBe('/tmp/project');
+		expect(args.facts.openedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+		expect(args.facts.closedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 		expect(args.idempotencyKey).toBeTruthy();
 	});
 });

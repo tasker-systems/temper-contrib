@@ -38,7 +38,9 @@ pub const DEFAULT_TEMPER_CONTEXT: &str = "temper-desktop";
 impl DeviceSettings {
     /// The configured context name — the setting, or the default when unset.
     pub fn temper_context_name(&self) -> &str {
-        self.temper_context.as_deref().unwrap_or(DEFAULT_TEMPER_CONTEXT)
+        self.temper_context
+            .as_deref()
+            .unwrap_or(DEFAULT_TEMPER_CONTEXT)
     }
 }
 

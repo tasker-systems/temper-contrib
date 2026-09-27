@@ -9,7 +9,7 @@
 //! (`DeviceSettings::temper_context_name`), found by profile owner and
 //! configured name, created on first write.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use temper_client::TemperClient;
@@ -21,7 +21,8 @@ use crate::temper::TemperState;
 /// The record's doc type: the conversation as work done, not the transcript.
 pub const WORK_RECORD_DOC_TYPE: &str = "work record";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkRecordFacts {
     pub agent_label: String,
     pub agent_command: String,
@@ -102,17 +103,15 @@ fn record_payload(
         content: record_markdown(facts),
         metadata: None,
         managed_meta: None,
-        open_meta: Some(
-            serde_json::json!({
-                "agent": facts.agent_label,
-                "agent_command": facts.agent_command,
-                "working_dir": facts.working_dir,
-                "opened_at": facts.opened_at,
-                "closed_at": facts.closed_at,
-                "resumable_workspace": facts.working_dir,
-                "products": [],
-            }),
-        ),
+        open_meta: Some(serde_json::json!({
+            "agent": facts.agent_label,
+            "agent_command": facts.agent_command,
+            "working_dir": facts.working_dir,
+            "opened_at": facts.opened_at,
+            "closed_at": facts.closed_at,
+            "resumable_workspace": facts.working_dir,
+            "products": [],
+        })),
         chunks_packed: None,
         sources: Vec::new(),
         act: Default::default(),
@@ -126,7 +125,13 @@ async fn persons_context_id(client: &TemperClient, context_name: &str) -> Result
     let profile = client.profile().get().await.map_err(|e| e.to_string())?;
     let contexts = client.contexts().list().await.map_err(|e| e.to_string())?;
     if let Some(existing) = contexts.iter().find(|c| {
-        is_persons_context(&c.kb_owner_table, c.kb_owner_id, &c.name, context_name, profile.id)
+        is_persons_context(
+            &c.kb_owner_table,
+            c.kb_owner_id,
+            &c.name,
+            context_name,
+            profile.id,
+        )
     }) {
         return Ok(existing.id.0);
     }
@@ -165,30 +170,14 @@ pub async fn write_work_record(
 pub async fn temper_write_work_record(
     state: tauri::State<'_, TemperState>,
     settings: tauri::State<'_, SettingsState>,
-    agent_label: String,
-    agent_command: String,
-    working_dir: String,
-    opened_at: String,
-    closed_at: String,
+    facts: WorkRecordFacts,
     idempotency_key: Uuid,
 ) -> Result<WrittenRecord, String> {
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
-    write_work_record(
-        client,
-        WorkRecordFacts {
-            agent_label,
-            agent_command,
-            working_dir,
-            opened_at,
-            closed_at,
-        },
-        idempotency_key,
-        &context_name,
-    )
-    .await
+    write_work_record(client, facts, idempotency_key, &context_name).await
 }
 
 #[cfg(test)]
@@ -236,11 +225,29 @@ mod tests {
     #[test]
     fn the_context_is_the_persons_own_by_owner_and_configured_name() {
         let me = Uuid::nil();
-        assert!(is_persons_context("kb_profiles", me, "temper-desktop", "temper-desktop", me));
+        assert!(is_persons_context(
+            "kb_profiles",
+            me,
+            "temper-desktop",
+            "temper-desktop",
+            me
+        ));
         // Same name, team-owned: not this person's home.
-        assert!(!is_persons_context("kb_teams", me, "temper-desktop", "temper-desktop", me));
+        assert!(!is_persons_context(
+            "kb_teams",
+            me,
+            "temper-desktop",
+            "temper-desktop",
+            me
+        ));
         // Same owner, different name: not the configured context.
-        assert!(!is_persons_context("kb_profiles", me, "other", "temper-desktop", me));
+        assert!(!is_persons_context(
+            "kb_profiles",
+            me,
+            "other",
+            "temper-desktop",
+            me
+        ));
         // Same name, someone else's profile: not this person's home either.
         assert!(!is_persons_context(
             "kb_profiles",

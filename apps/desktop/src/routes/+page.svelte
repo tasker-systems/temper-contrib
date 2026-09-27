@@ -163,11 +163,13 @@
 		}
 		try {
 			await invoke('temper_write_work_record', {
-				agentLabel: label,
-				agentCommand: command,
-				workingDir: dir,
-				openedAt: opened,
-				closedAt: new Date().toISOString(),
+				facts: {
+					agentLabel: label,
+					agentCommand: command,
+					workingDir: dir,
+					openedAt: opened,
+					closedAt: new Date().toISOString()
+				},
 				idempotencyKey: key
 			});
 		} catch (e) {
