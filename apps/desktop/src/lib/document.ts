@@ -29,6 +29,20 @@ export type PanelRead<T> =
 	| { state: 'unresolved'; reason: string }
 	| { state: 'failed'; message: string };
 
+// ─── Saving (src-tauri/src/document_save.rs) ───────────────────────────────────────────────────
+
+/** What a body save answers: the new hash, or the refusal that orients, or why nothing happened. */
+export type BodySaved =
+	| { state: 'saved'; bodyHash: string | null }
+	| {
+			state: 'refused';
+			current: DocOpened;
+			lastBodyChange: { actorName: string; occurredAt: string } | null;
+			changedSections: string[];
+	  }
+	| { state: 'unresolved'; reason: string }
+	| { state: 'failed'; message: string };
+
 export interface Connection {
 	edgeId: string;
 	direction: 'outgoing' | 'incoming' | string;
@@ -86,6 +100,33 @@ export interface Source {
 	sourceId: string;
 	uri: string | null;
 	carried: boolean;
+}
+
+/** One run of text inside a changed line; `emphasized` marks the words that actually differ. */
+export interface Segment {
+	emphasized: boolean;
+	text: string;
+}
+
+export interface DiffLine {
+	/** `equal`, `delete` or `insert`. */
+	tag: string;
+	segments: Segment[];
+}
+
+export type SectionState = 'unchanged' | 'changed' | 'added' | 'removed';
+
+export interface SectionChange {
+	/** The heading as it reads in the newer version; `null` for the text before the first heading. */
+	heading: string | null;
+	state: SectionState;
+	/** The lines, for a section that changed, was added, or was removed; unchanged collapses. */
+	lines: DiffLine[];
+	lineCount: number;
+}
+
+export interface SectionDiff {
+	sections: SectionChange[];
 }
 
 export interface BlockSources {
