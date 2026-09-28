@@ -32,7 +32,15 @@
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import { mergeProperties } from '$lib/properties';
-	import type { BodySaved, DocOpened, MetaSaved } from '$lib/document';
+	import { agentSession } from '$lib/agent/session.svelte';
+	import type { BodySaved, DocOpened, History, MetaSaved, PanelRead } from '$lib/document';
+	import {
+		handoffPrompt,
+		intentStated,
+		proposalFrom,
+		trailSince,
+		type Intent
+	} from '$lib/handoff';
 	import {
 		anchorExists,
 		capture,
@@ -74,6 +82,26 @@
 	let saving = $state(false);
 	let saveFailed = $state('');
 	let refusal = $state<Extract<BodySaved, { state: 'refused' }> | null>(null);
+
+	// ─── Intent handoff (slice 5) ───────────────────────────────────────────────────────────
+	//
+	// The refusal's intent field and its send. The material is composed at hand time from the
+	// state the refusal stands on; the trail is read then, once, and never re-read. The reply
+	// path is the conversation turn that follows the prompt (ruled, temper-artifacts#48): the
+	// turn's last ```proposal fence is the proposal, taken only when the person applies it.
+
+	/** The intent as the person has stated it so far, in the refusal's field. */
+	let intent = $state<Intent>({ freeText: '', oneClick: null });
+	/** The handoff's state: idle, the turn in flight (the transcript carries it), or the
+	 *  turn's outcome — a proposal awaiting the person's review, or the no-proposal verdict. */
+	let handoffState = $state<
+		| { phase: 'idle' }
+		| { phase: 'sent' }
+		| { phase: 'proposal'; proposal: string }
+		| { phase: 'none' }
+	>({ phase: 'idle' });
+	/** Why "Hand to agent" is unavailable, when it is. */
+	let handoffUnavailable = $state('');
 
 	/** The base the draft is measured against: the opened hash until a keep-on-newer re-bases it. */
 	let baseHash = $state('');
@@ -241,6 +269,9 @@
 		editing = false;
 		refusal = null;
 		saveFailed = '';
+		handoffState = { phase: 'idle' };
+		intent = { freeText: '', oneClick: null };
+		handoffUnavailable = '';
 	}
 
 	async function save(): Promise<void> {
@@ -360,10 +391,88 @@
 			localOpened = refusal.current;
 			seed = draft;
 			refusal = null;
+			handoffState = { phase: 'idle' };
 			// Stay in editing: the draft stands on the newer base.
 		} else {
 			stopEditing();
 		}
+	}
+
+	/**
+	 * Hands the disagreement to the agent: the trail is read once, the prompt composed from the
+	 * refusal's material and sent through the live conversation, and the turn that follows is
+	 * watched for the proposal. The turn ends in the transcript; the proposal is offered only
+	 * through the person's "Apply" — it is never the room's own write.
+	 */
+	async function handToAgent(): Promise<void> {
+		if (!refusal || refusal.current.state !== 'opened') return;
+		const session = agentSession;
+		if (!session.conversation) {
+			handoffUnavailable = 'no agent conversation is live — start one in the agent panel';
+			return;
+		}
+		if (!intentStated(intent)) {
+			handoffUnavailable = 'say what you want the agent to do first';
+			return;
+		}
+		handoffUnavailable = '';
+		// The trail since the base: read once at hand time, bounded by the same read the
+		// history tab uses, never kept beyond this send.
+		let trail = '';
+		try {
+			const answer = await invoke<PanelRead<History>>('doc_history', { id });
+			if (answer.state === 'present') {
+				trail = trailSince(answer.data, opened?.state === 'opened' ? opened.updated : '', 20)
+					.lines;
+			}
+		} catch {
+			// The trail is context, not the material: a failed read sends the prompt without it.
+		}
+		const prompt = handoffPrompt(intent, {
+			title: refusal.current.title,
+			base: baseMarkdown,
+			draft,
+			newer: refusal.current.markdown
+		}, trail);
+		try {
+			await session.sendHandoff(prompt);
+			handoffState = { phase: 'sent' };
+			// The turn is over (acp_prompt resolves when it ends): extract the proposal from
+			// the transcript lines the turn's reply occupies.
+			const start = session.handoffTurnStart();
+			const reply = start !== null ? session.messages.slice(start).filter((m) => m.role === 'assistant').map((m) => m.text).join('\n') : '';
+			const proposal = proposalFrom(reply);
+			session.handoff = null;
+			if (proposal === null) {
+				handoffState = { phase: 'none' };
+				return;
+			}
+			handoffState = { phase: 'proposal', proposal };
+		} catch {
+			handoffState = { phase: 'idle' };
+			// The session store carried the error; the person sees it in the panel.
+		}
+	}
+
+	/**
+	 * Applies the agent's proposal as the person's draft on the newer base — the return path's
+	 * one gesture. The draft is re-seeded (a capture-once seed, the same shape keepDraft uses),
+	 * and the person reviews and saves through compare-and-save. The proposal never enters the
+	 * document by itself.
+	 */
+	function applyProposal(): void {
+		if (handoffState.phase !== 'proposal' || !refusal || refusal.current.state !== 'opened') {
+			return;
+		}
+		baseHash = refusal.current.bodyHash;
+		baseMarkdown = refusal.current.markdown;
+		localOpened = refusal.current;
+		draft = handoffState.proposal;
+		seed = handoffState.proposal;
+		refusal = null;
+		handoffState = { phase: 'idle' };
+		intent = { freeText: '', oneClick: null };
+		// Stay in editing: the proposal is the draft now, on the newer base, unsaved.
 	}
 </script>
 
@@ -400,8 +509,19 @@
 		</div>
 		{#if refusal}
 			<!-- The refusal takes the editor's place while it stands: the person reads it, then
-			     chooses. The draft is kept either way until Take newer or a landed save closes it. -->
-			<SaveRefusal refused={refusal} ontakeNewer={takeNewer} onkeepDraft={keepDraft} />
+			     chooses. The draft is kept either way until Take newer or a landed save closes it.
+			     Slice 5: the intent field and the hand to the agent ride in the same view. -->
+			<SaveRefusal
+				refused={refusal}
+				ontakeNewer={takeNewer}
+				onkeepDraft={keepDraft}
+				bind:intent
+				handoffState={handoffState.phase}
+				{handoffUnavailable}
+				agentLive={agentSession.conversation !== null}
+				onhandToAgent={handToAgent}
+				onapplyProposal={applyProposal}
+			/>
 		{:else if editing}
 			<!-- The seed is the draft when one stands (a refusal unmounted the editor; keeping
 			     the draft remounts it with the person's text), else the document as opened. -->

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen } from '@tauri-apps/api/event';
 import { untrack } from 'svelte';
 import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 import {
@@ -95,9 +95,15 @@ class AgentSession {
 	scopeShared = $state<boolean>(false);
 	/** The scope last started with on this device — Start offers it first. A device fact. */
 	lastScope = $state<SessionScope | null>(null);
-
-	private unlisten: UnlistenFn | null = null;
-	private unlistenAsk: UnlistenFn | null = null;
+	/**
+	 * The handoff in flight (slice 5): the conversation id the handoff prompt went to, and the
+	 * turn that will carry the agent's proposal. Null when nothing is handed over.
+	 */
+	handoff = $state<{ conversationId: string; turn: number } | null>(null);
+	/** The listeners' unarms, assigned when they arm; never called — the store outlives every
+	 *  surface it decorates, and closing the conversation ends the conversation itself. */
+	private unlisten: (() => void) | null = null;
+	private unlistenAsk: (() => void) | null = null;
 	private initialised = false;
 
 	init(): void {
@@ -313,6 +319,44 @@ class AgentSession {
 		} finally {
 			this.prompting = false;
 		}
+	}
+
+	/**
+	 * Sends the document room's handoff prompt (slice 5) and returns when the turn ends. The
+	 * prompt is composed by the caller (the room, from the refusal's material); the store sends
+	 * it as this person's words in the transcript, records the handoff so the caller can extract
+	 * the proposal from this turn's reply, and offers no resource references — the material is
+	 * fenced text inside the prompt itself, never a `temper:` URI the agent would resolve.
+	 */
+	async sendHandoff(text: string): Promise<void> {
+		if (!this.conversation) throw new Error('no agent conversation is live');
+		if (this.prompting) throw new Error('the agent is already responding');
+		const turn = this.messages.length + 1;
+		this.messages.push({ role: 'user', text, with: 'the document handoff' });
+		this.prompting = true;
+		this.error = '';
+		this.handoff = { conversationId: this.conversation.conversationId, turn };
+		try {
+			await invoke<string>('acp_prompt', {
+				conversationId: this.conversation.conversationId,
+				text,
+				references: []
+			});
+		} catch (e) {
+			this.error = String(e);
+			this.handoff = null;
+			throw e;
+		} finally {
+			this.prompting = false;
+		}
+	}
+
+	/**
+	 * The index of the transcript line the handoff turn's reply starts at: every assistant
+	 * chunk after it belongs to the turn the caller watches.
+	 */
+	handoffTurnStart(): number | null {
+		return this.handoff?.turn ?? null;
 	}
 
 	async answer(ask: AskedNotice, option: DeclaredOption): Promise<void> {
