@@ -14,7 +14,19 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
+    // WKWebView driver. Behind the `webdriver` feature — the witness builds with it, so
+    // development and release builds never compile an endpoint — and only when the witness (or
+    // WebdriverIO) names a port: an ordinary run starts no endpoint.
+    #[cfg(feature = "webdriver")]
+    let builder = if std::env::var_os("TAURI_WEBDRIVER_PORT").is_some() {
+        tauri::Builder::default().plugin(tauri_plugin_wdio_webdriver::init())
+    } else {
+        tauri::Builder::default()
+    };
+    #[cfg(not(feature = "webdriver"))]
+    let builder = tauri::Builder::default();
+    builder
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             app.manage(settings::SettingsState::load(dir.clone()));

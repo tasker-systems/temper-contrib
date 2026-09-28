@@ -3,6 +3,7 @@
 // records every command, so each witness can say exactly which reads the room issued, and when.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 
+import { EditorView } from '@codemirror/view';
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -339,5 +340,231 @@ describe('the document room', () => {
 		expect(link?.getAttribute('href')).toBe(`/r/the-peer-${PEER}`);
 		expect(container.textContent).toContain('← relates_to');
 		expect(container.textContent).toContain('blob · b0000000');
+	});
+});
+
+describe("the document room's save path", () => {
+	beforeEach(() => {
+		calls = [];
+		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
+		answering(DEFAULTS);
+	});
+
+	/** Open the room, enter editing, and reach the editor through its shadow root. */
+	async function editing(container: HTMLElement) {
+		await opened(container);
+		await fireEvent.click(button(container, 'Edit'));
+		const host = container.querySelector('.editor') as HTMLElement & {
+			shadowRoot: ShadowRoot;
+		};
+		expect(host).not.toBeNull();
+		await waitFor(() => expect(host.shadowRoot.querySelector('.cm-content')).not.toBeNull());
+		return { host };
+	}
+
+	/** What a save was sent with, as the answering wrapper recorded it. */
+	function saveArgs(): Record<string, unknown> | undefined {
+		return calls.find((c) => c.cmd === 'doc_save_body')?.args;
+	}
+
+	/** Every save's args, in the order they were sent. */
+	function saveCalls(): Record<string, unknown>[] {
+		return calls.filter((c) => c.cmd === 'doc_save_body').map((c) => c.args ?? {}) as Record<
+			string,
+			unknown
+		>[];
+	}
+
+	/** One byte into the draft, through the view CodeMirror itself resolves from the DOM. */
+	async function typeInto(host: HTMLElement & { shadowRoot: ShadowRoot }, insert: string) {
+		const content = host.shadowRoot.querySelector('.cm-content') as HTMLElement;
+		const view = EditorView.findFromDOM(content);
+		if (!view) throw new Error('the editor view did not resolve from the DOM');
+		view.dispatch({ changes: { from: view.state.doc.length, insert } });
+		await waitFor(() => {
+			expect(button(host.closest('.page') as HTMLElement, 'Save').disabled).toBe(false);
+		});
+		return view;
+	}
+
+	it('a dirty draft saves against the opened base and lands: the base moves, the room re-reads (W2)', async () => {
+		const freshOpen: Extract<DocOpened, { state: 'opened' }> = {
+			...OPENED,
+			markdown: '# Scope\n\nThe room, read-only.edited',
+			bodyHash: 'h2'
+		};
+		let opens = 0;
+		answering({
+			...DEFAULTS,
+			doc_open: async () => (opens++ === 0 ? OPENED : freshOpen),
+			doc_save_body: async () => ({ state: 'saved', bodyHash: 'h2' })
+		});
+		const { container } = openRoom();
+		const { host } = await editing(container);
+
+		// Save is disabled while the draft is clean: a byte-identical save is never invited.
+		expect(button(container, 'Save').disabled).toBe(true);
+		await typeInto(host, 'edited');
+		expect(button(container, 'Save').disabled).toBe(false);
+
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(saveArgs()).toBeDefined());
+		expect(saveArgs()?.id).toBe(ID);
+		expect(saveArgs()?.baseHash).toBe(OPENED.bodyHash);
+		expect(saveArgs()?.baseMarkdown).toBe(OPENED.markdown);
+		expect(saveArgs()?.content).toBe(`${OPENED.markdown}edited`);
+
+		// The save landed: the room re-reads, and the fresh answer is what it now renders.
+		await waitFor(() => expect(container.textContent).toContain('read-only.edited'));
+		// Editing closed: the properties strip is back, the editor is gone.
+		expect(container.querySelector('.editor')).toBeNull();
+		expect(button(container, 'Edit')).toBeDefined();
+	});
+
+	it('a byte-identical draft is never invited to save (W10, client half)', async () => {
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		const { host } = await editing(container);
+		await waitFor(() => expect(button(container, 'Save').disabled).toBe(true));
+		// Even after an edit and an undo back to the base text, nothing is sent.
+		const content = host.shadowRoot.querySelector('.cm-content') as HTMLElement;
+		const view = EditorView.findFromDOM(content);
+		if (!view) throw new Error('the editor view did not resolve from the DOM');
+		view.dispatch({ changes: { from: view.state.doc.length, insert: 'x' } });
+		await waitFor(() => expect(button(container, 'Save').disabled).toBe(false));
+		view.dispatch({
+			changes: { from: view.state.doc.length - 1, to: view.state.doc.length, insert: '' }
+		});
+		await waitFor(() => expect(button(container, 'Save').disabled).toBe(true));
+		expect(calls.filter((c) => c.cmd === 'doc_save_body')).toHaveLength(0);
+	});
+
+	it('a save against a moved base lands nothing and orients: who, when, which sections (W-refusal)', async () => {
+		const newer: Extract<DocOpened, { state: 'opened' }> = {
+			...OPENED,
+			markdown: '# Scope\n\nSomeone else changed this.',
+			bodyHash: 'newer'
+		};
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => ({
+				state: 'refused',
+				current: newer,
+				lastBodyChange: { actorName: 'someone-else', occurredAt: '2026-09-28T00:00:00+00:00' },
+				changedSections: ['# Scope']
+			})
+		});
+		const { container } = openRoom();
+		const { host } = await editing(container);
+		await typeInto(host, 'my edit');
+		await fireEvent.click(button(container, 'Save'));
+
+		// The refusal orients: nothing was saved, who changed it, and which sections differ.
+		await waitFor(() => expect(container.textContent).toContain('changed since you opened it'));
+		expect(container.textContent).toContain('someone-else');
+		expect(container.textContent).toContain('# Scope');
+		// The room still renders the base: nothing landed. The renderer's sanitizer loads on the
+		// client, so the article can trail the refusal by a tick.
+		await waitFor(() =>
+			expect(container.querySelector('.md-body')?.textContent).toContain('The room, read-only.')
+		);
+		// The refusal took the editor's place while it stands; the draft lives in the room.
+		expect(container.textContent).toContain('Keep my draft on the newer base');
+	});
+
+	it('take newer discards the draft and shows the newer version', async () => {
+		const newer: Extract<DocOpened, { state: 'opened' }> = {
+			...OPENED,
+			markdown: '# Scope\n\nSomeone else changed this.',
+			bodyHash: 'newer'
+		};
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => ({
+				state: 'refused',
+				current: newer,
+				lastBodyChange: null,
+				changedSections: ['# Scope']
+			})
+		});
+		const { container } = openRoom();
+		const { host } = await editing(container);
+		await typeInto(host, 'my edit');
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(container.textContent).toContain('changed since you opened it'));
+		await fireEvent.click(button(container, 'Take newer'));
+		await waitFor(() => expect(container.textContent).toContain('Someone else changed this.'));
+		expect(container.querySelector('.editor')).toBeNull();
+	});
+
+	it('keeping the draft re-bases it on the newer hash: the next save compares against it', async () => {
+		const newer: Extract<DocOpened, { state: 'opened' }> = {
+			...OPENED,
+			markdown: '# Scope\n\nSomeone else changed this.',
+			bodyHash: 'newer'
+		};
+		let saves = 0;
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => {
+				saves++;
+				if (saves === 1) {
+					return {
+						state: 'refused',
+						current: newer,
+						lastBodyChange: null,
+						changedSections: ['# Scope']
+					};
+				}
+				return { state: 'saved', bodyHash: 'final' };
+			}
+		});
+		const { container } = openRoom();
+		const { host } = await editing(container);
+		await typeInto(host, 'my edit');
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(container.textContent).toContain('changed since you opened it'));
+		await fireEvent.click(button(container, 'Keep my draft on the newer base'));
+		// The editor is back (remounted with the draft as its seed), the refusal is gone.
+		const host2 = await waitFor(() => {
+			const h = container.querySelector('.editor') as HTMLElement & { shadowRoot: ShadowRoot };
+			expect(h?.shadowRoot?.querySelector('.cm-content')).not.toBeNull();
+			return h;
+		});
+		expect(container.textContent).not.toContain('changed since you opened it');
+		// The remounted editor seeds with the person's draft, not the newer base.
+		const content = host2.shadowRoot.querySelector('.cm-content') as HTMLElement;
+		const view = EditorView.findFromDOM(content);
+		if (!view) throw new Error('the editor view did not resolve from the DOM');
+		expect(view.state.doc.toString()).toBe(`${OPENED.markdown}my edit`);
+		// The next save goes out against the newer base, not the opened one.
+		view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(saveCalls().length).toBe(2));
+		expect(saveCalls()[1].baseHash).toBe('newer');
+	});
+
+	it('a dirty draft holds the tab: beforeLeave answers, and a saved draft releases it (W-draft-guard)', async () => {
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => ({ state: 'saved', bodyHash: 'h2' })
+		});
+		const { container, step } = openRoom();
+		const { host } = await editing(container);
+		await typeInto(host, 'my edit');
+
+		// The tab's guard is set: opening another subject here is asked. The room's guard lives on
+		// the tab; the model consults it before any move. Drive the shell's own open: the guard
+		// must refuse until the draft is saved, and the step must not move.
+		tabs.open({ kind: 'resource', id: PEER }, { where: 'here' });
+		expect(step().subject.kind).toBe('resource');
+		expect(tabs.notice).toContain('unsaved draft');
+
+		// A landed save releases the guard: save, then the same open is allowed through.
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(container.querySelector('.editor')).toBeNull());
+		tabs.open({ kind: 'resource', id: PEER }, { where: 'here' });
+		const subject = step().subject;
+		expect(subject.kind === 'resource' && subject.id).toBe(PEER);
 	});
 });
