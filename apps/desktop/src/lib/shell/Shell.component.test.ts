@@ -691,4 +691,31 @@ describe('the shell', () => {
 		await agentSession.send();
 		expect(reads('acp_prompt')[0].args?.reference).toBeNull();
 	});
+
+	it('a prevented close asks, and the confirm clears the draft and closes (W-close-guard)', async () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+		render(Shell);
+		await vi.waitFor(() => expect(handlers['doc-close-requested']).toBeDefined());
+
+		// The core prevented a close over a dirty draft and announced it: the person is asked.
+		handlers['doc-close-requested']({ payload: null });
+		await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
+		expect(confirm.mock.calls[0][0]).toContain('unsaved draft');
+
+		// The confirm clears the core's flag and closes past the guard.
+		await vi.waitFor(() => expect(reads('doc_close_confirmed')).toHaveLength(1));
+		confirm.mockRestore();
+	});
+
+	it('a close the person declines never clears the draft', async () => {
+		const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+		render(Shell);
+		await vi.waitFor(() => expect(handlers['doc-close-requested']).toBeDefined());
+
+		handlers['doc-close-requested']({ payload: null });
+		await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
+		// Nothing was sent to the core: the draft stands, and so does the dirty flag.
+		expect(reads('doc_close_confirmed')).toHaveLength(0);
+		confirm.mockRestore();
+	});
 });

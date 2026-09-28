@@ -17,10 +17,16 @@
 	 * dirty the room holds the tab — beforeLeave answers with the draft's sentence — and the
 	 * save's outcome replaces the base in place: the room re-renders from the saved answer, and
 	 * any open panel tab refreshes against the same resource on its next read.
+	 *
+	 * Metadata (slice 3b): the properties strip offers its edit controls and saves through
+	 * `doc_save_meta` — a separate channel from the body's. The patch carries only what the
+	 * person changed (title, changed descriptions, removed keys as nulls), never the body, so
+	 * neither save can overwrite the other. A landed metadata save re-reads in place, and the
+	 * open panel tabs refresh against the same resource.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import { mergeProperties } from '$lib/properties';
-	import type { BodySaved, DocOpened } from '$lib/document';
+	import type { BodySaved, DocOpened, MetaSaved } from '$lib/document';
 	import type { TabHandle } from '$lib/shell/lenses';
 	import { ageWords } from '$lib/temper-views.svelte';
 	import AboutPanel from './AboutPanel.svelte';
@@ -64,13 +70,25 @@
 	let seed = $state('');
 	const dirty = $derived(doc !== null && editing && draft !== doc.markdown);
 
-	// The draft guard: while a draft is dirty the tab is asked before it leaves its step.
+	// The draft guard: while a draft is dirty the tab is asked before it leaves its step, and
+	// the core is told — a window close is prevented by the core and announced back
+	// (doc-close-requested), so the draft asks before it is lost.
 	$effect(() => {
 		if (!tab || !dirty) return;
 		const release = tab.beforeLeave(() =>
 			'This document has an unsaved draft — leave anyway? The draft is kept until you close the tab.'
 		);
 		return release;
+	});
+
+	// The room knows its drafts; the core only answers whether one stands. Reported on
+	// transitions only — the core's flag starts false, so a mount and a clean room are
+	// never reports, and a landed save's return to false clears it.
+	let reportedDirty = $state(false);
+	$effect(() => {
+		if (dirty === reportedDirty) return;
+		reportedDirty = dirty;
+		invoke('doc_draft_state', { dirty }).catch(() => {});
 	});
 
 	function startEdit(): void {
@@ -141,6 +159,52 @@
 	let localOpened = $state<DocOpened | null>(null);
 	const shown = $derived(localOpened ?? opened);
 
+	/**
+	 * The metadata patch, built at save time from the strip's edit state: changed
+	 * descriptions carry values, removed keys carry null (the API deletes an open_meta key
+	 * on an explicit null), untouched keys are absent. Title is not the strip's.
+	 */
+	function buildMetaPatch(
+		before: Record<string, unknown> | null,
+		changed: Record<string, unknown>,
+		removing: string[]
+	): { openMeta: Record<string, unknown> } {
+		const patch: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(changed)) patch[key] = value;
+		for (const key of removing) patch[key] = null;
+		return { openMeta: patch };
+	}
+
+	/** Save the strip's changed open-tier keys through the metadata channel, then re-read. */
+	async function saveMeta(
+		changed: Record<string, unknown>,
+		removing: string[]
+	): Promise<void> {
+		if (!doc || saving) return;
+		saving = true;
+		saveFailed = '';
+		try {
+			const fresh = buildMetaPatch(doc.openMeta, changed, removing);
+			const answer = await invoke<MetaSaved>('doc_save_meta', {
+				id,
+				patch: { openMeta: fresh.openMeta }
+			});
+			saving = false;
+			if (answer.state === 'saved') {
+				await refresh();
+			} else if (answer.state === 'refused') {
+				saveFailed = answer.reason;
+			} else if (answer.state === 'unresolved') {
+				saveFailed = `temper has nothing it would save here — ${answer.reason}`;
+			} else {
+				saveFailed = answer.message;
+			}
+		} catch (err) {
+			saving = false;
+			saveFailed = String(err);
+		}
+	}
+
 	function takeNewer(): void {
 		if (refusal && refusal.current.state === 'opened') {
 			localOpened = refusal.current;
@@ -207,7 +271,11 @@
 				{#if saveFailed}<span class="failed">{saveFailed}</span>{/if}
 			</div>
 		{:else}
-			<PropertySet rows={mergeProperties(d.managedMeta, d.openMeta, d.docType)} />
+			<PropertySet
+				rows={mergeProperties(d.managedMeta, d.openMeta, d.docType)}
+				mayDescribe
+				onsave={saveMeta}
+			/>
 		{/if}
 	{:else if shown?.state === 'unresolved'}
 		<RegionState

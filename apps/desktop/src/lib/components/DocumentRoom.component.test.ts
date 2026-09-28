@@ -375,6 +375,14 @@ describe("the document room's save path", () => {
 		>[];
 	}
 
+	/** Every metadata save's args, in the order they were sent. */
+	function metaCalls(): Record<string, unknown>[] {
+		return calls.filter((c) => c.cmd === 'doc_save_meta').map((c) => c.args ?? {}) as Record<
+			string,
+			unknown
+		>[];
+	}
+
 	/** One byte into the draft, through the view CodeMirror itself resolves from the DOM. */
 	async function typeInto(host: HTMLElement & { shadowRoot: ShadowRoot }, insert: string) {
 		const content = host.shadowRoot.querySelector('.cm-content') as HTMLElement;
@@ -566,5 +574,79 @@ describe("the document room's save path", () => {
 		tabs.open({ kind: 'resource', id: PEER }, { where: 'here' });
 		const subject = step().subject;
 		expect(subject.kind === 'resource' && subject.id).toBe(PEER);
+	});
+
+	it('reports draft state to the core: dirty while editing, cleared when the draft closes (W-close-guard)', async () => {
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => ({ state: 'saved', bodyHash: 'h2' })
+		});
+		const { container } = openRoom();
+		const { host } = await editing(container);
+		await typeInto(host, 'my edit');
+
+		// The core now knows a draft stands: its close guard will ask.
+		await waitFor(() =>
+			expect(
+				calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty
+			).toBe(true)
+		);
+
+		// A landed save closes the draft; the report clears.
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() =>
+			expect(
+				calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty
+			).toBe(false)
+		);
+	});
+
+	it('metadata editing is its own channel: only the changed open keys go out, and the body save never carries them (W8)', async () => {
+		answering({
+			...DEFAULTS,
+			doc_save_meta: async () => ({ state: 'saved' }),
+			// The opened document gains a scalar description to revise: `tags` is a list,
+			// deliberately offered no control ("not editable here").
+			doc_open: async () => ({
+				...OPENED,
+				openMeta: { tags: ['desktop', 'documents'], priority: 2 }
+			})
+		});
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() => expect(container.querySelector('.props')).not.toBeNull());
+
+		// Revise one description, through the strip's control.
+		const priorityInput = [...container.querySelectorAll('.props input')].find(
+			(i) => i.getAttribute('aria-label') === 'priority'
+		) as HTMLInputElement;
+		expect(priorityInput).toBeDefined();
+		expect(priorityInput.value).toBe('2');
+		await fireEvent.input(priorityInput, { target: { value: '3' } });
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(metaCalls()).toHaveLength(1));
+		const sent = metaCalls()[0];
+		expect(sent.id).toBe(ID);
+		// Only the changed key, and its type survives: a number in, a number out — never "3".
+		expect(sent.patch).toEqual({ openMeta: { priority: 3 } });
+		// The body save was never asked for: the channels stayed separate.
+		expect(calls.filter((c) => c.cmd === 'doc_save_body')).toHaveLength(0);
+		// A landed metadata save re-reads the document in place.
+		await waitFor(() => expect(calls.filter((c) => c.cmd === 'doc_open')).toHaveLength(2));
+	});
+
+	it('a description holding a list is offered no control, and the strip says so (W8-structured)', async () => {
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() => expect(container.querySelector('.props')).not.toBeNull());
+
+		// `tags` holds an array: no input, no remove, and the exclusion is said out loud.
+		expect(
+			[...container.querySelectorAll('.props input')].some(
+				(i) => i.getAttribute('aria-label') === 'tags'
+			)
+		).toBe(false);
+		expect(container.textContent).toContain('not editable here');
 	});
 });
