@@ -388,6 +388,71 @@ async fn list_page(
     })
 }
 
+/// How many of a context's regions a shape read answers with: the most salient
+/// first, and `population` says how many there are.
+pub const SHAPE_REGIONS_MAX: usize = 8;
+
+/// One region, as home's Explore shows it: temper's label when a region has one
+/// (none is invented), and how many members this person can read.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegionView {
+    pub label: Option<String>,
+    pub members: i32,
+}
+
+/// A context's shape, bounded: its most salient regions, how many it has in all
+/// that this person can see, and — when there are none — why, in temper's words
+/// (`never_clustered`, `nothing_visible`, `lens_narrowed`, `unreadable_or_absent`).
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextShapeView {
+    pub regions: Vec<RegionView>,
+    pub population: i32,
+    pub emptiness: Option<String>,
+    /// RFC 3339; absent when never clustered, or not readable.
+    pub materialized_at: Option<String>,
+}
+
+/// Projects a shape read to what Explore shows: salience order kept, bounded.
+pub fn shape_view(shape: temper_core::types::cognitive_maps::AnchorShape) -> ContextShapeView {
+    ContextShapeView {
+        regions: shape
+            .regions
+            .into_iter()
+            .take(SHAPE_REGIONS_MAX)
+            .map(|r| RegionView {
+                label: r.label.filter(|l| !l.trim().is_empty()),
+                members: r.member_count,
+            })
+            .collect(),
+        population: shape.population,
+        emptiness: shape.emptiness.and_then(|e| {
+            serde_json::to_value(e)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_string))
+        }),
+        materialized_at: shape.materialized_at.map(|t| t.to_rfc3339()),
+    }
+}
+
+/// A context's materialized regions, most salient first and bounded — the
+/// orientation home's Explore gives without folders.
+#[tauri::command]
+pub async fn temper_context_shape(
+    state: tauri::State<'_, TemperState>,
+    context_id: String,
+) -> Result<ContextShapeView, String> {
+    let id = uuid::Uuid::parse_str(context_id.trim())
+        .map_err(|_| format!("{context_id} is not a context id"))?;
+    let shape = temper_client(&state)?
+        .contexts()
+        .shape(id, None)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(shape_view(shape))
+}
+
 /// Resolves references for display: title, doc type and home, read from temper. The webview
 /// never shows a title an author typed as if it were the resource's own.
 #[tauri::command]
@@ -408,7 +473,9 @@ pub async fn temper_resolve_refs(
 
 #[cfg(test)]
 mod tests {
-    use super::{list_params, parse_ref, ResourceFilter, LIST_PAGE_MAX};
+    use super::{
+        list_params, parse_ref, shape_view, ResourceFilter, LIST_PAGE_MAX, SHAPE_REGIONS_MAX,
+    };
     use temper_workflow::types::resource::{ResourceSortField, SortOrder};
 
     #[test]
@@ -442,6 +509,57 @@ mod tests {
         let params = list_params(&filter, 1, 0);
         assert_eq!(params.owner.as_deref(), Some("@me"));
         assert_eq!(params.doc_type_name.as_deref(), Some("session"));
+    }
+
+    fn region(
+        label: Option<&str>,
+        members: i32,
+    ) -> temper_core::types::cognitive_maps::CogmapRegionRow {
+        serde_json::from_value(serde_json::json!({
+            "region_id": uuid::Uuid::new_v4(),
+            "lens_id": uuid::Uuid::new_v4(),
+            "salience": 0.5,
+            "content_cohesion": null,
+            "label": label,
+            "member_count": members,
+        }))
+        .expect("a region row")
+    }
+
+    /// A shape is bounded, keeps its salience order, and says how many regions
+    /// there are in all; an empty label is no label.
+    #[test]
+    fn a_shape_is_bounded_and_keeps_its_order() {
+        use temper_core::types::cognitive_maps::AnchorShape;
+        let mut regions: Vec<_> = (0..12)
+            .map(|i| region(Some(&format!("region {i}")), 10 - i))
+            .collect();
+        regions[1] = region(Some("  "), 9);
+        let view = shape_view(AnchorShape {
+            regions,
+            population: 12,
+            emptiness: None,
+            materialized_at: None,
+        });
+        assert_eq!(view.regions.len(), SHAPE_REGIONS_MAX);
+        assert_eq!(view.population, 12);
+        assert_eq!(view.regions[0].label.as_deref(), Some("region 0"));
+        assert_eq!(view.regions[1].label, None, "a blank label is no label");
+        assert_eq!(view.emptiness, None);
+    }
+
+    /// An empty shape says why, in temper's own words.
+    #[test]
+    fn an_empty_shape_says_why() {
+        use temper_core::types::cognitive_maps::{AnchorShape, ShapeEmptiness};
+        let view = shape_view(AnchorShape {
+            regions: vec![],
+            population: 0,
+            emptiness: Some(ShapeEmptiness::NeverClustered),
+            materialized_at: None,
+        });
+        assert_eq!(view.emptiness.as_deref(), Some("never_clustered"));
+        assert!(view.regions.is_empty());
     }
 
     #[test]
@@ -588,6 +706,22 @@ mod tests {
             );
         }
         let _ = teams; // presence of the teams read is the assertion: it answered
+
+        // A visible context's shape answers, bounded, and an empty one says why.
+        if let Some(context) = contexts.first() {
+            let view = shape_view(
+                client
+                    .contexts()
+                    .shape(context.id.0, None)
+                    .await
+                    .expect("context shape"),
+            );
+            assert!(view.regions.len() <= SHAPE_REGIONS_MAX);
+            assert!(view.population as usize >= view.regions.len());
+            if view.regions.is_empty() {
+                assert!(view.emptiness.is_some(), "an empty shape says why");
+            }
+        }
     }
 
     /// Witness for the temperkb-client integration: builds the client the way
