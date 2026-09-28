@@ -166,8 +166,9 @@ def main() -> int:
         driver.execute_script(
             "localStorage.removeItem('temper-shell-tabs-v1');"
             " localStorage.removeItem('temper-ways-in-v1');"
-            f" localStorage.removeItem('{STORE_KEY}'); location.reload();"
+            f" localStorage.removeItem('{STORE_KEY}'); return true;"
         )
+        driver.execute_script("location.reload();")
         WebDriverWait(driver, 20).until(
             lambda d: (
                 d.execute_script("return document.readyState") == "complete"
