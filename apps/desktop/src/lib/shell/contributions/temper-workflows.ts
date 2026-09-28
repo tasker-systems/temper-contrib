@@ -27,8 +27,8 @@ export const temperWorkflows: Contribution = {
 			pinned: { home: 25 },
 			group: 'Awaiting you',
 			build: {
-				state: 'unbuilt',
-				landsWith: "home's Awaiting-you slice — what changed recently in the contexts you work in"
+				state: 'built',
+				component: () => import('../lenses/home/RecentlyUpdatedSection.svelte')
 			}
 		}
 	],
