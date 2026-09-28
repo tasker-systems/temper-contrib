@@ -17,10 +17,7 @@ export const temperWorkflows: Contribution = {
 			accepts: { kinds: ['place'], places: ['home'] },
 			pinned: { home: 15 },
 			group: 'Resume',
-			build: {
-				state: 'unbuilt',
-				landsWith: "home's Resume slice — the next steps from the latest session you recorded"
-			}
+			build: { state: 'built', component: () => import('../lenses/home/HandoffSection.svelte') }
 		},
 		{
 			id: 'temper-workflows/home-recent',
