@@ -23,10 +23,24 @@
 	 * person changed (title, changed descriptions, removed keys as nulls), never the body, so
 	 * neither save can overwrite the other. A landed metadata save re-reads in place, and the
 	 * open panel tabs refresh against the same resource.
+	 *
+	 * Return (slice 4): where the person was in the body is a device fact, kept beside the other
+	 * device stores and never in temper (ruling Q2). Opening restores the saved position when
+	 * this device holds one and the heading it names still exists — the anchor plus the fraction
+	 * through its section. A heading the saved position names that the body no longer holds is
+	 * said, and the room starts at the top: the sentence is a verdict, not an alarm.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import { mergeProperties } from '$lib/properties';
 	import type { BodySaved, DocOpened, MetaSaved } from '$lib/document';
+	import {
+		anchorExists,
+		capture,
+		headingOccurrences,
+		readPosition,
+		restoreTop,
+		savePosition
+	} from '$lib/scroll-position';
 	import type { TabHandle } from '$lib/shell/lenses';
 	import { ageWords } from '$lib/temper-views.svelte';
 	import AboutPanel from './AboutPanel.svelte';
@@ -89,6 +103,127 @@
 		if (dirty === reportedDirty) return;
 		reportedDirty = dirty;
 		invoke('doc_draft_state', { dirty }).catch(() => {});
+	});
+
+	// ─── Return (slice 4): the device-local position ────────────────────────────────────────
+	//
+	// The scroll box is the body's own scroll container — the tab's `.tab-body` in the shell,
+	// the room's nearest scrollable ancestor in a test. Found once, read on mount and scroll.
+
+	/** The rendered body, for heading reads. */
+	let bodyEl: HTMLElement | null = $state(null);
+
+	/** What the restore did, for the room to say: the saved position applied, or why not. */
+	let positionNote = $state<string | null>(null);
+	/** The restored position's anchor, until the person scrolls away from it — then cleared. */
+	let positionAnchor = $state<string | null>(null);
+
+	function scrollBox(): HTMLElement | null {
+		if (!bodyEl) return null;
+		let node: HTMLElement | null = bodyEl;
+		while (node && node !== document.body) {
+			if (node.scrollHeight > node.clientHeight + 1) return node;
+			node = node.parentElement;
+		}
+		return null;
+	}
+
+	/** The headings the body renders, in the scroll box's own coordinates. */
+	function headingsOf(box: HTMLElement): ReturnType<typeof headingOccurrences> {
+		const body = bodyEl as HTMLElement | null;
+		return headingOccurrences(body ?? document.createElement('div'), box);
+	}
+
+	function deviceStore(): Storage | null {
+		try {
+			return typeof localStorage === 'undefined' ? null : localStorage;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Saves where the body is now, once this device's store answers. */
+	function recordPosition(box: HTMLElement): void {
+		const saved = capture(headingsOf(box), box.scrollTop, box.scrollHeight);
+		savePosition(deviceStore(), id, saved);
+		if (saved.heading === positionAnchor) positionNote = null;
+	}
+
+	// Restore: the saved position, applied when the heading it names still exists; said when it
+	// does not. The verdict is decided reactively — `anchorExists` reads the markdown source,
+	// the one input that changes when the document's headings change — so a heading the saved
+	// position names that the body no longer holds is said whatever the rendered state. The
+	// scroll itself waits for the laid-out body: the sanitizer fills the article
+	// asynchronously, so the seek is retried a bounded number of frames until the headings
+	// render, and gives up honestly if they never do.
+	$effect(() => {
+		if (shown?.state !== 'opened') return;
+		const markdown = shown.markdown;
+		const saved = readPosition(deviceStore(), id);
+		if (!saved || saved.heading === null) return;
+		if (!anchorExists(saved.heading, markdown)) {
+			positionNote = saved.heading;
+			positionAnchor = null;
+			return;
+		}
+		positionNote = null;
+		positionAnchor = saved.heading;
+		// The scroll: retried until the body's headings are laid out (the sanitizer fills the
+		// body asynchronously), bounded — a document that renders no headings cannot be sought.
+		const anchor = saved.heading;
+		let frames = 0;
+		let cancelled = false;
+		const seek = () => {
+			if (cancelled) return;
+			const body = bodyEl;
+			const box = body ? scrollBox() : null;
+			if (body && box) {
+				const headings = headingOccurrences(body, box);
+				if (headings.length > 0) {
+					const top = restoreTop(
+						anchor,
+						saved.fraction,
+						headings,
+						box.scrollHeight,
+						box.clientHeight
+					);
+					if (top !== null) box.scrollTop = top;
+					return;
+				}
+			}
+			if (frames++ < 30) requestAnimationFrame(seek);
+		};
+		requestAnimationFrame(seek);
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	// Capture while the person reads, throttled to at most one record per second of stillness.
+	let captureTimer: ReturnType<typeof setTimeout> | null = null;
+	function onBodyScroll(): void {
+		const box = scrollBox();
+		if (!box || !bodyEl) return;
+		if (captureTimer !== null) clearTimeout(captureTimer);
+		captureTimer = setTimeout(() => {
+			captureTimer = null;
+			recordPosition(box);
+		}, 1000);
+	}
+
+	$effect(() => {
+		if (shown?.state !== 'opened') return;
+		const box = scrollBox();
+		if (!box) return;
+		box.addEventListener('scroll', onBodyScroll, { passive: true });
+		return () => {
+			box.removeEventListener('scroll', onBodyScroll);
+			if (captureTimer !== null) {
+				clearTimeout(captureTimer);
+				captureTimer = null;
+				recordPosition(box);
+			}
+		};
 	});
 
 	function startEdit(): void {
@@ -299,7 +434,13 @@
 	{/if}
 
 	{#if shown?.state === 'opened'}
-		<article class="body">
+		{#if positionNote}
+			<p class="t-strip position-note" role="note">
+				This device held a position at {positionNote} — that heading is no longer in this
+				document, so the room starts at the top.
+			</p>
+		{/if}
+		<article class="body" bind:this={bodyEl}>
 			<MarkdownRenderer markdown={shown.markdown} />
 		</article>
 	{/if}
@@ -352,5 +493,9 @@
 	}
 	.body {
 		padding-top: 0.6rem;
+	}
+	.position-note {
+		margin: 0;
+		color: var(--tp-text-subtle);
 	}
 </style>

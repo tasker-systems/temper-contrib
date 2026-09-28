@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connections, DocOpened, History, PanelRead, Related, Sources } from '$lib/document';
+import { SCROLL_STORE_KEY } from '$lib/scroll-position';
 import StepHost from '$lib/shell/StepHost.svelte';
 import { HOME_TAB, tabs } from '$lib/shell/tabs.svelte';
 
@@ -719,5 +720,74 @@ describe("the document room's save path", () => {
 		]);
 		// The panel never blanked during the re-read: the tab stayed shown throughout.
 		expect(container.querySelector('.about')).not.toBeNull();
+	});
+});
+
+describe("the document room's return path", () => {
+	// The room reads the position through `localStorage`, which jsdom provides; cleared per
+	// witness, so each starts from exactly what it stores. The verdict (does the heading still
+	// exist?) is decided from the markdown source; the scroll itself is the seek's to apply
+	// against the laid-out body, which jsdom's unstyled article cannot offer — so the witnesses
+	// assert the verdict and the device-only traffic, not pixels.
+
+	/** Saves one position for the room's document, as a device would hold it. */
+	function seedPosition(position: unknown, resource: string = ID): void {
+		localStorage.setItem(SCROLL_STORE_KEY, JSON.stringify({ [resource]: position }));
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+	});
+
+	it('says when the heading the saved position names no longer exists', async () => {
+		seedPosition({ heading: 'Gone#0', fraction: 0.5 });
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() =>
+			expect(container.textContent).toContain('that heading is no longer in this')
+		);
+		expect(container.textContent).toContain('Gone#0');
+	});
+
+	it('holds the note only while the heading is gone: a position whose heading survives is silent', async () => {
+		seedPosition({ heading: 'Scope#0', fraction: 0.5 });
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() => expect(container.querySelector('.md-body h1')).not.toBeNull());
+		// The verdict ran against the markdown: 'Scope' exists, so nothing is said and the
+		// seek is the shell's. No note is rendered.
+		expect(container.textContent).not.toContain('that heading is no longer in this');
+	});
+
+	it('never writes temper for the position: the position is a device fact alone', async () => {
+		seedPosition({ heading: 'Gone#0', fraction: 0.5 });
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() =>
+			expect(container.textContent).toContain('that heading is no longer in this')
+		);
+		// A position restore writes nothing: no save, no draft report, no hub commit. Counted
+		// from this test's own first call — a prior test's landed save can still be in flight.
+		const first = calls.length;
+		const writes = calls
+			.slice(first)
+			.filter((c) => /^(doc_save_|doc_draft_state|hub_|temper_write)/.test(c.cmd));
+		expect(writes).toEqual([]);
+		// And no hub write went out on opening: the leave commits, the entry never does.
+		expect(calls.filter((c) => c.cmd.includes('hub'))).toHaveLength(0);
+	});
+
+	it('a position saved on this device is the only one consulted, and none means top', async () => {
+		// Another resource's position is present; this resource has none.
+		seedPosition({ heading: 'Gone#0', fraction: 1 }, 'other-resource');
+		answering({ ...DEFAULTS });
+		const { container } = openRoom();
+		await opened(container);
+		await waitFor(() => expect(container.querySelector('.md-body')).not.toBeNull());
+		// No note: nothing was saved for this resource, and the top is the honest start.
+		expect(container.textContent).not.toContain('that heading is no longer in this');
 	});
 });
