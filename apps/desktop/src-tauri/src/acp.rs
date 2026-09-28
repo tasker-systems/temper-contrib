@@ -256,24 +256,22 @@ pub struct PromptReference {
     pub name: String,
 }
 
-/// The content of one prompt: the person's text, then — when a room is in view
-/// and has changed since it was last shared — a `resource_link` to it. Every ACP
-/// agent accepts `text` and `resource_link` blocks, so no capability is asked.
-pub fn prompt_blocks(text: String, reference: Option<PromptReference>) -> Vec<ContentBlock> {
+/// The content of one prompt: the person's text, then a `resource_link` for each
+/// reference that goes with it — the session's scope on its first prompt, and the
+/// room in view when it has changed since it was last shared. Every ACP agent
+/// accepts `text` and `resource_link` blocks, so no capability is asked.
+pub fn prompt_blocks(text: String, references: Vec<PromptReference>) -> Vec<ContentBlock> {
     let mut blocks = vec![ContentBlock::Text(TextContent::new(text))];
-    if let Some(reference) = reference {
-        blocks.push(ContentBlock::ResourceLink(ResourceLink::new(
-            reference.name,
-            reference.uri,
-        )));
-    }
+    blocks.extend(references.into_iter().map(|reference| {
+        ContentBlock::ResourceLink(ResourceLink::new(reference.name, reference.uri))
+    }));
     blocks
 }
 
 pub enum ConversationCommand {
     Prompt {
         text: String,
-        reference: Option<PromptReference>,
+        references: Vec<PromptReference>,
         reply: oneshot::Sender<Result<String, String>>,
     },
     SetMode {
@@ -476,13 +474,13 @@ async fn run_conversation(
         match command {
             ConversationCommand::Prompt {
                 text,
-                reference,
+                references,
                 reply,
             } => {
                 let result = connection
                     .send_request(PromptRequest::new(
                         session_id.clone(),
-                        prompt_blocks(text, reference),
+                        prompt_blocks(text, references),
                     ))
                     .block_task()
                     .await;
@@ -586,22 +584,23 @@ pub async fn acp_answer_permission(
 }
 
 /// Sends a prompt into a live conversation and waits for the turn to end.
-/// Streamed output arrives as `acp-update` events, not in this reply. A
-/// `reference` goes with the text as a `resource_link` block.
+/// Streamed output arrives as `acp-update` events, not in this reply. Each of
+/// `references` goes with the text as a `resource_link` block, in order.
 #[tauri::command]
 pub async fn acp_prompt(
     state: tauri::State<'_, AcpState>,
     conversation_id: String,
     text: String,
-    reference: Option<PromptReference>,
+    references: Option<Vec<PromptReference>>,
 ) -> Result<String, String> {
+    let references = references.unwrap_or_default();
     let commands = conversation_commands(&state, &conversation_id)?;
 
     let (reply_tx, reply_rx) = oneshot::channel();
     if commands
         .send(ConversationCommand::Prompt {
             text,
-            reference,
+            references,
             reply: reply_tx,
         })
         .is_err()
@@ -828,7 +827,7 @@ mod tests {
         commands
             .send(ConversationCommand::Prompt {
                 text: text.to_string(),
-                reference,
+                references: reference.into_iter().collect(),
                 reply: reply_tx,
             })
             .expect("conversation should still be open");
@@ -863,7 +862,7 @@ mod tests {
             uri: "temper:build-the-desktop-shell-01a0e32f-27e5-7ca3-9327-5812961bdbff".into(),
             name: "Build the desktop shell".into(),
         };
-        let blocks = prompt_blocks("What is next?".into(), Some(reference));
+        let blocks = prompt_blocks("What is next?".into(), vec![reference]);
         assert_eq!(blocks.len(), 2);
         match &blocks[0] {
             ContentBlock::Text(text) => assert_eq!(text.text, "What is next?"),
@@ -882,9 +881,32 @@ mod tests {
 
     #[test]
     fn a_prompt_with_nothing_in_view_is_text_alone() {
-        let blocks = prompt_blocks("Hello".into(), None);
+        let blocks = prompt_blocks("Hello".into(), Vec::new());
         assert_eq!(blocks.len(), 1);
         assert!(matches!(&blocks[0], ContentBlock::Text(_)));
+    }
+
+    /// A session's first prompt carries its scope and the room in view, each a
+    /// link of its own, in the order given.
+    #[test]
+    fn a_first_prompt_carries_the_scope_then_the_room_in_view() {
+        let scope = PromptReference {
+            uri: "temper:+temper-dev/contrib".into(),
+            name: "context +temper-dev/contrib".into(),
+        };
+        let room = PromptReference {
+            uri: "temper:the-desktop-hub-01a0e0b8-39a6-7c42-97a4-3c1380308dc7".into(),
+            name: "The desktop hub".into(),
+        };
+        let blocks = prompt_blocks("Where were we?".into(), vec![scope, room]);
+        let names: Vec<_> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                ContentBlock::ResourceLink(link) => Some(link.name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(names, ["context +temper-dev/contrib", "The desktop hub"]);
     }
 
     /// Witness that a real agent accepts the room in view: a prompt carrying a

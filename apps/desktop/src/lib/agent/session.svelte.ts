@@ -22,6 +22,20 @@ import {
 export type InView = { uri: string; name: string };
 
 /**
+ * What a session is started for (ruling B): a context the person works in, or an active goal.
+ * The scope goes to the agent with the first prompt, and the work record links it — the record
+ * itself lives in the person's context whatever the scope.
+ */
+export type SessionScope = { kind: 'context' | 'goal'; ref: string; name: string };
+
+/** The scope as the agent is shown it: a reference its own temper tools resolve. */
+export function scopeReference(scope: SessionScope): InView {
+	return { uri: `temper:${scope.ref}`, name: `${scope.kind} ${scope.name}` };
+}
+
+const SCOPE_STORE = 'temper-start-scope-v1';
+
+/**
  * The active tab's subject as a reference the agent's own temper tools resolve — a `temper:` URI
  * over the resource's decorated ref, named by its title. Places and queries are not resources and
  * are never shared.
@@ -75,6 +89,12 @@ class AgentSession {
 	recordKey = $state<string>('');
 	/** The last reference the agent was shown in this conversation; a new conversation forgets it. */
 	lastReferenceUri = $state<string | null>(null);
+	/** What the live conversation was started for, if anything. */
+	scope = $state<SessionScope | null>(null);
+	/** Whether the scope has gone to the agent yet — it goes once, with the first prompt. */
+	scopeShared = $state<boolean>(false);
+	/** The scope last started with on this device — Start offers it first. A device fact. */
+	lastScope = $state<SessionScope | null>(null);
 
 	private unlisten: UnlistenFn | null = null;
 	private unlistenAsk: UnlistenFn | null = null;
@@ -84,6 +104,7 @@ class AgentSession {
 		if (this.initialised) return;
 		this.initialised = true;
 		this.restorePanel();
+		this.restoreLastScope();
 		this.loadDefaults();
 		this.loadAgents();
 		this.listenOnce();
@@ -192,7 +213,34 @@ class AgentSession {
 		invoke('settings_set_working_dir', { dir: this.workingDir.trim() }).catch(() => {});
 	}
 
-	async start(): Promise<void> {
+	private restoreLastScope(): void {
+		try {
+			const raw = localStorage.getItem(SCOPE_STORE);
+			if (!raw) return;
+			const parsed = JSON.parse(raw) as Partial<SessionScope>;
+			if (
+				(parsed.kind === 'context' || parsed.kind === 'goal') &&
+				typeof parsed.ref === 'string' &&
+				typeof parsed.name === 'string'
+			) {
+				this.lastScope = { kind: parsed.kind, ref: parsed.ref, name: parsed.name };
+			}
+		} catch {
+			// No remembered scope: Start offers the list in its own order.
+		}
+	}
+
+	private rememberScope(scope: SessionScope | null): void {
+		this.lastScope = scope;
+		try {
+			if (scope) localStorage.setItem(SCOPE_STORE, JSON.stringify(scope));
+			else localStorage.removeItem(SCOPE_STORE);
+		} catch {
+			// A store that cannot be written costs the next Start its default, no more.
+		}
+	}
+
+	async start(options: { scope?: SessionScope | null } = {}): Promise<void> {
 		if (!this.workingDir.trim()) {
 			this.error = 'A working directory is required — agents treat it as their project root.';
 			return;
@@ -213,6 +261,9 @@ class AgentSession {
 			this.messages = [];
 			this.asks = [];
 			this.lastReferenceUri = null;
+			this.scope = options.scope ?? null;
+			this.scopeShared = false;
+			if (options.scope !== undefined) this.rememberScope(options.scope);
 			// The declared selection is established at conversation start from
 			// what `session/new` declared — never inherited from how the room
 			// was entered, never guessed for an agent that declares nothing.
@@ -231,14 +282,20 @@ class AgentSession {
 		const text = this.draft.trim();
 		if (!text || !this.conversation || this.prompting) return;
 		this.draft = '';
-		// The room in view goes with the first prompt, then only when it has changed since the last
-		// prompt that carried one. The transcript records exactly what went with the text.
+		// The session's scope goes with the first prompt only. The room in view goes with the first
+		// prompt, then only when it has changed since the last prompt that carried one. The
+		// transcript records exactly what went with the text.
+		const scope = this.scope && !this.scopeShared ? scopeReference(this.scope) : null;
 		const inView = inViewReference();
 		const reference = inView && inView.uri !== this.lastReferenceUri ? inView : null;
 		const previous = this.lastReferenceUri;
 		if (reference) this.lastReferenceUri = reference.uri;
+		if (scope) this.scopeShared = true;
+		const references = [scope, reference].filter((r): r is InView => r !== null);
 		this.messages.push(
-			reference ? { role: 'user', text, with: reference.name } : { role: 'user', text }
+			references.length
+				? { role: 'user', text, with: references.map((r) => r.name).join(' and ') }
+				: { role: 'user', text }
 		);
 		this.prompting = true;
 		this.error = '';
@@ -246,12 +303,13 @@ class AgentSession {
 			await invoke<string>('acp_prompt', {
 				conversationId: this.conversation.conversationId,
 				text,
-				reference
+				references
 			});
 		} catch (e) {
 			this.error = String(e);
-			// Nothing reached the agent: the next prompt shares the room again.
+			// Nothing reached the agent: the next prompt shares the scope and the room again.
 			if (reference) this.lastReferenceUri = previous;
+			if (scope) this.scopeShared = false;
 		} finally {
 			this.prompting = false;
 		}
@@ -312,7 +370,10 @@ class AgentSession {
 		const dir = this.workingDir;
 		const opened = this.openedAt;
 		const key = this.recordKey;
+		const scope = this.scope;
 		this.conversation = null;
+		this.scope = null;
+		this.scopeShared = false;
 		this.messages = [];
 		this.asks = [];
 		this.selection = EMPTY_SELECTION;
@@ -328,7 +389,8 @@ class AgentSession {
 					agentCommand: command,
 					workingDir: dir,
 					openedAt: opened,
-					closedAt: new Date().toISOString()
+					closedAt: new Date().toISOString(),
+					scope: scope ? { kind: scope.kind, ref: scope.ref } : null
 				},
 				idempotencyKey: key
 			});

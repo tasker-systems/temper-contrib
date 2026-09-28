@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { EditorView } from '@codemirror/view';
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Connections, DocOpened, History, PanelRead, Related, Sources } from '$lib/document';
 import StepHost from '$lib/shell/StepHost.svelte';
 import { HOME_TAB, tabs } from '$lib/shell/tabs.svelte';
@@ -119,11 +119,26 @@ function openRoom() {
 	return { ...view, step: () => tabs.current(tab) };
 }
 
+/**
+ * The room has opened: the title is shown and the body has rendered. The body renders after a lazy
+ * import (the sanitizer), so the title alone lands first — an assertion on the body made then
+ * races it.
+ */
 async function opened(container: HTMLElement): Promise<void> {
-	await waitFor(() => expect(container.querySelector('h1')?.textContent).toBe(OPENED.title));
+	await waitFor(() => {
+		expect(container.querySelector('h1')?.textContent).toBe(OPENED.title);
+		expect(container.querySelector('.md-body')).not.toBeNull();
+	});
 }
 
 describe('the document room', () => {
+	// The lens and the sanitizer are imported lazily by the room. Load them once here, so no test
+	// pays for a cold import inside its own wait — under load that alone can outlast it.
+	beforeAll(async () => {
+		await import('$lib/shell/lenses/DocumentLens.svelte');
+		await import('$lib/markdown/sanitize');
+	});
+
 	beforeEach(() => {
 		calls = [];
 		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
