@@ -185,6 +185,15 @@ bun run tauri build --debug --no-bundle --features webdriver
 uv run -q --with selenium>=4.20,<5 scripts/csp-witness-macos.py
 '''
 
+[tasks.desktop-return-witness-macos]
+description = "W7 witness on macOS: the return clause end to end (needs TEMPER_WITNESS_REF)"
+cwd = "${DESKTOP}"
+script = '''
+set -e
+bun run tauri build --debug --no-bundle --features webdriver
+uv run -q --with selenium>=4.20,<5 scripts/return-witness-macos.py
+'''
+
 # =============================================================================
 # Python (ruff.toml at the root covers every .py file)
 # =============================================================================
