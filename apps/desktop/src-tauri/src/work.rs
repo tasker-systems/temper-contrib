@@ -127,6 +127,22 @@ fn record_payload(
     context_id: Uuid,
     idempotency_key: Uuid,
 ) -> IngestPayload {
+    // Open keys the facts may not carry are omitted, never null: the server deletes an
+    // open_meta key on an explicit null on update, and refuses a null on create — a null
+    // here would make every scope-less write a 400.
+    let mut open_meta = serde_json::json!({
+        "agent": facts.agent_label,
+        "agent_command": facts.agent_command,
+        "working_dir": facts.working_dir,
+        "opened_at": facts.opened_at,
+        "closed_at": facts.closed_at,
+        "resumable_workspace": facts.working_dir,
+        "products": [],
+    });
+    if let Some(scope) = &facts.scope {
+        open_meta["scope_kind"] = serde_json::Value::String(scope.kind.word().to_string());
+        open_meta["scope_ref"] = serde_json::Value::String(scope.reference.clone());
+    }
     IngestPayload {
         title: record_title(facts),
         origin_uri: String::new(),
@@ -139,17 +155,7 @@ fn record_payload(
         content: record_markdown(facts),
         metadata: None,
         managed_meta: None,
-        open_meta: Some(serde_json::json!({
-            "agent": facts.agent_label,
-            "agent_command": facts.agent_command,
-            "working_dir": facts.working_dir,
-            "opened_at": facts.opened_at,
-            "closed_at": facts.closed_at,
-            "resumable_workspace": facts.working_dir,
-            "products": [],
-            "scope_kind": facts.scope.as_ref().map(|s| s.kind.word()),
-            "scope_ref": facts.scope.as_ref().map(|s| s.reference.clone()),
-        })),
+        open_meta: Some(open_meta),
         chunks_packed: None,
         sources: Vec::new(),
         act: Default::default(),
