@@ -293,6 +293,39 @@ describe('the shell', () => {
 		).toContain('home');
 	});
 
+	it('home is its pinned sections, in order, each unbuilt one named with what lands it', async () => {
+		const { container } = render(Shell);
+		const home = activeBody(container);
+		await waitFor(() => expect(home.querySelectorAll('[data-section]')).toHaveLength(6));
+		expect([...home.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
+			'Resume',
+			'Awaiting you',
+			'Start',
+			'Explore'
+		]);
+		const resume = home.querySelector('[data-section="core/home-resume"]') as HTMLElement;
+		expect(resume.textContent).toContain("isn't built yet");
+		expect(resume.textContent).toContain('drawn from the hub');
+		// Nothing claims to be empty when nothing has been read.
+		expect(home.textContent).not.toMatch(/No (places|sessions)/);
+	});
+
+	it('awaiting you never interrupts: a pending ask is shown on home, and opened only by the person', async () => {
+		const { container } = render(Shell);
+		agentSession.setPanelOpen(false);
+		await startedConversationWithParkedAsk();
+		const home = activeBody(container);
+		const asks = () => home.querySelector('[data-section="core/home-asks"]') as HTMLElement;
+		await waitFor(() => expect(asks()?.textContent).toContain('asks to run Write witness.txt'));
+		expect(agentSession.panelOpen).toBe(false);
+
+		await fireEvent.click(button(asks(), 'answer it in the agent panel'));
+		expect(agentSession.panelOpen).toBe(true);
+		await waitFor(() =>
+			expect(document.activeElement?.getAttribute('data-ask')).toBe(declaredAsk.askId)
+		);
+	});
+
 	it('home is pinned: no close, no way out, no room strip', () => {
 		const { container } = render(Shell);
 		const home = container.querySelector('[role="tab"]');

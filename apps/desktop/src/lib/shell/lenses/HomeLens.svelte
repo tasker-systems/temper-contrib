@@ -1,50 +1,98 @@
 <script lang="ts">
 	/**
-	 * Core's home, interim: the temper views, and where the conversation went. It makes no claim
-	 * about what awaits you or where to resume — those are the home build's, and until it lands
-	 * this says only what it holds.
+	 * Core's home: the throughline of the work. Home is the frame — the heading, the line, the
+	 * order — and every section in it is a lens pinned to home (ruling A), contributed by core or
+	 * a plugin. Sections read once per show: the frame counts each time home is shown, and hands
+	 * the count to every section, which reads when it changes and never on hover.
+	 *
+	 * A section that is named and not built says so, and what lands it — never an empty state
+	 * claiming there is nothing, when nothing has been read.
 	 */
-	import { agentSession } from '$lib/agent/session.svelte';
-	import TemperViews from '$lib/components/TemperViews.svelte';
-	import type { LensProps } from '../lenses';
+	import { untrack } from 'svelte';
+	import { enabled } from '../contributions';
+	import { homeSections, type LensDecl, type LensProps } from '../lenses';
+	import { HOME_TAB, tabs } from '../tabs.svelte';
 
-	// A place lens takes the props every lens is handed and needs none of them.
-	let _props: LensProps = $props();
+	let { subject, tab }: LensProps = $props();
+
+	const sections = homeSections(enabled);
+
+	let shown = $state(0);
+	$effect(() => {
+		if (tabs.activeId === HOME_TAB) untrack(() => (shown += 1));
+	});
+
+	const loaders = new Map(
+		sections
+			.map(({ lens }) => lens)
+			.filter((lens): lens is LensDecl & { build: { state: 'built' } } => lens.build.state === 'built')
+			.map((lens) => [lens.id, lens.build.component()])
+	);
 </script>
 
-<div class="page">
-	<p class="t-label">home</p>
-	<p class="t-strip">
-		The conversation lives in the agent panel — it keeps running while you move between tabs,
-		and a closed panel still shows its pending count on the
-		<span class="strip-em">agent</span> toggle.
-	</p>
-	{#if !agentSession.panelOpen}
-		<button class="t-action start" onclick={() => agentSession.setPanelOpen(true)}>
-			start a session <span aria-hidden="true">→</span>
-		</button>
-	{/if}
+<div class="home">
+	<header class="masthead">
+		<p class="t-label">home · the throughline</p>
+		<h1 class="t-hero-title">Where the <em>work</em> stands</h1>
+		<p class="t-tagline">Pick up where you were, answer what waits on you, start something, or go looking.</p>
+	</header>
 
-	<TemperViews />
+	{#each sections as { lens, heading } (lens.id)}
+		<section class="section" aria-label={lens.name} data-section={lens.id}>
+			{#if heading}
+				<h2 class="t-label heading">{heading}</h2>
+			{/if}
+			{#if lens.build.state === 'unbuilt'}
+				<p class="unbuilt">
+					The <span class="name">{lens.name}</span> section isn't built yet — it lands with
+					{lens.build.landsWith}.
+				</p>
+			{:else}
+				{#await loaders.get(lens.id) then mod}
+					{#if mod}
+						<mod.default {subject} {tab} {shown} />
+					{/if}
+				{:catch err}
+					<p class="unbuilt">The {lens.name} section failed to load: {String(err)}</p>
+				{/await}
+			{/if}
+		</section>
+	{/each}
 </div>
 
 <style>
-	.page {
+	.home {
 		display: grid;
-		gap: 0.8rem;
-		max-width: 44rem;
+		gap: 1.1rem;
+		max-width: 46rem;
 		margin: 0 auto;
 		padding: 2.5rem 1.5rem 4rem;
 	}
-	.t-label,
-	.t-strip {
+	.masthead {
+		display: grid;
+		gap: 0.5rem;
+		margin-bottom: 1rem;
+	}
+	.masthead > * {
 		margin: 0;
 	}
-	.strip-em {
-		color: var(--tp-text);
+	.section {
+		display: grid;
+		gap: 0.5rem;
 	}
-	.start {
-		justify-self: start;
-		padding: 0;
+	.heading {
+		margin: 0.9rem 0 0;
+		color: var(--tp-accent);
+	}
+	.unbuilt {
+		margin: 0;
+		padding: 0.7rem 0.9rem;
+		border: 1px dashed var(--tp-rule-strong);
+		border-radius: var(--tp-radius-panel);
+		font: 0.85rem var(--tp-font-ui);
+		color: var(--tp-text-subtle);
+	}
+	.name {
+		color: var(--tp-text-muted);
 	}
 </style>

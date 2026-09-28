@@ -186,6 +186,10 @@ HELD = {
 }
 
 
+# Home's pinned sections as the shipped contributions declare them (core and temper-workflows).
+HOME_SECTIONS = 6
+
+
 def wait_for_port(port: int, timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -273,6 +277,13 @@ def main() -> int:
                     for e in d.find_elements(By.CSS_SELECTOR, ".tab-body:not([hidden])")
                 )
 
+            # Home is its pinned sections: every one renders, built or named as unbuilt.
+            WebDriverWait(driver, 10).until(
+                lambda d: (
+                    len(d.find_elements(By.CSS_SELECTOR, ".tab-body:not([hidden]) [data-section]"))
+                    == HOME_SECTIONS
+                )
+            )
             step("home")
 
             # A document opened from home opens in a new tab. Without temper credentials the room

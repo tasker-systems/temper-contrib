@@ -58,6 +58,9 @@ pub struct RecentWorkEntry {
 #[serde(rename_all = "camelCase")]
 pub struct RecentWorkView {
     pub entries: Vec<RecentWorkEntry>,
+    /// How many of `entries`' facts are still queued on this device, not yet
+    /// committed — a place just left shows at once, and says it is local.
+    pub queued: usize,
 }
 
 /// The family's shape: draft 2020-12, closed, capped, every field a surface
@@ -292,7 +295,7 @@ pub async fn commit_recent_work(
             .unwrap_or(serde_json::Value::Null),
     )
     .map_err(|e| format!("the committed artifact did not conform: {e}"))?;
-    Ok(RecentWorkView { entries })
+    Ok(RecentWorkView { entries, queued: 0 })
 }
 
 /// Reads the merged current entries for home's "Return to …" and a later
@@ -308,6 +311,7 @@ pub async fn recent_work(
     }
     Ok(RecentWorkView {
         entries: merge_recent_work(&batches, &[]),
+        queued: 0,
     })
 }
 
@@ -344,17 +348,29 @@ pub async fn hub_commit_recent_work(
     commit_recent_work(client, &context_name, entries).await
 }
 
-/// Reads the merged recent-work entries for the home room.
+/// Folds this device's queued entries into what the hub answered, by the
+/// same rule every commit merges by.
+pub fn with_queued(read: RecentWorkView, queued: &[RecentWorkEntry]) -> RecentWorkView {
+    RecentWorkView {
+        entries: merge_recent_work(&[read.entries], queued),
+        queued: queued.len(),
+    }
+}
+
+/// Reads the merged recent-work entries for home, with this device's
+/// not-yet-committed leaves folded in.
 #[tauri::command]
 pub async fn hub_recent_work(
     state: tauri::State<'_, TemperState>,
     settings: tauri::State<'_, SettingsState>,
+    queue: tauri::State<'_, crate::hub_queue::HubQueue>,
 ) -> Result<RecentWorkView, String> {
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
-    recent_work(client, &context_name).await
+    let read = recent_work(client, &context_name).await?;
+    Ok(with_queued(read, &queue.queued()))
 }
 
 #[cfg(test)]
@@ -420,6 +436,27 @@ mod tests {
         let merged = merge_recent_work(&[stale], &fresh);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].left_at, "2026-09-27T10:00:00.000Z");
+    }
+
+    /// A place just left shows at once: the queue folds into the read by
+    /// the commit's own rule, and says how much of it is local.
+    #[test]
+    fn queued_entries_fold_into_the_read() {
+        let read = RecentWorkView {
+            entries: vec![entry(A, "2026-09-27T10:00:00.000Z")],
+            queued: 0,
+        };
+        let view = with_queued(
+            read,
+            &[
+                entry(A, "2026-09-27T12:00:00.000Z"),
+                entry(B, "2026-09-27T11:00:00.000Z"),
+            ],
+        );
+        assert_eq!(view.queued, 2);
+        assert_eq!(view.entries.len(), 2);
+        assert_eq!(view.entries[0].resource, A);
+        assert_eq!(view.entries[0].left_at, "2026-09-27T12:00:00.000Z");
     }
 
     /// The shape bounds the family: closed, capped, the five watched facts.
