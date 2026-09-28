@@ -68,6 +68,7 @@ pub fn run() {
             temper::temper_context_create,
             temper::temper_recent_work,
             temper::temper_list_resources,
+            temper::temper_context_shape,
             work::temper_write_work_record,
             hub::hub_commit_recent_work,
             hub::hub_recent_work,

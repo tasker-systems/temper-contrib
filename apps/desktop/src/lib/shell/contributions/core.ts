@@ -51,10 +51,7 @@ export const core: Contribution = {
 			accepts: { kinds: ['place'], places: ['home'] },
 			pinned: { home: 40 },
 			group: 'Explore',
-			build: {
-				state: 'unbuilt',
-				landsWith: "home's Explore slice — your contexts, shown by the regions temper derived"
-			}
+			build: { state: 'built', component: () => import('../lenses/home/ExploreSection.svelte') }
 		},
 		{
 			id: 'core/document',
