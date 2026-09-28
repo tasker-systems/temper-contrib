@@ -67,6 +67,17 @@ const C = '01a0e327-ef19-7d72-b7b2-2dd45a028cc9';
 let hubView: { entries: unknown[]; queued: number; thisDevice?: string };
 let resolvable: Set<string>;
 let sessionMarkdown: string | null;
+/** What everything-visible answers — only the home tests that fall back to it set one. */
+let recentWork: { total: number; rows: unknown[] } | null;
+
+const row = (id: string, title: string, updated: string) => ({
+	id,
+	decoratedRef: `r-${id}`,
+	title,
+	docType: 'task',
+	contextRef: '+temper-dev/contrib',
+	updated
+});
 
 const hubEntry = (resource: string, leftAt: string, device = 'station') => ({
 	resource,
@@ -81,6 +92,8 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 	switch (cmd) {
 		case 'hub_recent_work':
 			return Promise.resolve(hubView);
+		case 'temper_recent_work':
+			return Promise.resolve(recentWork);
 		case 'acp_start':
 			return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
 		case 'doc_open':
@@ -109,6 +122,15 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 			);
 		case 'temper_list_resources': {
 			const filter = args?.filter as { docType?: string; owner?: string };
+			if ((filter as { contextRef?: string })?.contextRef === '+temper-dev/contrib') {
+				return Promise.resolve({
+					total: 7,
+					rows: [
+						row('r-older', 'An older change', '2026-09-27T10:00:00Z'),
+						row('r-newer', 'A newer change', '2026-09-28T10:00:00Z')
+					]
+				});
+			}
 			if (filter?.owner === '@me' && filter.docType === 'session') {
 				return Promise.resolve(
 					sessionMarkdown === null
@@ -186,6 +208,8 @@ describe('the shell', () => {
 		hubView = { entries: [], queued: 0, thisDevice: 'station' };
 		resolvable = new Set();
 		sessionMarkdown = null;
+		recentWork = null;
+		agentSession.lastScope = null;
 		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
 		agentSession.messages = [];
@@ -495,6 +519,71 @@ describe('the shell', () => {
 		await waitFor(() => expect(reads('hub_recent_work')).toHaveLength(2));
 	});
 
+	it('recently updated reads where you worked, newest first, and says how much it shows', async () => {
+		hubView = {
+			entries: [hubEntry(A, '2026-09-28T10:00:00.000Z')],
+			queued: 0,
+			thisDevice: 'station'
+		};
+		resolvable = new Set([A]);
+		const { container } = render(Shell);
+		const section = () =>
+			activeBody(container).querySelector(
+				'[data-section="temper-workflows/home-recent"]'
+			) as HTMLElement;
+		await waitFor(() =>
+			expect(section().textContent).toContain(
+				'recently updated in +temper-dev/contrib, where you worked last'
+			)
+		);
+		const titles = [...section().querySelectorAll('.main')].map((e) => e.textContent);
+		expect(titles).toEqual(['A newer change', 'An older change']);
+		expect(section().textContent).toContain('2 of 7 recently updated; 5 not shown.');
+		// It never claims to know what changed since you last engaged: the phrase appears only as
+		// the disclaimer, quoted.
+		const text = section().textContent ?? '';
+		expect(text.match(/since you last engaged/gi)).toHaveLength(1);
+		expect(text).toContain('“Since you last engaged” needs temper’s event feed');
+	});
+
+	it('recently updated falls back to everything visible when nothing you worked in is recorded, and says so', async () => {
+		recentWork = { total: 3, rows: [row('r-1', 'Something visible', '2026-09-28T09:00:00Z')] };
+		const { container } = render(Shell);
+		const section = () =>
+			activeBody(container).querySelector(
+				'[data-section="temper-workflows/home-recent"]'
+			) as HTMLElement;
+		await waitFor(() =>
+			expect(section().textContent).toContain('nothing you worked in is recorded yet')
+		);
+		expect(section().textContent).toContain('1 of 3 recently updated');
+	});
+
+	it('start begins a session scoped to what the person chose, and only then opens the panel', async () => {
+		agentSession.setPanelOpen(false);
+		const { container } = render(Shell);
+		const start = () =>
+			activeBody(container).querySelector('[data-section="core/home-start"]') as HTMLElement;
+		await waitFor(() =>
+			expect(start().querySelector('optgroup[label="Active goals"] option')).toBeTruthy()
+		);
+		expect(agentSession.panelOpen).toBe(false);
+		const scope = start().querySelectorAll('select')[1] as HTMLSelectElement;
+		const goal = start().querySelector(
+			'optgroup[label="Active goals"] option'
+		) as HTMLOptionElement;
+		await fireEvent.change(scope, { target: { value: goal.value } });
+		agentSession.workingDir = '/tmp/project';
+		await fireEvent.click(button(start(), 'start session'));
+
+		await waitFor(() => expect(agentSession.conversation).not.toBeNull());
+		expect(agentSession.scope).toEqual({ kind: 'goal', ref: `goal-0-${A}`, name: 'goal 0' });
+		expect(agentSession.panelOpen).toBe(true);
+		await waitFor(() => expect(start().textContent).toContain('scoped to the goal goal 0'));
+		// The scope is remembered on this device, and offered first next time.
+		expect(agentSession.lastScope?.ref).toBe(`goal-0-${A}`);
+	});
+
 	it('home is pinned: no close, no way out, no room strip', () => {
 		const { container } = render(Shell);
 		const home = container.querySelector('[role="tab"]');
@@ -657,7 +746,8 @@ describe('the shell', () => {
 			'In view, shared with the agent:'
 		);
 
-		const prompts = () => reads('acp_prompt').map((c) => c.args?.reference ?? null);
+		const prompts = () =>
+			reads('acp_prompt').map((c) => (c.args?.references as unknown[] | undefined)?.[0] ?? null);
 		agentSession.draft = 'What is next?';
 		await agentSession.send();
 		agentSession.draft = 'And after that?';
@@ -689,6 +779,37 @@ describe('the shell', () => {
 		expect(container.querySelector('.in-view')?.textContent).toContain('not shared');
 		agentSession.draft = 'Hello';
 		await agentSession.send();
-		expect(reads('acp_prompt')[0].args?.reference).toBeNull();
+		expect(reads('acp_prompt')[0].args?.references).toEqual([]);
+	});
+
+	it('a scoped session sends its scope with the first prompt only, before the room in view', async () => {
+		render(Shell);
+		agentSession.workingDir = '/tmp/project';
+		await agentSession.start({
+			scope: { kind: 'goal', ref: `a-goal-${C}`, name: 'The desktop register' }
+		});
+		tabs.open({ kind: 'resource', id: A }, { where: 'new' });
+		await waitFor(() => expect(tabs.current(tabs.active).title).toBe('Build the document room'));
+		agentSession.draft = 'Where do we start?';
+		await agentSession.send();
+		agentSession.draft = 'And then?';
+		await agentSession.send();
+
+		const sent = reads('acp_prompt').map((c) => c.args?.references);
+		expect(sent).toEqual([
+			[
+				{ uri: `temper:a-goal-${C}`, name: 'goal The desktop register' },
+				{ uri: `temper:a-document-${A}`, name: 'Build the document room' }
+			],
+			[]
+		]);
+		expect(agentSession.messages.find((m) => m.role === 'user')?.with).toBe(
+			'goal The desktop register and Build the document room'
+		);
+
+		// The work record links the scope when the session closes.
+		await agentSession.close();
+		const record = reads('temper_write_work_record')[0].args?.facts as { scope: unknown };
+		expect(record.scope).toEqual({ kind: 'goal', ref: `a-goal-${C}` });
 	});
 });
