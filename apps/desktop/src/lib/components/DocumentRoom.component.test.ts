@@ -602,17 +602,13 @@ describe("the document room's save path", () => {
 
 		// The core now knows a draft stands: its close guard will ask.
 		await waitFor(() =>
-			expect(
-				calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty
-			).toBe(true)
+			expect(calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty).toBe(true)
 		);
 
 		// A landed save closes the draft; the report clears.
 		await fireEvent.click(button(container, 'Save'));
 		await waitFor(() =>
-			expect(
-				calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty
-			).toBe(false)
+			expect(calls.filter((c) => c.cmd === 'doc_draft_state').at(-1)?.args?.dirty).toBe(false)
 		);
 	});
 
@@ -663,5 +659,65 @@ describe("the document room's save path", () => {
 			)
 		).toBe(false);
 		expect(container.textContent).toContain('not editable here');
+	});
+
+	it('a landed save refreshes the open panel tabs in place, and never reads the ones nobody opened (W-panel-refresh)', async () => {
+		// History answers with a different actor on its second read, so the re-read is
+		// observable in what the tab renders; a scalar description is present to edit.
+		let historyReads = 0;
+		answering({
+			...DEFAULTS,
+			doc_save_meta: async () => ({ state: 'saved' }),
+			doc_open: async () => ({
+				...OPENED,
+				openMeta: { tags: ['desktop', 'documents'], priority: 2 }
+			}),
+			doc_history: async () => {
+				historyReads++;
+				return present({
+					...HISTORY,
+					runs: [
+						{
+							actorName: historyReads === 1 ? 'j-cole-taylor' : 'someone-newer',
+							acts: 1,
+							firstAt: '2026-09-27T00:00:00+00:00',
+							lastAt: '2026-09-27T00:00:00+00:00',
+							events: []
+						}
+					]
+				})();
+			}
+		});
+		const { container } = openRoom();
+		await opened(container);
+
+		// One tab opened, one tab not: Connections read; Related never.
+		await fireEvent.click(button(container, 'About this document'));
+		await waitFor(() => expect(container.textContent).toContain('All 2 connections'));
+		await fireEvent.click(button(container, 'History'));
+		await waitFor(() => expect(container.textContent).toContain('j-cole-taylor'));
+		expect(panelCalls()).toEqual(['doc_connections', 'doc_history']);
+		expect(historyReads).toBe(1);
+
+		// A landed metadata save: the tabs already read re-read in place; Related stays unread.
+		const priorityInput = [...container.querySelectorAll('.props input')].find(
+			(i) => i.getAttribute('aria-label') === 'priority'
+		);
+		expect(priorityInput).toBeDefined();
+		await fireEvent.input(priorityInput as HTMLInputElement, { target: { value: '5' } });
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(metaCalls()).toHaveLength(1));
+
+		// Connections re-read, History re-read with its new answer, Related never read.
+		await waitFor(() => expect(container.textContent).toContain('someone-new'));
+		expect(historyReads).toBe(2);
+		expect(panelCalls()).toEqual([
+			'doc_connections',
+			'doc_history',
+			'doc_connections',
+			'doc_history'
+		]);
+		// The panel never blanked during the re-read: the tab stayed shown throughout.
+		expect(container.querySelector('.about')).not.toBeNull();
 	});
 });

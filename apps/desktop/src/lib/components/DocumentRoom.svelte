@@ -124,6 +124,7 @@
 				// The room's base moves to what was written: the next save compares against it.
 				baseHash = answer.bodyHash ?? baseHash;
 				stopEditing();
+				panelRefresh++;
 				// The body the room renders is the room's own answer's; the host re-reads nothing —
 				// show the saved text by re-opening through the room's own read path.
 				await refresh();
@@ -158,6 +159,9 @@
 	/** The room's view of the document: the host's answer until the room re-reads after a save. */
 	let localOpened = $state<DocOpened | null>(null);
 	const shown = $derived(localOpened ?? opened);
+	/** Bumped after each landed save (body or metadata): the open panel tabs re-read against
+	 * the saved state, in place. */
+	let panelRefresh = $state(0);
 
 	/**
 	 * The metadata patch, built at save time from the strip's edit state: changed
@@ -191,6 +195,7 @@
 			});
 			saving = false;
 			if (answer.state === 'saved') {
+				panelRefresh++;
 				await refresh();
 			} else if (answer.state === 'refused') {
 				saveFailed = answer.reason;
@@ -290,7 +295,7 @@
 	{/if}
 
 	{#if shown?.state !== 'unresolved'}
-		<AboutPanel {id} />
+		<AboutPanel {id} refreshKey={panelRefresh} />
 	{/if}
 
 	{#if shown?.state === 'opened'}
