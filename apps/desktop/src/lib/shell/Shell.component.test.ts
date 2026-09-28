@@ -10,7 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
@@ -67,6 +67,21 @@ const C = '01a0e327-ef19-7d72-b7b2-2dd45a028cc9';
 let hubView: { entries: unknown[]; queued: number; thisDevice?: string };
 let resolvable: Set<string>;
 let sessionMarkdown: string | null;
+const context = (id: string, slug: string, updated: string, resourceCount = 59) => ({
+	id,
+	name: slug,
+	slug,
+	ownerRef: '+temper-dev',
+	resourceCount,
+	updated
+});
+const CONTRIB = context('ctx-1', 'contrib', '2026-09-27T00:00:00Z');
+/** The contexts temper answers — one, unless a test names more. */
+let contextsList: unknown[];
+
+/** Each context's shape, by id; a context with none set has never been clustered. */
+let shapes: Record<string, unknown>;
+
 /** What everything-visible answers — only the home tests that fall back to it set one. */
 let recentWork: { total: number; rows: unknown[] } | null;
 
@@ -94,6 +109,15 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 			return Promise.resolve(hubView);
 		case 'temper_recent_work':
 			return Promise.resolve(recentWork);
+		case 'temper_context_shape':
+			return Promise.resolve(
+				shapes[args?.contextId as string] ?? {
+					regions: [],
+					population: 0,
+					emptiness: 'never_clustered',
+					materializedAt: null
+				}
+			);
 		case 'acp_start':
 			return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
 		case 'doc_open':
@@ -153,16 +177,7 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 			return Promise.resolve(listPage(filter));
 		}
 		case 'temper_contexts':
-			return Promise.resolve([
-				{
-					id: 'ctx-1',
-					name: 'contrib',
-					slug: 'contrib',
-					ownerRef: '+temper-dev',
-					resourceCount: 59,
-					updated: '2026-09-27T00:00:00Z'
-				}
-			]);
+			return Promise.resolve(contextsList);
 		default:
 			return Promise.resolve(null);
 	}
@@ -191,6 +206,14 @@ const activeBody = (container: HTMLElement) =>
 	container.querySelector(`.tab-body[data-tab="${tabs.activeId}"]`) as HTMLElement;
 
 describe('the shell', () => {
+	// The lenses a tab mounts are imported lazily. Load the document lens and the sanitizer once
+	// here, so the first test to open a document does not pay for a cold import inside its own
+	// wait — under load that alone can outlast it.
+	beforeAll(async () => {
+		await import('./lenses/DocumentLens.svelte');
+		await import('$lib/markdown/sanitize');
+	});
+
 	beforeEach(() => {
 		calls.length = 0;
 		vi.mocked(invoke).mockImplementation(routeInvoke as never);
@@ -209,6 +232,8 @@ describe('the shell', () => {
 		resolvable = new Set();
 		sessionMarkdown = null;
 		recentWork = null;
+		shapes = {};
+		contextsList = [CONTRIB];
 		agentSession.lastScope = null;
 		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
@@ -379,7 +404,7 @@ describe('the shell', () => {
 		).toContain('home');
 	});
 
-	it('home is its pinned sections, in order, each unbuilt one named with what lands it', async () => {
+	it('home is its pinned sections, in order, under their headings', async () => {
 		const { container } = render(Shell);
 		const home = activeBody(container);
 		await waitFor(() => expect(home.querySelectorAll('[data-section]')).toHaveLength(6));
@@ -389,9 +414,8 @@ describe('the shell', () => {
 			'Start',
 			'Explore'
 		]);
-		const explore = home.querySelector('[data-section="core/home-explore"]') as HTMLElement;
-		expect(explore.textContent).toContain("isn't built yet");
-		expect(explore.textContent).toContain('regions temper derived');
+		// Every section this build ships is built; none says it is waiting to land.
+		expect(home.textContent).not.toContain("isn't built yet");
 	});
 
 	it('awaiting you never interrupts: a pending ask is shown on home, and opened only by the person', async () => {
@@ -505,7 +529,9 @@ describe('the shell', () => {
 		resolvable = new Set([A]);
 		sessionMarkdown = '## Next\nOne thing.';
 		const { container } = render(Shell);
+		await temperViews.refreshContexts();
 		await waitFor(() => expect(activeBody(container).querySelector('blockquote')).toBeTruthy());
+		await waitFor(() => expect(reads('temper_context_shape')).toHaveLength(1));
 		expect(reads('hub_recent_work')).toHaveLength(1);
 		const before = calls.length;
 		for (const el of activeBody(container).querySelectorAll('a, button')) {
@@ -517,6 +543,7 @@ describe('the shell', () => {
 		tabs.open({ kind: 'place', place: 'settings' }, { where: 'new' });
 		tabs.activate(HOME_TAB);
 		await waitFor(() => expect(reads('hub_recent_work')).toHaveLength(2));
+		await waitFor(() => expect(reads('temper_context_shape')).toHaveLength(2));
 	});
 
 	it('recently updated reads where you worked, newest first, and says how much it shows', async () => {
@@ -582,6 +609,82 @@ describe('the shell', () => {
 		await waitFor(() => expect(start().textContent).toContain('scoped to the goal goal 0'));
 		// The scope is remembered on this device, and offered first next time.
 		expect(agentSession.lastScope?.ref).toBe(`goal-0-${A}`);
+	});
+
+	it('explore shows the most recently updated contexts by their regions, bounded, and names the lenses it opens', async () => {
+		contextsList = [
+			context('ctx-old', 'old', '2026-09-01T00:00:00Z'),
+			context('ctx-1', 'contrib', '2026-09-28T00:00:00Z'),
+			context('ctx-core', 'core', '2026-09-27T00:00:00Z'),
+			context('ctx-art', 'artifacts', '2026-09-26T00:00:00Z')
+		];
+		shapes = {
+			'ctx-1': {
+				regions: [
+					{ label: 'the document room', members: 12 },
+					{ label: null, members: 4 },
+					{ label: 'settings and surface', members: 7 },
+					{ label: 'agent hosting over ACP', members: 5 }
+				],
+				population: 5,
+				emptiness: null,
+				materializedAt: '2026-09-28T00:00:00Z'
+			}
+		};
+		await temperViews.refreshContexts();
+		const { container } = render(Shell);
+		const explore = () =>
+			activeBody(container).querySelector('[data-section="core/home-explore"]') as HTMLElement;
+		await waitFor(() => expect(explore().querySelectorAll('.regions li')).toHaveLength(4));
+		const cards = [...explore().querySelectorAll('[data-context]')].map((c) =>
+			c.getAttribute('data-context')
+		);
+		expect(cards).toEqual(['+temper-dev/contrib', '+temper-dev/core', '+temper-dev/artifacts']);
+		const first = explore().querySelector('[data-context="+temper-dev/contrib"]') as HTMLElement;
+		expect(first.textContent).toContain('59 resources · 5 regions');
+		expect([...first.querySelectorAll('.regions li')].map((l) => l.textContent)).toEqual([
+			'the document room',
+			'an unlabelled region of 4',
+			'settings and surface',
+			'+2 more'
+		]);
+		expect(explore().textContent).toContain('1 more context is in the ways-in panel.');
+		expect(reads('temper_context_shape')).toHaveLength(3);
+
+		await fireEvent.click(button(first, 'its shape'));
+		const step = tabs.current(tabs.active);
+		expect(step.subject).toEqual({ kind: 'query', context: '+temper-dev/contrib' });
+		expect(step.lens).toBe('core/shape');
+		await waitFor(() =>
+			expect(activeBody(container).textContent).toContain('The shape lens isn’t built yet')
+		);
+	});
+
+	it('explore says why a context shows no regions, in temper’s own terms', async () => {
+		contextsList = [
+			context('ctx-new', 'new', '2026-09-28T00:00:00Z'),
+			context('ctx-hidden', 'hidden', '2026-09-27T00:00:00Z')
+		];
+		shapes = {
+			'ctx-hidden': {
+				regions: [],
+				population: 0,
+				emptiness: 'nothing_visible',
+				materializedAt: null
+			}
+		};
+		await temperViews.refreshContexts();
+		const { container } = render(Shell);
+		const card = (ref: string) =>
+			activeBody(container).querySelector(`[data-context="${ref}"]`) as HTMLElement | null;
+		await waitFor(() =>
+			expect(card('+temper-dev/new')?.textContent).toContain(
+				'not yet clustered — temper hasn’t derived regions here'
+			)
+		);
+		await waitFor(() =>
+			expect(card('+temper-dev/hidden')?.textContent).toContain('no regions you can read')
+		);
 	});
 
 	it('home is pinned: no close, no way out, no room strip', () => {
