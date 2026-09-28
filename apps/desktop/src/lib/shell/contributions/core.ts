@@ -1,6 +1,6 @@
 /**
  * Core's contribution: the lenses the desktop ships with. Place lenses (home, settings, setup) are
- * core's own and a plugin never contributes one. The table, graph, shape and search lenses are
+ * core's own and a plugin never contributes one; a plugin may pin a section to home. The table, graph, shape and search lenses are
  * named and not built: each lands with its own port, and until then a tab opened on one says so.
  */
 import type { Contribution } from '../lenses';
@@ -14,6 +14,50 @@ export const core: Contribution = {
 			plugin: 'core',
 			accepts: { kinds: ['place'], places: ['home'] },
 			build: { state: 'built', component: () => import('../lenses/HomeLens.svelte') }
+		},
+		// Home's sections: lenses pinned to home (ruling A). Resume, the agent's asks, Start and
+		// Explore are core's; the workflow's readings of the work are temper-workflows'.
+		{
+			id: 'core/home-resume',
+			name: 'resume',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['home'] },
+			pinned: { home: 10 },
+			group: 'Resume',
+			build: {
+				state: 'unbuilt',
+				landsWith: "home's Resume slice — the places you last worked, drawn from the hub"
+			}
+		},
+		{
+			id: 'core/home-asks',
+			name: 'awaiting you',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['home'] },
+			pinned: { home: 20 },
+			group: 'Awaiting you',
+			build: { state: 'built', component: () => import('../lenses/home/AsksSection.svelte') }
+		},
+		{
+			id: 'core/home-start',
+			name: 'start',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['home'] },
+			pinned: { home: 30 },
+			group: 'Start',
+			build: { state: 'built', component: () => import('../lenses/home/StartSection.svelte') }
+		},
+		{
+			id: 'core/home-explore',
+			name: 'explore',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['home'] },
+			pinned: { home: 40 },
+			group: 'Explore',
+			build: {
+				state: 'unbuilt',
+				landsWith: "home's Explore slice — your contexts, shown by the regions temper derived"
+			}
 		},
 		{
 			id: 'core/document',

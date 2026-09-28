@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { core } from './contributions/core';
-import { type Contribution, lensesFor, resolveLens } from './lenses';
+import { temperWorkflows } from './contributions/temper-workflows';
+import { type Contribution, homeSections, lensesFor, resolveLens } from './lenses';
 import type { Subject } from './subjects';
 
 const resource: Subject = { kind: 'resource', id: '01a0e020-a6d7-7420-b924-68f5e89f354b' };
@@ -92,5 +93,47 @@ describe('the lens switcher', () => {
 		expect(lensesFor(resource, null, [core]).some((l) => l.accepts.kinds.includes('place'))).toBe(
 			false
 		);
+	});
+});
+
+describe("home's sections", () => {
+	it('are the enabled lenses pinned to home, in order, and never the frame itself', () => {
+		const ids = homeSections([core, temperWorkflows]).map((s) => s.lens.id);
+		expect(ids).toEqual([
+			'core/home-resume',
+			'temper-workflows/home-handoff',
+			'core/home-asks',
+			'temper-workflows/home-recent',
+			'core/home-start',
+			'core/home-explore'
+		]);
+		expect(ids).not.toContain('core/home');
+	});
+
+	it('share one heading per group: the first section of a run opens it', () => {
+		const headings = homeSections([core, temperWorkflows]).map((s) => s.heading);
+		expect(headings).toEqual(['Resume', null, 'Awaiting you', null, 'Start', 'Explore']);
+	});
+
+	it('without the workflow plugin, its sections vanish and home still reads whole', () => {
+		const sections = homeSections([core]);
+		expect(sections.map((s) => s.lens.id)).toEqual([
+			'core/home-resume',
+			'core/home-asks',
+			'core/home-start',
+			'core/home-explore'
+		]);
+		expect(sections.every((s) => s.heading !== null)).toBe(true);
+	});
+
+	it('leave home resolving to the frame, and offer no lens switch on it', () => {
+		const home: Subject = { kind: 'place', place: 'home' };
+		expect(resolveLens(home, null, 'core/home', [core, temperWorkflows])).toMatchObject({
+			lens: { id: 'core/home' }
+		});
+		expect(resolveLens(home, null, null, [core, temperWorkflows])).toMatchObject({
+			lens: { id: 'core/home' }
+		});
+		expect(lensesFor(home, null, [core, temperWorkflows])).toEqual([]);
 	});
 });

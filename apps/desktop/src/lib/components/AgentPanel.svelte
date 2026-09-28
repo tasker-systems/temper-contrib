@@ -121,7 +121,13 @@
 		</div>
 		<Transcript messages={session.messages} pending={session.prompting ? session.agentLabel() : null} />
 		{#each session.asks as ask (ask.askId)}
-			<section class="ask" aria-label="Permission requested" aria-busy="true">
+			<section
+				class="ask"
+				aria-label="Permission requested"
+				aria-busy="true"
+				data-ask={ask.askId}
+				tabindex="-1"
+			>
 				<p class="t-strip">asked to run <span aria-hidden="true">·</span> waiting for your answer</p>
 				<p class="ask-what">{askLabel(ask)}</p>
 				{#if ask.toolCall.rawInput !== undefined && ask.toolCall.rawInput !== null}
