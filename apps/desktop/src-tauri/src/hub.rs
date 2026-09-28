@@ -506,6 +506,26 @@ mod tests {
             .expect("machine temper credentials should resolve to a client");
         let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;
 
+        // The witness starts from a clean hub: every hub resource a prior
+        // run (or a real session's leave) left behind is deleted first, so
+        // the fork below is exactly the fork it claims — two writers from
+        // the same base, nothing before them. Real work records live in the
+        // work records themselves, not the hub; deleting the hub discards
+        // nothing the ledger holds.
+        let context_id = crate::person_context::persons_context_id(client, context_name)
+            .await
+            .expect("the person's context should resolve");
+        for stale in find_hub_resources(client, context_id)
+            .await
+            .expect("existing hubs should list")
+        {
+            client
+                .resources()
+                .delete(stale, &Default::default())
+                .await
+                .expect("the witness clears the hub before it writes");
+        }
+
         // The fork: two writers from the same base leave two live currents.
         let first = commit_recent_work(
             client,
@@ -515,9 +535,6 @@ mod tests {
         .await
         .expect("the first commit should land");
         assert_eq!(first.entries.len(), 1);
-        let context_id = crate::person_context::persons_context_id(client, context_name)
-            .await
-            .expect("the person's context should resolve");
         let currents_before = read_currents(client, context_id)
             .await
             .expect("the hub's currents should read");

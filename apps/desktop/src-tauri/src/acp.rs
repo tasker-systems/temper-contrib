@@ -937,6 +937,61 @@ mod tests {
         );
     }
 
+    /// Witness of the handoff's return path against a real agent: a prompt composed exactly as
+    /// the document room composes it — intent, the three versions as fenced sections, and the
+    /// instruction naming the ```proposal fence — ends its turn with a proposal the frontend's
+    /// extraction reads. This is W12's running half: the reply is the material, the fence is
+    /// the contract. Requires opencode on PATH. Run locally:
+    /// `cargo test -p desktop --lib -- --ignored`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode on PATH"]
+    async fn opencode_answers_a_handoff_prompt_with_a_proposal_fence() {
+        let (commands, recorded, _info) = start_test_conversation(
+            opencode_witness_agent(),
+            AskBoard::default(),
+            silent_ask_sink(),
+        )
+        .await;
+        // The prompt, as the room composes it (src/lib/handoff.ts `handoffPrompt`): the
+        // intent, three fenced versions, the instruction bounding the answer.
+        let prompt = "I was editing \"Witness scratch\" in temper, but the document changed since \
+I opened it, so my save was refused. Here is what I intended, and the material:\n\n\
+Intent: fold my changes into theirs — keep the reconciliation small\n\n\
+### What I had written (my draft)\n\n```markdown\n# Scope\n\nThe room, read-only.\n\nAnd my \
+edit.\n```\n\
+### What the document reads now (the newer version)\n\n```markdown\n# Scope\n\nSomeone else \
+was here.\n```\n\
+### What the document read when I opened it (the base)\n\n```markdown\n# Scope\n\nThe room, \
+read-only.\n```\n\n\
+Return your proposed reconciliation as ONE fenced markdown block that begins with ```proposal \
+and ends with ``` — the body between the fences is exactly the document text you propose, \
+whole. Change nothing outside it, and write nothing else inside it.";
+        let stop = prompt_with(&commands, prompt, None).await;
+        assert_eq!(stop, "end_turn", "a handoff turn should end normally");
+        // The turn's reply, as the frontend's extractor receives it: the streamed text chunks.
+        let reply = streamed_chunks(&recorded).join("");
+        // The fence the frontend asks for, and the extraction of what it asked for.
+        let fence = reply.rfind("```proposal");
+        assert!(
+            fence.is_some(),
+            "the turn should carry a ```proposal fence; reply was:\n{reply}"
+        );
+        // The proposal fence closes: the extraction reads the body between the fences.
+        let after_open = reply[fence.unwrap() + "```proposal".len()..]
+            .find("\n```")
+            .expect("the proposal fence should close");
+        let proposal = reply[fence.unwrap() + "```proposal".len() + 1
+            ..fence.unwrap() + "```proposal".len() + 1 + after_open]
+            .to_string();
+        // The proposal is the whole document text: it opens with the shared heading and
+        // carries the newer version's line, folded or kept by the agent's own choice.
+        assert!(
+            proposal.contains("Someone else was here.")
+                || proposal.contains("The room, read-only."),
+            "the proposal should be a reconciliation of the versions; was:\n{proposal}"
+        );
+    }
+
     // --- The permission-ask seam ---------------------------------------------
 
     use super::{AskAnswer, AskBoard, AskNotice, AskResolution, AskSink};
