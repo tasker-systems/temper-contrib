@@ -28,7 +28,13 @@ similar = { version = "3", features = ["inline"] }
 regex = "1"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
+# The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
+# WKWebView driver. Behind a feature: the witness builds with `--features webdriver`, so
+# development and release builds never compile an endpoint.
+tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 
+[features]
+webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

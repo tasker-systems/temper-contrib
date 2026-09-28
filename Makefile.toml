@@ -176,6 +176,15 @@ if [ -z "${DISPLAY:-}" ] && command -v xvfb-run >/dev/null 2>&1; then run="xvfb-
 $run
 '''
 
+[tasks.desktop-csp-witness-macos]
+description = "CSP witness on macOS: the real WKWebView through the embedded WebDriver server (needs TEMPER_WITNESS_REF)"
+cwd = "${DESKTOP}"
+script = '''
+set -e
+bun run tauri build --debug --no-bundle --features webdriver
+uv run -q --with selenium>=4.20,<5 scripts/csp-witness-macos.py
+'''
+
 # =============================================================================
 # Python (ruff.toml at the root covers every .py file)
 # =============================================================================
