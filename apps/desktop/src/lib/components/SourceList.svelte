@@ -4,16 +4,12 @@
 	 * only when a writer names them, so a document with none says so plainly — none recorded,
 	 * not unknown, and not a statement about who wrote it (that is History's).
 	 */
-	import { PANEL_STEP, type Sources, walkOn } from '$lib/document';
+	import { PANEL_STEP, type Sources } from '$lib/document';
 	import BoundedList from './BoundedList.svelte';
 	import RegionState from './RegionState.svelte';
 	import ResourceRef from './ResourceRef.svelte';
 
-	let {
-		sources,
-		current,
-		walk
-	}: { sources: Sources; current: string; walk: string[] } = $props();
+	let { sources }: { sources: Sources } = $props();
 
 	let shown = $state(PANEL_STEP);
 	const rows = $derived(sources.blocks.slice(0, shown));
@@ -42,7 +38,7 @@
 					{#each block.sources as source, i (i)}
 						<li>
 							{#if source.kind === 'resource'}
-								<ResourceRef id={source.sourceId} hrefFor={(ref) => walkOn(ref, current, walk)} />
+								<ResourceRef id={source.sourceId} />
 							{:else if source.uri}
 								<span class="uri">{source.uri}</span>
 							{:else}

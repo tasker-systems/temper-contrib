@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { roomHref } from '$lib/document';
+	import { contextHref } from '$lib/shell/subjects';
 	import { ageWords, temperViews } from '$lib/temper-views.svelte';
 	import BoundedList from './BoundedList.svelte';
 	import type { RegionStateName } from './RegionState.svelte';
@@ -52,12 +53,12 @@
 		shown={v.contexts?.length ?? 0}
 	>
 		{#each v.contexts ?? [] as context (context.id)}
-			<span class="entry">
+			<a class="entry" href={contextHref(`${context.ownerRef}/${context.slug}`)}>
 				<span class="main">{context.ownerRef}/{context.slug}</span>
 				<span class="sub">
 					{context.name} · {context.resourceCount} {context.resourceCount === 1 ? 'resource' : 'resources'}
 				</span>
-			</span>
+			</a>
 		{/each}
 	</BoundedList>
 	{#if v.contexts !== null && !v.contextsFresh && v.contextsFetchedAt !== null}

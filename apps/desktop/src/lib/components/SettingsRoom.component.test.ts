@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Page from './settings/+page.svelte';
+import Page from './SettingsRoom.svelte';
 
 // jsdom has no matchMedia; the theme control watches the system preference.
 if (!window.matchMedia) {

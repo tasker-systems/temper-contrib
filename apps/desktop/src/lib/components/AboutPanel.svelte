@@ -23,7 +23,7 @@
 	import RelatedList from './RelatedList.svelte';
 	import SourceList from './SourceList.svelte';
 
-	let { id, walk }: { id: string; walk: string[] } = $props();
+	let { id }: { id: string } = $props();
 
 	type TabState = { state: 'arriving' } | PanelRead<unknown>;
 
@@ -95,13 +95,13 @@
 					detail={`temper found nothing it would show at this reference — ${current.reason}`}
 				/>
 			{:else if active === 'connections'}
-				<ConnectionList connections={current.data as Connections} current={id} {walk} />
+				<ConnectionList connections={current.data as Connections} />
 			{:else if active === 'related'}
-				<RelatedList related={current.data as Related} current={id} {walk} />
+				<RelatedList related={current.data as Related} />
 			{:else if active === 'history'}
 				<HistoryList history={current.data as History} />
 			{:else}
-				<SourceList sources={current.data as Sources} current={id} {walk} />
+				<SourceList sources={current.data as Sources} />
 			{/if}
 		</div>
 	{/if}

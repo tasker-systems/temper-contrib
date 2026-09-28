@@ -159,7 +159,7 @@
 	}
 </script>
 
-<main class="page">
+<div class="page">
 	<div class="ed-strip">
 		<span>settings</span><span class="ed-strip-sep">·</span>
 		<span>device facts — they stay on this machine</span>
@@ -271,7 +271,7 @@
 		<p class="t-strip">{contextStatus}</p>
 		<a class="t-action" href="/setup">set up the app…</a>
 	</section>
-</main>
+</div>
 
 <style>
 	.page {
