@@ -4,7 +4,9 @@ Content-Security-Policy in tauri.conf.json both ways.
 1. The app is whole under the policy: the shell renders styled, with its bundled fonts and IPC
    answering, and no `securitypolicyviolation` is raised while it is driven — a document opened
    in a tab, a second tab, a switch between them (the room kept, not remounted), a switch to a
-   lens that is not built yet, settings and setup opened as tabs, and home again.
+   lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
+   from it), the ways-in panel closed and reopened, settings and setup opened as tabs, and home
+   again.
 2. The policy is a backstop: an injected inline script, eval, an inline event handler, an inline
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
    as a violation naming its directive. Styling through the CSSOM, which Svelte's `style:`
@@ -35,7 +37,9 @@ from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -234,7 +238,8 @@ def main() -> int:
             )
             # Open tabs are a device fact and outlive a run: start from the home tab alone.
             driver.execute_script(
-                "localStorage.removeItem('temper-shell-tabs-v1'); location.reload();"
+                "localStorage.removeItem('temper-shell-tabs-v1');"
+                " localStorage.removeItem('temper-ways-in-v1'); location.reload();"
             )
             WebDriverWait(driver, 20).until(
                 lambda d: (
@@ -302,6 +307,56 @@ def main() -> int:
             ).click()
             WebDriverWait(driver, 10).until(active_text("graph lens"))
             step("switched lens")
+
+            # The palette, from its trigger: it filters what the desktop holds, and a lens switch
+            # run from it keeps the tab's subject.
+            driver.find_element(By.CSS_SELECTOR, ".palette-trigger").click()
+            palette = WebDriverWait(driver, 10).until(
+                lambda d: d.find_element(By.CSS_SELECTOR, '[role="dialog"] input')
+            )
+            palette.send_keys("document lens")
+            palette.send_keys(Keys.ENTER)
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
+            )
+            WebDriverWait(driver, 10).until(active_text("about this document"))
+            step("lens switched from the palette")
+
+            # Ctrl-K opens it from anywhere; Escape closes it.
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("k").key_up(
+                Keys.CONTROL
+            ).perform()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, '[role="dialog"] input')
+            )
+            step("the palette open")
+            driver.find_element(By.CSS_SELECTOR, '[role="dialog"] input').send_keys(Keys.ESCAPE)
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
+            )
+
+            # The ways-in panel closes and reopens as the same node: hidden, never remounted.
+            ways = driver.execute_script(
+                "return document.querySelector('nav[aria-label=\"Ways in\"]')"
+            )
+            if ways is None:
+                failures.append("the ways-in panel did not render")
+            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.querySelector('.ways').hidden")
+            )
+            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.execute_script("return document.querySelector('.ways').hidden")
+            )
+            if (
+                driver.execute_script(
+                    "return document.querySelector('nav[aria-label=\"Ways in\"]')"
+                )
+                != ways
+            ):
+                failures.append("reopening the ways-in panel remounted it")
+            step("the ways-in panel closed and reopened")
 
             # Settings and setup open as tabs, from the chrome menu — the way a person does.
             for href, words in [("/settings", "settings room"), ("/setup", "setup room")]:

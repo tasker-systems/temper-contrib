@@ -7,8 +7,12 @@
  * Home is the pinned first tab: it cannot be closed and has no trail to walk, so a link followed
  * from home opens a new tab rather than replacing home.
  *
- * Open tabs are a device fact: tabs, trails, cursors, the active tab and each step's last-known
- * title persist to this device's storage, bounded and versioned. A store that cannot be read
+ * Twelve tabs may be open beside home. Opening a thirteenth sets the least-recently-used tab
+ * aside — unmounted, listed, and reopened with its trail intact — and says which. A tab whose
+ * lens declines to leave (an unsaved draft) is never set aside.
+ *
+ * Open tabs are a device fact: tabs, trails, cursors, the active tab, the set-aside tabs and each
+ * step's last-known title persist to this device's storage, bounded and versioned. A store that cannot be read
  * yields the home tab alone, never an error. Restored tabs are not mounted — and read nothing —
  * until they are first shown.
  */
@@ -17,6 +21,8 @@ import { parseSubject, type Subject, subjectKey, subjectWords } from './subjects
 
 /** How many tabs may be open beside home. */
 export const TAB_BOUND = 12;
+/** How many set-aside tabs are remembered. Older ones drop off the end. */
+export const SET_ASIDE_BOUND = 20;
 /** How many steps back a tab's trail remembers. Older steps drop off the front. */
 export const TRAIL_BOUND = 20;
 export const HOME_TAB = 'home';
@@ -33,12 +39,16 @@ export interface Step {
 	title: string | null;
 	/** The doc type, once a read has said — what the lens switcher offers depends on it. */
 	docType: string | null;
+	/** The decorated ref temper gave a resource, once read — what the agent is shown. */
+	ref: string | null;
 }
 
 export interface Tab {
 	id: string;
 	steps: Step[];
 	cursor: number;
+	/** When the tab was last shown — which tab is least recently used. */
+	usedAt: number;
 }
 
 /** A room left: a step change, a tab close, or a tab set aside. */
@@ -54,10 +64,11 @@ const homeStep = (): Step => ({
 	subject: { kind: 'place', place: 'home' },
 	lens: 'core/home',
 	title: 'home',
-	docType: null
+	docType: null,
+	ref: null
 });
 
-const homeTab = (): Tab => ({ id: HOME_TAB, steps: [homeStep()], cursor: 0 });
+const homeTab = (): Tab => ({ id: HOME_TAB, steps: [homeStep()], cursor: 0, usedAt: 0 });
 
 /** The words a step goes by: its last-known title, else what its subject is called unread. */
 export function stepTitle(step: Step): string {
@@ -75,7 +86,8 @@ function readStep(raw: unknown): Step | null {
 		subject,
 		lens: text(s.lens),
 		title: text(s.title),
-		docType: text(s.docType)
+		docType: text(s.docType),
+		ref: text(s.ref)
 	};
 }
 
@@ -92,7 +104,16 @@ function readTab(raw: unknown): Tab | null {
 		typeof t.cursor === 'number' && Number.isInteger(t.cursor)
 			? Math.min(Math.max(t.cursor, 0), steps.length - 1)
 			: steps.length - 1;
-	return { id: t.id, steps, cursor };
+	const usedAt = typeof t.usedAt === 'number' && Number.isFinite(t.usedAt) ? t.usedAt : 0;
+	return { id: t.id, steps, cursor, usedAt };
+}
+
+/** A stored list of tabs, each read on its own; what is not a tab is dropped, and ids are unique. */
+function readTabs(raw: unknown, seen: Set<string>): Tab[] {
+	if (!Array.isArray(raw)) return [];
+	return raw
+		.map(readTab)
+		.filter((t): t is Tab => t !== null && !seen.has(t.id) && Boolean(seen.add(t.id)));
 }
 
 export class TabModel {
@@ -102,6 +123,8 @@ export class TabModel {
 	mounted = $state<Record<string, true>>({ [HOME_TAB]: true });
 	/** What the last move did or refused, in words — shown in the tab strip, cleared by the next move. */
 	notice = $state<string | null>(null);
+	/** Tabs set aside to make room, most recently set aside first. Unmounted; trails intact. */
+	setAside = $state<Tab[]>([]);
 
 	#storage: Storage | null;
 	#now: () => number;
@@ -130,7 +153,9 @@ export class TabModel {
 	}
 
 	activate(id: string): void {
-		if (!this.tabs.some((t) => t.id === id)) return;
+		const tab = this.tabs.find((t) => t.id === id);
+		if (!tab) return;
+		tab.usedAt = this.#now();
 		this.activeId = id;
 		this.mounted[id] = true;
 		this.notice = null;
@@ -153,7 +178,8 @@ export class TabModel {
 			subject,
 			lens: options.lens ?? null,
 			title: null,
-			docType: null
+			docType: null,
+			ref: null
 		};
 
 		if (where === 'here') {
@@ -168,18 +194,17 @@ export class TabModel {
 			return true;
 		}
 
-		if (this.openCount >= TAB_BOUND) {
-			this.notice = `${TAB_BOUND} tabs are open, the most this holds — close one to open ${subjectWords(subject)} in a new tab.`;
-			return false;
-		}
-		const tab: Tab = { id: mint('t'), steps: [step], cursor: 0 };
+		const room = this.#makeRoom(subjectWords(subject));
+		if (room === false) return false;
+		const tab: Tab = { id: mint('t'), steps: [step], cursor: 0, usedAt: this.#now() };
 		this.tabs.push(tab);
 		this.#entered(step);
 		this.activate(tab.id);
+		this.notice = room;
 		return true;
 	}
 
-	/** Focus a tab already showing this subject, else open it in a new tab. */
+	/** Focus a tab already showing this subject — open or set aside — else open it in a new tab. */
 	focusOrOpen(subject: Subject): boolean {
 		const key = subjectKey(subject);
 		const existing = this.tabs.find((t) => subjectKey(this.current(t).subject) === key);
@@ -187,7 +212,47 @@ export class TabModel {
 			this.activate(existing.id);
 			return true;
 		}
+		const aside = this.setAside.find((t) => subjectKey(this.current(t).subject) === key);
+		if (aside) return this.reopen(aside.id);
 		return this.open(subject, { where: 'new' });
+	}
+
+	/** Reopen a set-aside tab with its trail intact. It re-reads when shown, as any restored tab. */
+	reopen(id: string): boolean {
+		const tab = this.setAside.find((t) => t.id === id);
+		if (!tab) return false;
+		const room = this.#makeRoom(stepTitle(this.current(tab)));
+		if (room === false) return false;
+		this.setAside = this.setAside.filter((t) => t.id !== id);
+		this.tabs.push(tab);
+		this.#entered(this.current(tab));
+		this.activate(tab.id);
+		this.notice = room;
+		return true;
+	}
+
+	/**
+	 * Make room for one more tab. Under the bound there is room already (`null`, nothing to say).
+	 * At the bound the least-recently-used tab willing to leave is set aside, and the answer says
+	 * which. When every tab declines, nothing is set aside, `false` is answered and the notice says
+	 * why.
+	 */
+	#makeRoom(opening: string): string | null | false {
+		if (this.openCount < TAB_BOUND) return null;
+		const chosen = this.tabs
+			.filter((t) => t.id !== HOME_TAB && t.id !== this.activeId)
+			.sort((a, b) => a.usedAt - b.usedAt)
+			.find((t) => this.#willLeave(t));
+		if (!chosen) {
+			this.notice = `${TAB_BOUND} tabs are open and none can be set aside without losing work — close one to open ${opening}.`;
+			return false;
+		}
+		this.#left(this.current(chosen));
+		this.tabs = this.tabs.filter((t) => t.id !== chosen.id);
+		this.#guards.delete(chosen.id);
+		delete this.mounted[chosen.id];
+		this.setAside = [chosen, ...this.setAside].slice(0, SET_ASIDE_BOUND);
+		return `Set aside ${stepTitle(this.current(chosen))} to open ${opening}.`;
 	}
 
 	canBack(tab: Tab): boolean {
@@ -233,12 +298,13 @@ export class TabModel {
 		this.#save();
 	}
 
-	/** The host resolved a step's lens (and, for a resource, learned its doc type). */
-	resolved(stepKey: string, lens: string, docType: string | null): void {
+	/** The host resolved a step's lens (and, for a resource, learned its doc type and ref). */
+	resolved(stepKey: string, lens: string, docType: string | null, ref: string | null = null): void {
 		const step = this.#step(stepKey);
 		if (!step) return;
 		step.lens = lens;
 		if (docType) step.docType = docType;
+		if (ref) step.ref = ref;
 		this.#save();
 	}
 
@@ -294,6 +360,12 @@ export class TabModel {
 		return true;
 	}
 
+	/** Whether a tab's lens would let it go — asked without saying anything when it would not. */
+	#willLeave(tab: Tab): boolean {
+		const answer = this.#guards.get(tab.id)?.();
+		return answer === undefined || answer === true;
+	}
+
 	#mayLeave(tab: Tab): boolean {
 		const answer = this.#guards.get(tab.id)?.();
 		if (answer === undefined || answer === true) return true;
@@ -322,14 +394,17 @@ export class TabModel {
 		}
 		if (raw) {
 			try {
-				const stored = JSON.parse(raw) as { v?: unknown; active?: unknown; tabs?: unknown };
+				const stored = JSON.parse(raw) as {
+					v?: unknown;
+					active?: unknown;
+					tabs?: unknown;
+					setAside?: unknown;
+				};
 				if (stored.v === 1 && Array.isArray(stored.tabs)) {
 					const seen = new Set<string>();
-					const tabs = stored.tabs
-						.map(readTab)
-						.filter((t): t is Tab => t !== null && !seen.has(t.id) && Boolean(seen.add(t.id)))
-						.slice(0, TAB_BOUND);
+					const tabs = readTabs(stored.tabs, seen).slice(0, TAB_BOUND);
 					this.tabs = [homeTab(), ...tabs];
+					this.setAside = readTabs(stored.setAside, seen).slice(0, SET_ASIDE_BOUND);
 					const active = typeof stored.active === 'string' ? stored.active : HOME_TAB;
 					this.activeId = this.tabs.some((t) => t.id === active) ? active : HOME_TAB;
 				}
@@ -348,7 +423,8 @@ export class TabModel {
 				JSON.stringify({
 					v: 1,
 					active: this.activeId,
-					tabs: this.tabs.filter((t) => t.id !== HOME_TAB)
+					tabs: this.tabs.filter((t) => t.id !== HOME_TAB),
+					setAside: this.setAside
 				})
 			);
 		} catch {

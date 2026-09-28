@@ -2,6 +2,8 @@
 	export type ChatMessage = {
 		role: 'user' | 'assistant' | 'system';
 		text: string;
+		/** What went with a person's prompt: the name of the room shared with the agent. */
+		with?: string;
 		toolCallId?: string;
 		status?: string;
 	};
@@ -32,6 +34,7 @@
 		{:else}
 			<p class={message.role}>
 				{message.text}{message.status ? ` · ${message.status}` : ''}
+				{#if message.with}<span class="with">with: <em>{message.with}</em></span>{/if}
 			</p>
 		{/if}
 	{/each}
@@ -41,6 +44,18 @@
 </div>
 
 <style>
+	.with {
+		display: block;
+		margin-top: 0.2rem;
+		font: 0.6rem var(--tp-font-doing);
+		letter-spacing: var(--tp-tracking-strip);
+		color: var(--tp-text-subtle);
+	}
+	.with em {
+		font: italic 0.8rem var(--tp-font-reading);
+		letter-spacing: normal;
+		color: var(--tp-text-muted);
+	}
 	.transcript {
 		box-sizing: border-box;
 		width: 100%;
