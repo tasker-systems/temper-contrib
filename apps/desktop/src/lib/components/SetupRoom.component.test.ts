@@ -7,8 +7,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { temperViews } from '../lib/temper-views.svelte';
-import Page from './setup/+page.svelte';
+import { temperViews } from '$lib/temper-views.svelte';
+import Page from './SetupRoom.svelte';
 
 type CtxRow = {
 	id: string;

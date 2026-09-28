@@ -101,7 +101,7 @@
 	}
 </script>
 
-<main class="page">
+<div class="page">
 	<div class="ed-strip">
 		<span>setup</span><span class="ed-strip-sep">·</span>
 		<span>choose where the app stores your facts</span>
@@ -205,7 +205,7 @@
 			{/if}
 		{/if}
 	</section>
-</main>
+</div>
 
 <style>
 	.page {

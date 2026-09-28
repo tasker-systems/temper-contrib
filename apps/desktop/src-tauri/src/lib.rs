@@ -3,9 +3,11 @@ mod document;
 mod document_panel;
 mod document_save;
 mod hub;
+mod hub_queue;
 mod person_context;
 mod settings;
 mod temper;
+mod window;
 mod work;
 
 use tauri::Manager;
@@ -15,7 +17,17 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
-            app.manage(settings::SettingsState::load(dir));
+            app.manage(settings::SettingsState::load(dir.clone()));
+            let queue = hub_queue::HubQueue::load(dir);
+            let pending = !queue.queued().is_empty();
+            app.manage(queue);
+            // Leaves queued by an earlier run that exited offline are committed now.
+            if pending {
+                hub_queue::commit_soon(app.handle().clone());
+            }
+            if let Some(main) = app.get_webview_window("main") {
+                window::fit_to_monitor(&main);
+            }
             Ok(())
         })
         .manage(temper::TemperState::connect())
@@ -25,6 +37,7 @@ pub fn run() {
             settings::settings_set_working_dir,
             settings::settings_set_theme,
             settings::settings_set_temper_context,
+            settings::settings_set_device_label,
             settings::settings_set_agent,
             settings::settings_remove_agent,
             temper::temper_connection_status,
@@ -42,9 +55,11 @@ pub fn run() {
             temper::temper_contexts,
             temper::temper_context_create,
             temper::temper_recent_work,
+            temper::temper_list_resources,
             work::temper_write_work_record,
             hub::hub_commit_recent_work,
             hub::hub_recent_work,
+            hub_queue::hub_note_left,
             acp::acp_start,
             acp::acp_prompt,
             acp::acp_set_mode,
@@ -53,6 +68,13 @@ pub fn run() {
             acp::acp_ask_surface,
             acp::acp_answer_permission
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // One bounded attempt to commit what is queued; the rest waits in
+            // the queue file for the next launch.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                hub_queue::flush_at_exit(app);
+            }
+        });
 }

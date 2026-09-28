@@ -36,6 +36,10 @@ pub struct DeviceSettings {
     /// profile-owned (`@<handle>/<name>`). Unset means the default; an
     /// app-setup flow will own choosing and validating it.
     pub temper_context: Option<String>,
+    /// What this device is called where its facts meet another device's —
+    /// the hub's recent work says "on `<label>`". Unset means the machine's
+    /// hostname.
+    pub device_label: Option<String>,
 }
 
 /// The context name used until a setting says otherwise.
@@ -48,6 +52,35 @@ impl DeviceSettings {
             .as_deref()
             .unwrap_or(DEFAULT_TEMPER_CONTEXT)
     }
+}
+
+impl DeviceSettings {
+    /// The device's label — the setting, else the machine's hostname, else
+    /// words that say only that it is this device.
+    pub fn device_label(&self) -> String {
+        self.device_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .or_else(|| machine_hostname().clone())
+            .unwrap_or_else(|| "this device".to_string())
+    }
+}
+
+/// The machine's hostname, asked once. `hostname` answers on macOS and
+/// Linux alike; a machine where it does not is simply unnamed.
+fn machine_hostname() -> &'static Option<String> {
+    static HOSTNAME: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    HOSTNAME.get_or_init(|| {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .map(|name| name.trim().trim_end_matches(".local").to_string())
+            .filter(|name| !name.is_empty())
+    })
 }
 
 const FILE_NAME: &str = "device-settings.json";
@@ -92,6 +125,17 @@ impl SettingsState {
             return Err("a temper context name is required".to_string());
         }
         self.persist(|s| s.temper_context = Some(name))
+    }
+
+    /// Names this device. A blank label clears it, back to the hostname.
+    pub fn set_device_label(&self, label: String) -> Result<(), String> {
+        let label = label.trim().to_string();
+        self.persist(|s| s.device_label = (!label.is_empty()).then_some(label))
+    }
+
+    /// The device's label as the hub records it.
+    pub fn device_label(&self) -> String {
+        self.get().device_label()
     }
 
     /// Stores one agent's launch facts by its key. An empty launch command
@@ -179,6 +223,14 @@ pub fn settings_set_temper_context(
     name: String,
 ) -> Result<(), String> {
     state.set_temper_context(name)
+}
+
+#[tauri::command]
+pub fn settings_set_device_label(
+    state: tauri::State<SettingsState>,
+    label: String,
+) -> Result<(), String> {
+    state.set_device_label(label)
 }
 
 #[tauri::command]

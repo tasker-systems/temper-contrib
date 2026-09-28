@@ -6,17 +6,13 @@
 	 *
 	 * The relationship reads in the author's own words — the edge's label, verbatim — or not at
 	 * all; the arrows are direction, not relationship. A resource peer is a reference into its
-	 * own room, carrying the walk; a blob peer has no room and stays inert.
+	 * own room; a blob peer has no room and stays inert.
 	 */
-	import { PANEL_STEP, type Connections, walkOn } from '$lib/document';
+	import { PANEL_STEP, type Connections } from '$lib/document';
 	import BoundedList from './BoundedList.svelte';
 	import ResourceRef from './ResourceRef.svelte';
 
-	let {
-		connections,
-		current,
-		walk
-	}: { connections: Connections; current: string; walk: string[] } = $props();
+	let { connections }: { connections: Connections } = $props();
 
 	let shown = $state(PANEL_STEP);
 	const rows = $derived(connections.edges.slice(0, shown));
@@ -42,7 +38,6 @@
 				<ResourceRef
 					id={edge.peerId}
 					titleHint={edge.peerTitle}
-					hrefFor={(ref) => walkOn(ref, current, walk)}
 				/>
 			{:else}
 				<span class="blob">blob · {edge.peerId.slice(0, 8)}</span>

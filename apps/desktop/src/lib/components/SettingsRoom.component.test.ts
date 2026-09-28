@@ -6,7 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Page from './settings/+page.svelte';
+import Page from './SettingsRoom.svelte';
 
 // jsdom has no matchMedia; the theme control watches the system preference.
 if (!window.matchMedia) {
@@ -64,13 +64,45 @@ describe('the settings room', () => {
 		const saves = [...container.querySelectorAll('button')].filter(
 			(b) => b.textContent === 'Save' || b.textContent === 'Saving…'
 		);
-		// The working directory's save is first; the temper context's is second.
-		expect(saves.length).toBe(2);
-		await fireEvent.click(saves[1]);
+		// The working directory's save is first, the device label's second, the temper context's last.
+		expect(saves.length).toBe(3);
+		await fireEvent.click(saves[2]);
 
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke)).toHaveBeenCalledWith('settings_set_temper_context', {
 				name: 'renamed-context'
+			})
+		);
+	});
+});
+
+describe("this device's label", () => {
+	beforeEach(() => {
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'settings_get') {
+				return Promise.resolve({ workingDir: '/w', temperContext: 'c', deviceLabel: 'station' });
+			}
+			return Promise.resolve(null);
+		}) as never);
+	});
+
+	it('reads the label from the store and saves a change through it', async () => {
+		const { container } = render(Page);
+		const input = await vi.waitFor(() => {
+			const found = container.querySelector(
+				'input[placeholder="this machine\'s hostname"]'
+			) as HTMLInputElement;
+			expect(found.value).toBe('station');
+			return found;
+		});
+		await fireEvent.input(input, { target: { value: 'laptop' } });
+		const save = [...container.querySelectorAll('button')].filter(
+			(b) => b.textContent === 'Save'
+		)[1];
+		await fireEvent.click(save);
+		await vi.waitFor(() =>
+			expect(vi.mocked(invoke)).toHaveBeenCalledWith('settings_set_device_label', {
+				label: 'laptop'
 			})
 		);
 	});

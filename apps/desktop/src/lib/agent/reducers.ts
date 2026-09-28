@@ -54,6 +54,8 @@ export type DeclaredConfigOption = {
 export type ChatMessage = {
 	role: 'user' | 'assistant' | 'system';
 	text: string;
+	/** What went with a person's prompt: the name of the room shared with the agent. */
+	with?: string;
 	toolCallId?: string;
 	status?: string;
 };

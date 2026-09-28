@@ -1,11 +1,6 @@
 /**
- * The document room's model: the shapes its core commands answer with, and the walk that
- * carries a person from room to room.
- *
- * The walk lives in the URL, not in memory. A room entered from another room carries where it
- * was entered from, so the way out returns there, and that room's way out returns to the one
- * before. A room entered directly carries no walk, and its way out is home. Discarding every
- * local store loses nothing: the address is the whole state.
+ * The document room's model: the shapes its core commands answer with, and the address a link
+ * into a room carries. Where a room was entered from is the tab's trail (`$lib/shell/tabs`).
  */
 
 // ─── Wire shapes (src-tauri/src/document.rs, document_panel.rs) ────────────────────────────────
@@ -112,10 +107,7 @@ export const PANEL_TABS = [
 
 export type PanelTab = (typeof PANEL_TABS)[number]['key'];
 
-// ─── The walk ──────────────────────────────────────────────────────────────────────────────────
-
-/** How many rooms back the way out remembers. Older steps drop off the front of the walk. */
-export const WALK_BOUND = 20;
+// ─── Addresses ─────────────────────────────────────────────────────────────────────────────────
 
 const UUID_TAIL = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -124,33 +116,12 @@ export function refId(ref: string): string | null {
 	return ref.trim().match(UUID_TAIL)?.[0].toLowerCase() ?? null;
 }
 
-/** The walk a room's address carries: the rooms it was entered through, oldest first. */
-export function parseWalk(raw: string | null): string[] {
-	if (!raw) return [];
-	return raw
-		.split(',')
-		.map((step) => refId(step))
-		.filter((id): id is string => id !== null)
-		.slice(-WALK_BOUND);
-}
-
-/** The address of a room. With a walk, the room remembers where it was entered from. */
-export function roomHref(target: string, walk: readonly string[] = []): string {
-	const steps = walk.slice(-WALK_BOUND);
-	const base = `/r/${encodeURIComponent(target)}`;
-	return steps.length ? `${base}?walk=${steps.join(',')}` : base;
-}
-
-/** The address of a room entered from `current`, which itself was entered through `walk`. */
-export function walkOn(target: string, current: string, walk: readonly string[]): string {
-	const here = refId(current);
-	return roomHref(target, here ? [...walk, here] : walk);
-}
-
-/** Where a room's way out leads: back one step along the walk, or home when there is none. */
-export function wayOutOf(walk: readonly string[]): { href: string; label: string } {
-	if (walk.length === 0) return { href: '/', label: 'home' };
-	return { href: roomHref(walk[walk.length - 1], walk.slice(0, -1)), label: 'back' };
+/**
+ * The address of a document's room. It names only its target: where the link was followed from
+ * belongs to the tab's own trail, never to the link.
+ */
+export function roomHref(target: string): string {
+	return `/r/${encodeURIComponent(target)}`;
 }
 
 /** How many rows a panel tab shows at first, and how many more each "show more" adds. */

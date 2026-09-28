@@ -1,8 +1,12 @@
 """The CSP witness: drives a production build of the desktop in its real webview and checks the
 Content-Security-Policy in tauri.conf.json both ways.
 
-1. The app is whole under the policy: every route renders styled, with its bundled fonts, IPC
-   answering, and no `securitypolicyviolation` raised while moving between them.
+1. The app is whole under the policy: the shell renders styled, with its bundled fonts and IPC
+   answering, and no `securitypolicyviolation` is raised while it is driven — a document opened
+   in a tab, a second tab, a switch between them (the room kept, not remounted), a switch to a
+   lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
+   from it), the ways-in panel closed and reopened, settings and setup opened as tabs, and home
+   again.
 2. The policy is a backstop: an injected inline script, eval, an inline event handler, an inline
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
    as a violation naming its directive. Styling through the CSSOM, which Svelte's `style:`
@@ -33,7 +37,9 @@ from pathlib import Path
 
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.options import ArgOptions
 from selenium.webdriver.support.ui import WebDriverWait
 
@@ -42,7 +48,7 @@ DEFAULT_BINARY = APP / "src-tauri" / "target" / "debug" / "desktop"
 DRIVER_PORT = 4444
 REMOTE = "https://example.com"
 
-# Recorded on the document, which survives client-side navigation between routes.
+# Recorded on the document, which lives as long as the window: the shell never navigates.
 LISTEN = """
 window.__csp = window.__csp || [];
 if (!window.__cspListening) {
@@ -53,36 +59,49 @@ if (!window.__cspListening) {
 }
 """
 
-# A route is whole when theme roles resolved, the bundled reading font loaded and the room frame
-# rendered. Blocked stylesheets or fonts fail the first two; a blocked script renders nothing.
+# A step is whole when theme roles resolved, the bundled reading font loaded, the masthead and
+# the agent panel rendered, and the active tab has a body. Blocked stylesheets or fonts fail the
+# first two; a blocked script renders nothing.
 HEALTH = """
 const done = arguments[arguments.length - 1];
-document.fonts.ready.then(() => {
+// Ask for the bundled reading face by name: a font is fetched only when something needs it, so
+// the load is what puts `font-src` to the test. A refused font leaves the face unloaded.
+document.fonts.load('16px "Source Serif 4 Variable"').catch(() => []).then(() => document.fonts.ready).then(() => {
   const root = getComputedStyle(document.documentElement);
+  const active = document.querySelector('.tab-body:not([hidden])');
   done({
-    path: location.pathname,
+    tab: document.querySelector('[role="tab"][aria-selected="true"]')?.innerText ?? null,
     ground: root.getPropertyValue('--tp-ground').trim(),
     background: root.backgroundColor,
     readingFont: document.fonts.check('16px "Source Serif 4 Variable"'),
     fontsLoaded: [...document.fonts].filter((f) => f.status === 'loaded').length,
     masthead: !!document.querySelector('header a[href="/"]'),
     agentPanel: !!document.querySelector('aside[aria-label="Agent"]'),
-    text: document.body.innerText.slice(0, 400)
+    tabs: document.querySelectorAll('[role="tab"]').length,
+    body: active ? active.innerText.slice(0, 300) : null
   });
 });
 """
 
-# A document room, addressed by a well-formed reference that names nothing: the room must render
-# whole whatever temper answers, including when nothing answers at all.
-DOCUMENT_ROOM = "/r/00000000-0000-7000-8000-000000000000"
+# A document, addressed by a well-formed reference that names nothing: the room must render whole
+# whatever temper answers, including when nothing answers at all.
+DOCUMENT = "/r/00000000-0000-7000-8000-000000000000"
+CONTEXT = "/q?context=%2Btemper-dev%2Fcontrib"
 
+# Links stay links: the witness places an in-app link inside the shell and clicks it, so the move
+# goes through the shell's own delegated handler. `modified` stands for a ⌘/Ctrl-click.
 FOLLOW_LINK = """
 const link = document.createElement('a');
 link.href = arguments[0];
-document.querySelector('header').append(link);
-link.click();
+link.textContent = 'witness link';
+document.querySelector('.tab-body:not([hidden])').append(link);
+link.dispatchEvent(new MouseEvent('click', {
+  bubbles: true, cancelable: true, button: 0, ctrlKey: arguments[1], metaKey: arguments[1]
+}));
 link.remove();
 """
+
+ACTIVE_ROOM = "return document.querySelector('.tab-body:not([hidden]) > *')"
 
 PROBES = """
 const done = arguments[arguments.length - 1];
@@ -167,6 +186,10 @@ HELD = {
 }
 
 
+# Home's pinned sections as the shipped contributions declare them (core and temper-workflows).
+HOME_SECTIONS = 6
+
+
 def wait_for_port(port: int, timeout: float = 10.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -184,9 +207,11 @@ def healthy(h: dict) -> list[str]:
     if not h["readingFont"]:
         problems.append("the bundled reading font did not load (font-src?)")
     if not h["masthead"]:
-        problems.append("the room frame did not render (a script was refused?)")
+        problems.append("the masthead did not render (a script was refused?)")
     if not h.get("agentPanel"):
         problems.append("the agent panel did not render (a script was refused?)")
+    if not h.get("body"):
+        problems.append("the active tab has no body")
     return problems
 
 
@@ -215,6 +240,18 @@ def main() -> int:
             WebDriverWait(driver, 20).until(
                 lambda d: d.find_elements(By.CSS_SELECTOR, 'header a[href="/"]')
             )
+            # Open tabs are a device fact and outlive a run: start from the home tab alone.
+            driver.execute_script(
+                "localStorage.removeItem('temper-shell-tabs-v1');"
+                " localStorage.removeItem('temper-ways-in-v1'); location.reload();"
+            )
+            WebDriverWait(driver, 20).until(
+                lambda d: (
+                    d.execute_script("return document.readyState") == "complete"
+                    and d.find_elements(By.CSS_SELECTOR, 'header a[href="/"]')
+                    and len(d.find_elements(By.CSS_SELECTOR, '[role="tab"]')) == 1
+                )
+            )
             driver.execute_script(LISTEN)
 
             # IPC answers under connect-src: the connection line settles to a verdict either way.
@@ -222,30 +259,139 @@ def main() -> int:
                 lambda d: "onnected" in d.find_element(By.TAG_NAME, "body").text
             )
 
-            routes = []
-            for href in ["/settings", "/setup", DOCUMENT_ROOM, "/"]:
-                if href == "/setup":
-                    # The setup room is reached only through the chrome menu — the
-                    # witness opens it the way a person does before clicking the entry.
-                    driver.find_element(By.CSS_SELECTOR, "header .chrome-menu button").click()
-                if href == DOCUMENT_ROOM:
-                    # A document room has no masthead entry; it is reached through a link to a
-                    # resource. The witness places one in the frame and follows it, so the room
-                    # renders through the app's own router. Without temper credentials the
-                    # room renders its failure regions, and must still be whole.
-                    driver.execute_script(FOLLOW_LINK, href)
-                else:
-                    driver.find_element(By.CSS_SELECTOR, f'header a[href="{href}"]').click()
-                WebDriverWait(driver, 10).until(
-                    lambda d, h=href: d.execute_script("return location.pathname") == h
-                )
+            steps = []
+
+            def step(name: str) -> None:
                 health = driver.execute_async_script(HEALTH)
-                routes.append(health)
-                failures += [f"{href}: {p}" for p in healthy(health)]
+                health["step"] = name
+                steps.append(health)
+                failures.extend(f"{name}: {p}" for p in healthy(health))
+
+            def tab_count(n: int):
+                return lambda d: len(d.find_elements(By.CSS_SELECTOR, '[role="tab"]')) == n
+
+            def active_text(text: str):
+                # Rendered text: case follows the stylesheet, so compare without it.
+                return lambda d: any(
+                    text.lower() in e.text.lower()
+                    for e in d.find_elements(By.CSS_SELECTOR, ".tab-body:not([hidden])")
+                )
+
+            # Home is its pinned sections: every one renders, built or named as unbuilt.
+            WebDriverWait(driver, 10).until(
+                lambda d: (
+                    len(d.find_elements(By.CSS_SELECTOR, ".tab-body:not([hidden]) [data-section]"))
+                    == HOME_SECTIONS
+                )
+            )
+            step("home")
+
+            # A document opened from home opens in a new tab. Without temper credentials the room
+            # renders its failure regions, and must still be whole.
+            driver.execute_script(FOLLOW_LINK, DOCUMENT, False)
+            WebDriverWait(driver, 10).until(tab_count(2))
+            WebDriverWait(driver, 10).until(active_text("document"))
+            step("a document in a tab")
+            document_tab = driver.find_element(
+                By.CSS_SELECTOR, '[role="tab"][aria-selected="true"]'
+            )
+            document_room = driver.execute_script(ACTIVE_ROOM)
+
+            # A second tab, by a modified click on a context: it opens on the table lens, which is
+            # not built yet and says so.
+            driver.execute_script(FOLLOW_LINK, CONTEXT, True)
+            WebDriverWait(driver, 10).until(tab_count(3))
+            WebDriverWait(driver, 10).until(active_text("isn\u2019t built yet"))
+            step("a second tab, on an unbuilt lens")
+
+            # Back to the document's tab: the same room node, so it was kept, not remounted.
+            document_tab.click()
+            WebDriverWait(driver, 10).until(active_text("document"))
+            if driver.execute_script(ACTIVE_ROOM) != document_room:
+                failures.append("switching back to a tab remounted its room")
+            step("switched back")
+
+            # A lens switch, to one that is not built yet.
+            driver.find_element(
+                By.XPATH,
+                '//nav[@aria-label="This room"]//button[starts-with(normalize-space(), "graph")]',
+            ).click()
+            WebDriverWait(driver, 10).until(active_text("graph lens"))
+            step("switched lens")
+
+            # The palette, from its trigger: it filters what the desktop holds, and a lens switch
+            # run from it keeps the tab's subject.
+            driver.find_element(By.CSS_SELECTOR, ".palette-trigger").click()
+            palette = WebDriverWait(driver, 10).until(
+                lambda d: d.find_element(By.CSS_SELECTOR, '[role="dialog"] input')
+            )
+            palette.send_keys("document lens")
+            palette.send_keys(Keys.ENTER)
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
+            )
+            WebDriverWait(driver, 10).until(active_text("about this document"))
+            step("lens switched from the palette")
+
+            # Ctrl-K opens it from anywhere; Escape closes it.
+            ActionChains(driver).key_down(Keys.CONTROL).send_keys("k").key_up(
+                Keys.CONTROL
+            ).perform()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, '[role="dialog"] input')
+            )
+            step("the palette open")
+            driver.find_element(By.CSS_SELECTOR, '[role="dialog"] input').send_keys(Keys.ESCAPE)
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
+            )
+
+            # The ways-in panel closes and reopens as the same node: hidden, never remounted.
+            ways = driver.execute_script(
+                "return document.querySelector('nav[aria-label=\"Ways in\"]')"
+            )
+            if ways is None:
+                failures.append("the ways-in panel did not render")
+            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.querySelector('.ways').hidden")
+            )
+            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.execute_script("return document.querySelector('.ways').hidden")
+            )
+            if (
+                driver.execute_script(
+                    "return document.querySelector('nav[aria-label=\"Ways in\"]')"
+                )
+                != ways
+            ):
+                failures.append("reopening the ways-in panel remounted it")
+            step("the ways-in panel closed and reopened")
+
+            # Settings and setup open as tabs, from the chrome menu — the way a person does.
+            for href, words in [("/settings", "settings room"), ("/setup", "setup room")]:
+                driver.find_element(By.CSS_SELECTOR, "header .chrome-menu button").click()
+                driver.find_element(
+                    By.CSS_SELECTOR, f'header .chrome-menu a[href="{href}"]'
+                ).click()
+                WebDriverWait(driver, 10).until(active_text(words))
+                step(href.strip("/"))
+
+            driver.find_element(By.CSS_SELECTOR, 'header a[href="/"]').click()
+            WebDriverWait(driver, 10).until(
+                lambda d: (
+                    "home"
+                    in d.find_element(
+                        By.CSS_SELECTOR, '[role="tab"][aria-selected="true"]'
+                    ).text.lower()
+                )
+            )
+            step("home again")
 
             clean = driver.execute_script("return window.__csp")
             if clean:
-                failures.append(f"violations while rendering routes: {json.dumps(clean)}")
+                failures.append(f"violations while driving the shell: {json.dumps(clean)}")
 
             probes = driver.execute_async_script(PROBES, REMOTE)
             violations = driver.execute_script("return window.__csp")
@@ -259,7 +405,7 @@ def main() -> int:
 
             report = {
                 "binary": str(binary),
-                "routes": routes,
+                "steps": steps,
                 "violations_while_rendering": clean,
                 "probes": probes,
                 "violations_from_probes": violations,
@@ -280,7 +426,7 @@ def main() -> int:
         print("\nCSP witness FAILED:", *failures, sep="\n  - ", file=sys.stderr)
         return 1
     print(
-        "\nCSP witness held: routes whole with no violations; every probe refused;"
+        "\nCSP witness held: the shell whole with no violations; every probe refused;"
         " the capability boundary holds."
     )
     return 0

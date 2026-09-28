@@ -7,7 +7,7 @@
 	 *
 	 * A resolved reference is a link into the document room at the address temper gave it.
 	 * Resolving, unresolved and failed references stay inert: a link to what temper did not
-	 * answer for would overstate itself. `hrefFor` lets a room carry its walk into the link. A long
+	 * answer for would overstate itself. `hrefFor` lets a caller address the link otherwise. A long
 	 * title is truncated to one line, so the tooltip leads with the whole title, then the home and
 	 * the decorated ref.
 	 */
