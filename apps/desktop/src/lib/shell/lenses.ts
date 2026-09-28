@@ -26,6 +26,11 @@ export interface TabHandle {
 
 export interface LensProps {
 	subject: Subject;
+	/**
+	 * For a lens pinned to home: how many times home has been shown. A section reads when this
+	 * changes — once per show, never on hover, never on a timer.
+	 */
+	shown?: number;
 	/** The host's open answer, for a resource subject: the one read made on opening. */
 	opened?: DocOpened;
 	tab: TabHandle;
@@ -51,6 +56,17 @@ export interface LensDecl {
 		queryBy?: ('context' | 'docType' | 'text')[];
 	};
 	build: LensBuild;
+	/**
+	 * A lens that accepts home and is pinned to it is one of home's sections, at this order. Home
+	 * is lenses pinned to it (ruling A): this is the lens contribution point with one declared
+	 * field, not a fifth point.
+	 */
+	pinned?: { home: number };
+	/**
+	 * The heading a pinned section sits under. Consecutive sections in one group share a single
+	 * heading, drawn once by the first of them.
+	 */
+	group?: string;
 }
 
 /**
@@ -175,4 +191,24 @@ export function lensesFor(
 /** One lens by id, among the enabled contributions. */
 export function lensById(id: string, contributions: readonly Contribution[]): LensDecl | null {
 	return allLenses(contributions).find((l) => l.id === id) ?? null;
+}
+
+const HOME_SUBJECT: Subject = { kind: 'place', place: 'home' };
+
+/** A section of home, with whether it opens a new heading. */
+export type HomeSection = { lens: LensDecl; heading: string | null };
+
+/**
+ * Home's sections: every enabled lens pinned to home that accepts it, in pinned order. The frame
+ * itself (`core/home`) is never a section. A section opens a heading when its group differs from
+ * the section before it.
+ */
+export function homeSections(contributions: readonly Contribution[]): HomeSection[] {
+	const pinned = allLenses(contributions)
+		.filter((lens) => lens.pinned && accepts(lens, HOME_SUBJECT))
+		.sort((a, b) => (a.pinned?.home ?? 0) - (b.pinned?.home ?? 0));
+	return pinned.map((lens, i) => ({
+		lens,
+		heading: lens.group && lens.group !== pinned[i - 1]?.group ? lens.group : null
+	}));
 }

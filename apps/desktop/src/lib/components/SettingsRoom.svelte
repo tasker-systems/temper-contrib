@@ -1,8 +1,8 @@
 <script lang="ts">
 	/**
 	 * The settings room: the device's preferences. Bounded and closable — it holds
-	 * Appearance, Agents, and the temper context the person's facts land in, and
-	 * stays silent about what it does not hold. Device facts stay on this
+	 * Appearance, Agents, the temper context the person's facts land in, and this
+	 * device's label, and stays silent about what it does not hold. Device facts stay on this
 	 * machine; the temper context names where person facts go.
 	 */
 	import { onMount } from 'svelte';
@@ -26,6 +26,12 @@
 	let justSavedContext = $state(false);
 	let saveContextError = $state('');
 
+	let deviceLabel = $state('');
+	let storedLabel = $state('');
+	let savingLabel = $state(false);
+	let justSavedLabel = $state(false);
+	let saveLabelError = $state('');
+
 	// Agents by configuration: the store's roster, and the form for adding or
 	// changing one. `agentKey` names the entry being edited; an empty key means
 	// the form is adding a new one under the key the person typed.
@@ -42,6 +48,8 @@
 	const saved = $derived(justSaved && !dirty);
 	const contextDirty = $derived(temperContext !== storedContext);
 	const contextSaved = $derived(justSavedContext && !contextDirty);
+	const labelDirty = $derived(deviceLabel !== storedLabel);
+	const labelSaved = $derived(justSavedLabel && !labelDirty);
 
 	// What the configured name resolves to, read from the temper views the whole app
 	// shares. This field is the raw editor; only the setup room validates and saves
@@ -67,8 +75,10 @@
 			const settings = await invoke<{
 				workingDir?: string | null;
 				temperContext?: string | null;
+				deviceLabel?: string | null;
 				agents?: Record<string, AgentLaunch>;
 			}>('settings_get');
+			deviceLabel = storedLabel = settings.deviceLabel ?? '';
 			workingDir = stored = settings.workingDir ?? '';
 			temperContext = storedContext = settings.temperContext ?? '';
 			agents = settings.agents ?? {};
@@ -106,6 +116,23 @@
 			saveContextError = String(e);
 		} finally {
 			savingContext = false;
+		}
+	}
+
+	async function saveDeviceLabel(): Promise<void> {
+		savingLabel = true;
+		justSavedLabel = false;
+		saveLabelError = '';
+		const value = deviceLabel;
+		try {
+			await invoke('settings_set_device_label', { label: value });
+			storedLabel = value.trim();
+			deviceLabel = storedLabel;
+			justSavedLabel = true;
+		} catch (e) {
+			saveLabelError = String(e);
+		} finally {
+			savingLabel = false;
 		}
 	}
 
@@ -247,6 +274,33 @@
 		</div>
 	</section>
 
+	<p class="t-label">This device</p>
+	<section class="ed-rail">
+		<label class="field">
+			<span class="t-strip">Device label</span>
+			<input bind:value={deviceLabel} placeholder="this machine's hostname" />
+		</label>
+		<div class="actions">
+			<button
+				class="ed-action ed-action--primary"
+				onclick={saveDeviceLabel}
+				disabled={savingLabel || !labelDirty}
+			>
+				{savingLabel ? 'Saving…' : 'Save'}
+			</button>
+			{#if labelSaved}<span class="t-strip" role="status">saved</span>{/if}
+		</div>
+		{#if saveLabelError}
+			<p class="ed-notice" role="alert">
+				Not saved — this device's label is unchanged. {saveLabelError}
+			</p>
+		{/if}
+		<p class="t-strip">
+			What home says when a place of work was left on this device and you return from another.
+			Blank means the machine's hostname.
+		</p>
+	</section>
+
 	<p class="t-label">Temper</p>
 	<section class="ed-rail">
 		<label class="field">
@@ -271,6 +325,7 @@
 		<p class="t-strip">{contextStatus}</p>
 		<a class="t-action" href="/setup">set up the app…</a>
 	</section>
+
 </div>
 
 <style>

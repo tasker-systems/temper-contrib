@@ -220,8 +220,57 @@ describe('the tab model', () => {
 		clock = 3000;
 		model.close(model.activeId);
 		expect(left).toEqual([
+			['place', 1000, 1000],
 			['resource', 1000, 2000],
 			['resource', 2000, 3000]
+		]);
+	});
+
+	it('switching tabs leaves the room switched away from, and returning enters it afresh', () => {
+		const left: Array<[string, number, number]> = [];
+		model.open(doc(1), { where: 'new' });
+		const first = model.activeId;
+		clock = 2000;
+		model.open(doc(2), { where: 'new' });
+		model.onLeave((step, openedAt, leftAt) =>
+			left.push([(step.subject as { id: string }).id.slice(-1), openedAt, leftAt])
+		);
+		clock = 5000;
+		model.activate(first);
+		clock = 9000;
+		model.activate(first); // already shown: nothing is left
+		model.activate(HOME_TAB);
+		expect(left).toEqual([
+			['2', 2000, 5000],
+			['1', 5000, 9000]
+		]);
+	});
+
+	it('closing or setting aside a background tab reports nothing twice', () => {
+		const left: string[] = [];
+		model.open(doc(1), { where: 'new' });
+		const background = model.activeId;
+		model.open(doc(2), { where: 'new' });
+		model.onLeave((step) => left.push(step.key));
+		model.close(background);
+		expect(left).toEqual([]);
+	});
+
+	it('pausing leaves the room in view once, and resuming enters it again', () => {
+		const left: Array<[number, number]> = [];
+		model.open(doc(1), { where: 'new' });
+		model.onLeave((_step, openedAt, leftAt) => left.push([openedAt, leftAt]));
+		clock = 4000;
+		model.pause();
+		model.pause();
+		clock = 6000;
+		model.resume();
+		model.resume();
+		clock = 8000;
+		model.pause();
+		expect(left).toEqual([
+			[1000, 4000],
+			[6000, 8000]
 		]);
 	});
 });
@@ -243,6 +292,24 @@ describe('restoring the tabs', () => {
 		expect(tab.cursor).toBe(0);
 		expect(tab.steps[1].title).toBe('Chapter 2');
 		expect(Object.keys(restored.mounted)).toEqual([kept]);
+	});
+
+	it('a tab restored in the background is entered when first shown, not at launch', () => {
+		model.open(doc(1), { where: 'new' });
+		const background = model.activeId;
+		model.open(doc(2), { where: 'new' });
+
+		clock = 50_000;
+		const restored = new TabModel(storage, () => clock);
+		const left: Array<[number, number]> = [];
+		restored.onLeave((step, openedAt, leftAt) => {
+			if (step.subject.kind === 'resource') left.push([openedAt, leftAt]);
+		});
+		clock = 60_000;
+		restored.close(background); // never shown: nothing to report
+		clock = 70_000;
+		restored.activate(HOME_TAB); // the active tab was entered at restore
+		expect(left).toEqual([[50_000, 70_000]]);
 	});
 
 	it('restores the set-aside tabs, and reopens them with their trails', () => {

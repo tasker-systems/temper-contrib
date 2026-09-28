@@ -11,6 +11,9 @@
  * aside — unmounted, listed, and reopened with its trail intact — and says which. A tab whose
  * lens declines to leave (an unsaved draft) is never set aside.
  *
+ * A room is left when its tab's step changes, when its tab closes or is set aside, and when the
+ * person switches to another tab; listeners hear each leave once, with when the room was entered.
+ *
  * Open tabs are a device fact: tabs, trails, cursors, the active tab, the set-aside tabs and each
  * step's last-known title persist to this device's storage, bounded and versioned. A store that cannot be read
  * yields the home tab alone, never an error. Restored tabs are not mounted — and read nothing —
@@ -152,9 +155,18 @@ export class TabModel {
 		return this.tabs.length - 1;
 	}
 
+	/**
+	 * Show a tab. Switching away from a tab leaves the room it was showing, and showing a tab enters
+	 * the room at its cursor: a person working across two tabs is recorded in both.
+	 */
 	activate(id: string): void {
 		const tab = this.tabs.find((t) => t.id === id);
 		if (!tab) return;
+		if (id !== this.activeId) {
+			const previous = this.tabs.find((t) => t.id === this.activeId);
+			if (previous) this.#left(this.current(previous));
+			this.#entered(this.current(tab));
+		}
 		tab.usedAt = this.#now();
 		this.activeId = id;
 		this.mounted[id] = true;
@@ -198,7 +210,6 @@ export class TabModel {
 		if (room === false) return false;
 		const tab: Tab = { id: mint('t'), steps: [step], cursor: 0, usedAt: this.#now() };
 		this.tabs.push(tab);
-		this.#entered(step);
 		this.activate(tab.id);
 		this.notice = room;
 		return true;
@@ -225,7 +236,6 @@ export class TabModel {
 		if (room === false) return false;
 		this.setAside = this.setAside.filter((t) => t.id !== id);
 		this.tabs.push(tab);
-		this.#entered(this.current(tab));
 		this.activate(tab.id);
 		this.notice = room;
 		return true;
@@ -332,6 +342,20 @@ export class TabModel {
 		};
 	}
 
+	/**
+	 * The window stopped being worked in (hidden, or closing): the room in view is left now, so the
+	 * last place of work is known without waiting for the next move. Idempotent.
+	 */
+	pause(): void {
+		this.#left(this.current(this.active));
+	}
+
+	/** The window is worked in again: the room in view is entered, unless it still is. */
+	resume(): void {
+		const step = this.current(this.active);
+		if (!this.#openedAt.has(step.key)) this.#entered(step);
+	}
+
 	/** Be told when a room is left — a step change or a tab close. Returns the unsubscribe. */
 	onLeave(listener: LeaveListener): () => void {
 		this.#listeners.add(listener);
@@ -413,7 +437,9 @@ export class TabModel {
 			}
 		}
 		this.mounted = { [this.activeId]: true };
-		for (const tab of this.tabs) this.#entered(this.current(tab));
+		// Only the room in view has been entered: a tab restored in the background is entered when
+		// it is first shown, never as if it had been open since launch.
+		this.#entered(this.current(this.active));
 	}
 
 	#save(): void {
