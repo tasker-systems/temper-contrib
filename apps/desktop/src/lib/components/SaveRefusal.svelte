@@ -2,24 +2,35 @@
 	/**
 	 * The save refusal, oriented: the document changed since the edit started, nothing was saved,
 	 * and here is what the person needs to decide. Who changed the document and when, which
-	 * sections differ between the base and the newer version, and three ways forward:
+	 * sections differ between the base and the newer version, and the ways forward:
 	 *
 	 * - **Show changes** — the line-over-line diff, computed by the core, unchanged sections
 	 *   collapsed.
 	 * - **Take newer** — discard the draft; the room shows the newer version.
 	 * - **Keep my draft on the newer base** — the draft stands, now compared against the newer
 	 *   hash; the person has seen the newer version and the next save compares against it.
-	 *
-	 * Handing the disagreement to the agent is slice 5; this slice makes the room safe without it.
+	 * - **Hand to agent** (slice 5) — with a live conversation and a stated intent, the
+	 *   disagreement goes to the agent as one prompt (intent + the three versions + the trail
+	 *   since the base); its proposal returns as transcript text and is offered here as
+	 *   *Apply* — the person's draft on the newer base, reviewed and saved through
+	 *   compare-and-save. The proposal never enters the document by itself (ruled,
+	 *   temper-artifacts#48). With no agent connected, only the plain choices show.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import type { DocOpened, SectionDiff } from '$lib/document';
+	import { ONE_CLICK_WORDS, type Intent } from '$lib/handoff';
 	import RegionState from './RegionState.svelte';
 
 	let {
 		refused,
 		ontakeNewer,
-		onkeepDraft
+		onkeepDraft,
+		intent = $bindable({ freeText: '', oneClick: null }),
+		handoffState = 'idle',
+		handoffUnavailable = '',
+		agentLive = false,
+		onhandToAgent,
+		onapplyProposal
 	}: {
 		/** The refusal as the core answered it. */
 		refused: {
@@ -29,6 +40,17 @@
 		};
 		ontakeNewer: () => void;
 		onkeepDraft: () => void;
+		/** The intent, held by the room: the field here edits it in place. */
+		intent?: Intent;
+		/** Where the handoff stands: idle, sent (the turn in flight), a proposal to review,
+		 *  or the turn's no-proposal verdict. */
+		handoffState?: 'idle' | 'sent' | 'proposal' | 'none';
+		/** Why the hand cannot go, when it cannot: said, never guessed. */
+		handoffUnavailable?: string;
+		/** Whether a conversation is live — the no-agent arm of ruling Q5. */
+		agentLive?: boolean;
+		onhandToAgent: () => void;
+		onapplyProposal: () => void;
 	} = $props();
 
 	let showing = $state(false);
@@ -76,6 +98,59 @@
 		<button type="button" class="take" onclick={ontakeNewer}>Take newer</button>
 		<button type="button" class="keep" onclick={onkeepDraft}>Keep my draft on the newer base</button>
 	</div>
+
+	{#if agentLive}
+		<div class="handoff" aria-label="Hand this disagreement to the agent">
+			<p class="t-strip">or hand the disagreement to the agent — it proposes, you review and save</p>
+			<textarea
+				class="intent"
+				bind:value={intent.freeText}
+				placeholder="what you want the agent to do with these versions…"
+				rows="3"
+				aria-label="Your intent for the agent"
+			></textarea>
+			<div class="one-click" role="group" aria-label="One-click intents">
+				<button
+					type="button"
+					aria-pressed={intent.oneClick === 'fold'}
+					onclick={() => (intent.oneClick = intent.oneClick === 'fold' ? null : 'fold')}
+				>
+					{ONE_CLICK_WORDS.fold}
+				</button>
+				<button
+					type="button"
+					aria-pressed={intent.oneClick === 'keep'}
+					onclick={() => (intent.oneClick = intent.oneClick === 'keep' ? null : 'keep')}
+				>
+					{ONE_CLICK_WORDS.keep}
+				</button>
+			</div>
+			<div class="actions">
+				<button
+					type="button"
+					class="hand"
+					onclick={onhandToAgent}
+					disabled={handoffState === 'sent'}
+				>
+					{handoffState === 'sent' ? 'Handed — the agent is working…' : 'Hand to agent'}
+				</button>
+				{#if handoffState === 'proposal'}
+					<button type="button" class="take" onclick={onapplyProposal}>
+						Apply the agent's proposal as my draft
+					</button>
+				{/if}
+			</div>
+			{#if handoffUnavailable}
+				<p class="t-strip refusal-note" role="note">{handoffUnavailable}</p>
+			{/if}
+			{#if handoffState === 'none'}
+				<p class="t-strip refusal-note" role="note">
+					The agent did not return a proposal — ask it again in the agent panel, or take newer
+					or keep your draft here.
+				</p>
+			{/if}
+		</div>
+	{/if}
 	{#if diffState === 'arriving'}
 		<RegionState state="arriving" label="the changes" />
 	{:else if diffState === 'failed'}
@@ -139,12 +214,60 @@
 		font-size: 0.85rem;
 		cursor: pointer;
 	}
-	.actions button:hover {
+	.actions button:hover:not(:disabled) {
 		border-color: var(--tp-accent-line);
 		background: var(--tp-accent-wash);
 	}
+	.actions button:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
 	.take {
 		border-color: var(--tp-accent-line) !important;
+	}
+	.handoff {
+		display: grid;
+		gap: 0.55rem;
+		border-top: 1px solid var(--tp-rule);
+		padding-top: 0.8rem;
+	}
+	.intent {
+		box-sizing: border-box;
+		width: 100%;
+		resize: vertical;
+		padding: 0.45rem 0.6rem;
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		color: var(--tp-text);
+		font: 0.85rem var(--tp-font-doing);
+	}
+	.intent:focus {
+		border-color: var(--tp-accent-line);
+		outline: none;
+	}
+	.one-click {
+		display: flex;
+		gap: 0.6rem;
+		flex-wrap: wrap;
+	}
+	.one-click button {
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		color: var(--tp-text);
+		padding: 0.2rem 0.7rem;
+		font: inherit;
+		font-size: 0.82rem;
+		cursor: pointer;
+	}
+	.one-click button[aria-pressed='true'] {
+		border-color: var(--tp-accent-line);
+		background: var(--tp-accent-wash);
+	}
+	.refusal-note {
+		margin: 0;
+		color: var(--tp-notice);
 	}
 	.diff {
 		display: grid;

@@ -7,6 +7,7 @@ import { EditorView } from '@codemirror/view';
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { agentSession } from '$lib/agent/session.svelte';
 import type { Connections, DocOpened, History, PanelRead, Related, Sources } from '$lib/document';
 import { SCROLL_STORE_KEY } from '$lib/scroll-position';
 import StepHost from '$lib/shell/StepHost.svelte';
@@ -80,14 +81,21 @@ const SOURCES: Sources = { blocks: [] };
 
 type Answers = Partial<Record<string, () => Promise<unknown>>>;
 let calls: { cmd: string; args?: Record<string, unknown> }[] = [];
+let answers: Answers = {};
 
-function answering(answers: Answers): void {
+function answering(next: Answers): void {
+	answers = next;
 	vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
 		calls.push({ cmd, args });
 		const answer = answers[cmd];
 		if (!answer) throw new Error(`unexpected command ${cmd}`);
 		return answer();
 	}) as never);
+}
+
+/** What the current answering map holds for a command — for wrappers that re-arm around it. */
+function callsAnswer(cmd: string): (() => Promise<unknown>) | undefined {
+	return answers[cmd];
 }
 
 const present =
@@ -789,5 +797,271 @@ describe("the document room's return path", () => {
 		await waitFor(() => expect(container.querySelector('.md-body')).not.toBeNull());
 		// No note: nothing was saved for this resource, and the top is the honest start.
 		expect(container.textContent).not.toContain('that heading is no longer in this');
+	});
+});
+
+/** Every save's args, in the order they were sent, for any describe block. */
+function saveCalls(): Record<string, unknown>[] {
+	return calls.filter((c) => c.cmd === 'doc_save_body').map((c) => c.args ?? {}) as Record<
+		string,
+		unknown
+	>[];
+}
+
+describe("the document room's intent handoff (slice 5, W12)", () => {
+	const NEWER: Extract<DocOpened, { state: 'opened' }> = {
+		...OPENED,
+		markdown: '# Scope\n\nSomeone else changed this.',
+		bodyHash: 'newer'
+	};
+	const _PROPOSAL = '# Scope\n\nReconciled by the agent.';
+	const REFUSAL = {
+		state: 'refused',
+		current: NEWER,
+		lastBodyChange: { actorName: 'someone-else', occurredAt: '2026-09-28T00:00:00+00:00' },
+		changedSections: ['# Scope']
+	};
+
+	/** The agent session's transcript state, driven directly — the store is module-level and
+	 *  shared, so each witness resets it. The turn's reply is what the room reads back: it is
+	 *  APPENDED to the transcript, as a real turn would be, so the handoff's turn index stays
+	 *  honest. */
+	function agentTurn(reply: string): void {
+		agentSession.messages.push({ role: 'assistant', text: reply });
+	}
+
+	/** The prompt mock, as the real command resolves: when the handoff turn ends, the reply is
+	 *  already in the transcript. Composed with atRefusal's answers. */
+	function _withPrompt(reply: string, answers: Answers): Answers {
+		return {
+			...answers,
+			acp_prompt: async () => {
+				agentTurn(reply);
+				return 'ok';
+			}
+		};
+	}
+
+	/** The history the handoff reads: one event AFTER the base (the other author's write), one
+	 *  before it. OPENED.updated is 2026-09-27, so the fresh event carries a later timestamp. */
+	const HANDOFF_HISTORY: History = {
+		total: 2,
+		omitted: 0,
+		runs: [
+			{
+				actorName: 'someone-else',
+				acts: 1,
+				firstAt: '2026-09-28T10:00:00+00:00',
+				lastAt: '2026-09-28T10:00:00+00:00',
+				events: [
+					{
+						eventId: 'ev2',
+						kind: 'resource_reblocked',
+						occurredAt: '2026-09-28T10:00:00+00:00'
+					}
+				]
+			}
+		]
+	};
+
+	beforeEach(() => {
+		calls = [];
+		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
+		agentSession.conversation = null;
+		agentSession.messages = [];
+		agentSession.prompting = false;
+		agentSession.handoff = null;
+		answering(DEFAULTS);
+	});
+
+	/** Reach the refusal through the built path: edit, type, save against a moved base. */
+	async function atRefusal(_container: HTMLElement) {
+		answering({
+			...DEFAULTS,
+			doc_save_body: async () => REFUSAL,
+			doc_history: present(HANDOFF_HISTORY)
+		});
+		const view = openRoom();
+		await opened(view.container);
+		await fireEvent.click(button(view.container, 'Edit'));
+		const host = view.container.querySelector('.editor') as HTMLElement & {
+			shadowRoot: ShadowRoot;
+		};
+		await waitFor(() => expect(host.shadowRoot.querySelector('.cm-content')).not.toBeNull());
+		const content = host.shadowRoot.querySelector('.cm-content') as HTMLElement;
+		const cm = EditorView.findFromDOM(content);
+		if (!cm) throw new Error('the editor view did not resolve from the DOM');
+		cm.dispatch({ changes: { from: cm.state.doc.length, insert: 'my edit' } });
+		await waitFor(() => expect(button(view.container, 'Save').disabled).toBe(false));
+		await fireEvent.click(button(view.container, 'Save'));
+		await waitFor(() => expect(view.container.textContent).toContain('changed since you opened'));
+		return view;
+	}
+
+	/** The editor view of a mounted editor, resolved through its shadow root. */
+	function editorView(host: HTMLElement & { shadowRoot: ShadowRoot }) {
+		const content = host.shadowRoot.querySelector('.cm-content') as HTMLElement;
+		const view = EditorView.findFromDOM(content);
+		if (!view) throw new Error('the editor view did not resolve from the DOM');
+		return view;
+	}
+
+	it('with no agent connected, only the plain choices show — no handoff surface (Q5 no-agent arm)', async () => {
+		const { container } = await atRefusal(container0());
+		expect(container.textContent).toContain('Take newer');
+		expect(container.textContent).toContain('Keep my draft on the newer base');
+		expect(container.textContent).not.toContain('Hand to agent');
+	});
+
+	function container0(): HTMLElement {
+		const div = document.createElement('div');
+		document.body.appendChild(div);
+		return div;
+	}
+
+	it('with a live conversation, the intent field and one-click intents show', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		expect(container.textContent).toContain('Hand to agent');
+		const field = container.querySelector('textarea.intent') as HTMLTextAreaElement;
+		expect(field).not.toBeNull();
+		expect(container.textContent).toContain('fold my changes into theirs');
+		expect(container.textContent).toContain('lose what they added');
+	});
+
+	it('a hand without a stated intent is refused locally, named, and sends nothing', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		const before = calls.filter((c) => c.cmd === 'acp_prompt').length;
+		await fireEvent.click(button(container, 'Hand to agent'));
+		await waitFor(() =>
+			expect(container.textContent).toContain('say what you want the agent to do first')
+		);
+		expect(calls.filter((c) => c.cmd === 'acp_prompt')).toHaveLength(before);
+	});
+
+	it('a stated hand sends ONE prompt: intent, the three fenced versions, the trail since the base (W12 send)', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		const field = container.querySelector('.intent') as HTMLTextAreaElement;
+		await fireEvent.input(field, { target: { value: 'prefer the smaller section' } });
+		await fireEvent.click(
+			[...container.querySelectorAll('.one-click button')].find((b) =>
+				b.textContent?.includes('fold')
+			) as HTMLButtonElement
+		);
+		vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+			calls.push({ cmd, args });
+			if (cmd === 'acp_prompt') {
+				agentTurn('here is my thinking\n```proposal\n# Scope\n\nReconciled.\n```');
+				return 'ok';
+			}
+			const answer = callsAnswer(cmd);
+			if (!answer) throw new Error(`unexpected command ${cmd}`);
+			return answer();
+		}) as never);
+		await fireEvent.click(button(container, 'Hand to agent'));
+
+		await waitFor(() => {
+			const sent = calls.find((c) => c.cmd === 'acp_prompt');
+			expect(sent).toBeDefined();
+		});
+		const sent = calls.find((c) => c.cmd === 'acp_prompt');
+		const text = sent?.args?.text as string;
+		expect(text).toContain('prefer the smaller section');
+		expect(text).toContain('fold my changes into theirs');
+		expect(text).toContain('```markdown\n# Scope\n\nThe room, read-only.\n```'); // base
+		expect(text).toContain('my edit'); // the draft
+		expect(text).toContain('Someone else changed this.'); // the newer version
+		expect(text).toContain('resource_reblocked'); // the trail since the base
+		// The send carries no resource references: the material is fenced text, never a temper:
+		// URI the agent resolves.
+		expect(sent?.args?.references).toEqual([]);
+		// Exactly one prompt went out.
+		expect(calls.filter((c) => c.cmd === 'acp_prompt')).toHaveLength(1);
+	});
+
+	it('the proposal returns as the person\u2019s draft on the newer base — reviewed and saved, never landed itself (W12 return)', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		const field = container.querySelector('.intent') as HTMLTextAreaElement;
+		await fireEvent.input(field, { target: { value: 'fold mine in' } });
+		vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+			calls.push({ cmd, args });
+			if (cmd === 'acp_prompt') {
+				agentTurn(`I reconciled the two:\n\`\`\`proposal\n# Scope\n\nReconciled.\n\`\`\`\nDone.`);
+				return 'ok';
+			}
+			const answer = callsAnswer(cmd);
+			if (!answer) throw new Error(`unexpected command ${cmd}`);
+			return answer();
+		}) as never);
+		await fireEvent.click(button(container, 'Hand to agent'));
+		await waitFor(() =>
+			expect(container.textContent).toContain("Apply the agent's proposal as my draft")
+		);
+		// The proposal is not yet in the document: the room still shows the base, nothing saved.
+		expect(calls.filter((c) => c.cmd === 'doc_save_body')).toHaveLength(1);
+
+		await fireEvent.click(button(container, "Apply the agent's proposal as my draft"));
+		// The editor is back, seeded with the proposal as the draft.
+		const host = await waitFor(() => {
+			const h = container.querySelector('.editor') as HTMLElement & { shadowRoot: ShadowRoot };
+			expect(h?.shadowRoot?.querySelector('.cm-content')).not.toBeNull();
+			return h;
+		});
+		expect(editorView(host).state.doc.toString()).toBe('# Scope\n\nReconciled.');
+		expect(container.textContent).not.toContain('changed since you opened');
+		// The draft now stands on the NEWER base: the next save compares against 'newer'.
+		const view = editorView(host);
+		view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+		await fireEvent.click(button(container, 'Save'));
+		await waitFor(() => expect(saveCalls().length).toBe(2));
+		expect(saveCalls()[1].baseHash).toBe('newer');
+		expect(saveCalls()[1].content).toBe('# Scope\n\nReconciled.!');
+	});
+
+	it('a turn that ends with no proposal is said — the no-proposal verdict, never a guess', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		const field = container.querySelector('.intent') as HTMLTextAreaElement;
+		await fireEvent.input(field, { target: { value: 'just merge it' } });
+		vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+			calls.push({ cmd, args });
+			if (cmd === 'acp_prompt') {
+				agentTurn('I looked at both versions but I am not sure which you would prefer.');
+				return 'ok';
+			}
+			const answer = callsAnswer(cmd);
+			if (!answer) throw new Error(`unexpected command ${cmd}`);
+			return answer();
+		}) as never);
+		await fireEvent.click(button(container, 'Hand to agent'));
+		await waitFor(() => expect(container.textContent).toContain('did not return a proposal'));
+		expect(container.textContent).toContain('Hand to agent');
+		// No draft changed: the person's draft is still the person's.
+		expect(container.textContent).toContain('Keep my draft on the newer base');
+	});
+
+	it('the handoff sends the trail read once, at hand time, and the send is one acp_prompt', async () => {
+		agentSession.conversation = { conversationId: 'conv1', sessionId: 's1', agentInfo: {} };
+		const { container } = await atRefusal(container0());
+		const field = container.querySelector('.intent') as HTMLTextAreaElement;
+		await fireEvent.input(field, { target: { value: 'x' } });
+		const historyReadsBefore = calls.filter((c) => c.cmd === 'doc_history').length;
+		vi.mocked(invoke).mockImplementation((async (cmd: string, args?: Record<string, unknown>) => {
+			calls.push({ cmd, args });
+			if (cmd === 'acp_prompt') {
+				agentTurn('no proposal here');
+				return 'ok';
+			}
+			const answer = callsAnswer(cmd);
+			if (!answer) throw new Error(`unexpected command ${cmd}`);
+			return answer();
+		}) as never);
+		await fireEvent.click(button(container, 'Hand to agent'));
+		await waitFor(() => expect(container.textContent).toContain('did not return a proposal'));
+		const historyReads = calls.filter((c) => c.cmd === 'doc_history').length;
+		expect(historyReads).toBe(historyReadsBefore + 1);
 	});
 });
