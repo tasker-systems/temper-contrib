@@ -215,8 +215,11 @@ export class TabModel {
 		return true;
 	}
 
-	/** Focus a tab already showing this subject — open or set aside — else open it in a new tab. */
-	focusOrOpen(subject: Subject): boolean {
+	/**
+	 * Focus a tab already showing this subject — open or set aside — else open it in a new tab,
+	 * through `lens` when one is named. A tab already showing the subject keeps its own lens.
+	 */
+	focusOrOpen(subject: Subject, lens: string | null = null): boolean {
 		const key = subjectKey(subject);
 		const existing = this.tabs.find((t) => subjectKey(this.current(t).subject) === key);
 		if (existing) {
@@ -225,7 +228,7 @@ export class TabModel {
 		}
 		const aside = this.setAside.find((t) => subjectKey(this.current(t).subject) === key);
 		if (aside) return this.reopen(aside.id);
-		return this.open(subject, { where: 'new' });
+		return this.open(subject, { where: 'new', lens });
 	}
 
 	/** Reopen a set-aside tab with its trail intact. It re-reads when shown, as any restored tab. */

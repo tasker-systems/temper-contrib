@@ -24,10 +24,7 @@ export const core: Contribution = {
 			accepts: { kinds: ['place'], places: ['home'] },
 			pinned: { home: 10 },
 			group: 'Resume',
-			build: {
-				state: 'unbuilt',
-				landsWith: "home's Resume slice — the places you last worked, drawn from the hub"
-			}
+			build: { state: 'built', component: () => import('../lenses/home/ResumeSection.svelte') }
 		},
 		{
 			id: 'core/home-asks',

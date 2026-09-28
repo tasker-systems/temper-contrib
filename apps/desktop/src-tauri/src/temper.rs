@@ -319,6 +319,8 @@ pub struct ResourceFilter {
     pub status: Option<String>,
     /// A context ref (`@owner/slug`, `+team/slug`, or a UUID).
     pub context_ref: Option<String>,
+    /// Whose resources: `@me` for the person's own, or a profile handle.
+    pub owner: Option<String>,
 }
 
 /// The largest page a list read asks for: a list is bounded and says what it
@@ -339,6 +341,7 @@ pub fn list_params(filter: &ResourceFilter, limit: i64, offset: i64) -> Resource
         stage: given(&filter.stage),
         status: given(&filter.status),
         context_ref: given(&filter.context_ref),
+        owner: given(&filter.owner),
         sort: Some(ResourceSortField::Updated),
         order: Some(SortOrder::Desc),
         limit: Some(limit.clamp(1, LIST_PAGE_MAX)),
@@ -415,6 +418,7 @@ mod tests {
             stage: Some("in-progress".into()),
             status: Some("  ".into()),
             context_ref: None,
+            owner: None,
         };
         let params = list_params(&filter, 10, 20);
         assert_eq!(params.doc_type_name.as_deref(), Some("task"));
@@ -425,6 +429,19 @@ mod tests {
         assert!(matches!(params.sort, Some(ResourceSortField::Updated)));
         assert!(matches!(params.order, Some(SortOrder::Desc)));
         assert_eq!((params.limit, params.offset), (Some(10), Some(20)));
+    }
+
+    /// The person's own resources: `@me` reaches the list read as the owner.
+    #[test]
+    fn an_owner_filter_is_passed_through() {
+        let filter = ResourceFilter {
+            doc_type: Some("session".into()),
+            owner: Some("@me".into()),
+            ..Default::default()
+        };
+        let params = list_params(&filter, 1, 0);
+        assert_eq!(params.owner.as_deref(), Some("@me"));
+        assert_eq!(params.doc_type_name.as_deref(), Some("session"));
     }
 
     #[test]

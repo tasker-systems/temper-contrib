@@ -61,6 +61,10 @@ pub struct RecentWorkView {
     /// How many of `entries`' facts are still queued on this device, not yet
     /// committed — a place just left shows at once, and says it is local.
     pub queued: usize,
+    /// This device's label, so a surface can say when an entry was left
+    /// somewhere else. Set on the read home makes; absent on a commit's answer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub this_device: Option<String>,
 }
 
 /// The family's shape: draft 2020-12, closed, capped, every field a surface
@@ -295,7 +299,11 @@ pub async fn commit_recent_work(
             .unwrap_or(serde_json::Value::Null),
     )
     .map_err(|e| format!("the committed artifact did not conform: {e}"))?;
-    Ok(RecentWorkView { entries, queued: 0 })
+    Ok(RecentWorkView {
+        entries,
+        queued: 0,
+        this_device: None,
+    })
 }
 
 /// Reads the merged current entries for home's "Return to …" and a later
@@ -312,6 +320,7 @@ pub async fn recent_work(
     Ok(RecentWorkView {
         entries: merge_recent_work(&batches, &[]),
         queued: 0,
+        this_device: None,
     })
 }
 
@@ -354,6 +363,7 @@ pub fn with_queued(read: RecentWorkView, queued: &[RecentWorkEntry]) -> RecentWo
     RecentWorkView {
         entries: merge_recent_work(&[read.entries], queued),
         queued: queued.len(),
+        this_device: read.this_device,
     }
 }
 
@@ -370,7 +380,9 @@ pub async fn hub_recent_work(
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
     let read = recent_work(client, &context_name).await?;
-    Ok(with_queued(read, &queue.queued()))
+    let mut view = with_queued(read, &queue.queued());
+    view.this_device = Some(settings.device_label());
+    Ok(view)
 }
 
 #[cfg(test)]
@@ -445,6 +457,7 @@ mod tests {
         let read = RecentWorkView {
             entries: vec![entry(A, "2026-09-27T10:00:00.000Z")],
             queued: 0,
+            this_device: None,
         };
         let view = with_queued(
             read,

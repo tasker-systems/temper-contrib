@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
+import { homeReads } from './home-reads.svelte';
 import { shellPanels } from './panels.svelte';
 import Shell from './Shell.svelte';
 import { HOME_TAB, tabs } from './tabs.svelte';
@@ -59,19 +60,76 @@ function listPage(filter: { docType?: string }) {
 	};
 }
 
+const SESSION = '01a0e79d-6442-71b1-ad4a-5cd2ae3939c2';
+const C = '01a0e327-ef19-7d72-b7b2-2dd45a028cc9';
+
+/** What the hub answers home, and which ids temper resolves — each home test sets its own. */
+let hubView: { entries: unknown[]; queued: number; thisDevice?: string };
+let resolvable: Set<string>;
+let sessionMarkdown: string | null;
+
+const hubEntry = (resource: string, leftAt: string, device = 'station') => ({
+	resource,
+	room: 'core/document',
+	openedAt: '2026-09-28T09:00:00.000Z',
+	leftAt,
+	device
+});
+
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
+		case 'hub_recent_work':
+			return Promise.resolve(hubView);
 		case 'acp_start':
 			return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
 		case 'doc_open':
+			if (args?.id === SESSION && sessionMarkdown !== null) {
+				return Promise.resolve({
+					...opened(SESSION),
+					docType: 'session',
+					markdown: sessionMarkdown
+				});
+			}
 			return Promise.resolve(opened(args?.id as string));
 		case 'doc_connections':
 			return Promise.resolve({ state: 'present', data: { total: 0, edges: [] } });
 		case 'temper_resolve_refs':
-			return Promise.resolve([]);
-		case 'temper_list_resources':
-			return Promise.resolve(listPage(args?.filter as { docType?: string }));
+			return Promise.resolve(
+				((args?.ids as string[] | undefined) ?? [])
+					.filter((id) => resolvable.has(id))
+					.map((id) => ({
+						state: 'resolved',
+						id,
+						title: `Resource ${id.slice(-4)}`,
+						docType: 'task',
+						contextRef: '+temper-dev/contrib',
+						decoratedRef: `resource-${id}`
+					}))
+			);
+		case 'temper_list_resources': {
+			const filter = args?.filter as { docType?: string; owner?: string };
+			if (filter?.owner === '@me' && filter.docType === 'session') {
+				return Promise.resolve(
+					sessionMarkdown === null
+						? { total: 0, rows: [] }
+						: {
+								total: 1,
+								rows: [
+									{
+										id: SESSION,
+										decoratedRef: `session-${SESSION}`,
+										title: 'Session wrap',
+										docType: 'session',
+										contextRef: '+temper-dev/contrib',
+										updated: new Date().toISOString()
+									}
+								]
+							}
+				);
+			}
+			return Promise.resolve(listPage(filter));
+		}
 		case 'temper_contexts':
 			return Promise.resolve([
 				{
@@ -124,6 +182,10 @@ describe('the shell', () => {
 		shellPanels.setWaysOpen(true);
 		shellPanels.setPaletteOpen(false);
 		temperViews.reset();
+		homeReads.reset();
+		hubView = { entries: [], queued: 0, thisDevice: 'station' };
+		resolvable = new Set();
+		sessionMarkdown = null;
 		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
 		agentSession.messages = [];
@@ -303,11 +365,9 @@ describe('the shell', () => {
 			'Start',
 			'Explore'
 		]);
-		const resume = home.querySelector('[data-section="core/home-resume"]') as HTMLElement;
-		expect(resume.textContent).toContain("isn't built yet");
-		expect(resume.textContent).toContain('drawn from the hub');
-		// Nothing claims to be empty when nothing has been read.
-		expect(home.textContent).not.toMatch(/No (places|sessions)/);
+		const explore = home.querySelector('[data-section="core/home-explore"]') as HTMLElement;
+		expect(explore.textContent).toContain("isn't built yet");
+		expect(explore.textContent).toContain('regions temper derived');
 	});
 
 	it('awaiting you never interrupts: a pending ask is shown on home, and opened only by the person', async () => {
@@ -324,6 +384,115 @@ describe('the shell', () => {
 		await waitFor(() =>
 			expect(document.activeElement?.getAttribute('data-ask')).toBe(declaredAsk.askId)
 		);
+	});
+
+	it('resume returns to the last place of work in one gesture, through the lens it was seen in', async () => {
+		hubView = {
+			entries: [
+				hubEntry(A, '2026-09-28T10:00:00.000Z'),
+				hubEntry(C, '2026-09-28T09:30:00.000Z', 'laptop')
+			],
+			queued: 0,
+			thisDevice: 'station'
+		};
+		resolvable = new Set([A, C]);
+		const { container } = render(Shell);
+		const resume = () =>
+			activeBody(container).querySelector('[data-section="core/home-resume"]') as HTMLElement;
+		await waitFor(() => expect(resume().querySelector('.card button')).toBeTruthy());
+		expect(resume().querySelector('.card')?.textContent).toContain('You were in its document lens');
+		expect(resume().querySelector('.card')?.textContent).not.toContain(' on ');
+		// A place left on another device says which.
+		expect(resume().textContent).toContain('on laptop');
+		expect(resume().textContent).toContain('All 1 earlier places of work.');
+
+		await fireEvent.click(resume().querySelector('.card button') as HTMLButtonElement);
+		expect(tabs.tabs).toHaveLength(2);
+		const step = tabs.current(tabs.active);
+		expect(step.subject).toEqual({ kind: 'resource', id: A });
+		expect(step.lens).toBe('core/document');
+
+		// A second return focuses the same tab rather than opening another.
+		tabs.activate(HOME_TAB);
+		await fireEvent.click(resume().querySelector('.card button') as HTMLButtonElement);
+		expect(tabs.tabs).toHaveLength(2);
+		expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: A });
+	});
+
+	it('resume offers no way back to a place temper no longer answers for', async () => {
+		hubView = {
+			entries: [hubEntry(B, '2026-09-28T10:00:00.000Z')],
+			queued: 0,
+			thisDevice: 'station'
+		};
+		const { container } = render(Shell);
+		const card = () => activeBody(container).querySelector('[data-resume]') as HTMLElement | null;
+		await waitFor(() => expect(card()?.textContent).toContain('Reference unavailable'));
+		expect(card()?.querySelector('button')).toBeNull();
+	});
+
+	it('resume with nothing recorded says what would appear, and how', async () => {
+		const { container } = render(Shell);
+		await waitFor(() =>
+			expect(activeBody(container).textContent).toContain('No places of work recorded yet.')
+		);
+	});
+
+	it('the latest handoff quotes the session’s own next steps, and invents none', async () => {
+		sessionMarkdown = '## Done\nThe shell.\n## Next\nTake up the home view.\n## Notes\nNone.';
+		const { container } = render(Shell);
+		const handoff = () =>
+			activeBody(container).querySelector(
+				'[data-section="temper-workflows/home-handoff"]'
+			) as HTMLElement;
+		await waitFor(() =>
+			expect(handoff().querySelector('blockquote')?.textContent).toBe('Take up the home view.')
+		);
+		expect(handoff().textContent).toContain('excerpt · Next');
+		expect(
+			calls.some(
+				(c) =>
+					c.cmd === 'temper_list_resources' &&
+					(c.args?.filter as { owner?: string } | undefined)?.owner === '@me' &&
+					c.args?.limit === 1
+			)
+		).toBe(true);
+	});
+
+	it('a handoff with no next steps shows the session and quotes nothing', async () => {
+		sessionMarkdown = '## Done\nThe shell, and nothing said about what comes next.';
+		const { container } = render(Shell);
+		const handoff = () =>
+			activeBody(container).querySelector(
+				'[data-section="temper-workflows/home-handoff"]'
+			) as HTMLElement;
+		await waitFor(() => expect(handoff().textContent).toContain('latest handoff'));
+		await waitFor(() => expect(reads('doc_open').some((c) => c.args?.id === SESSION)).toBe(true));
+		await Promise.resolve();
+		expect(handoff().querySelector('blockquote')).toBeNull();
+	});
+
+	it('home reads once per show: hovering reads nothing, and showing it again reads once more', async () => {
+		hubView = {
+			entries: [hubEntry(A, '2026-09-28T10:00:00.000Z')],
+			queued: 0,
+			thisDevice: 'station'
+		};
+		resolvable = new Set([A]);
+		sessionMarkdown = '## Next\nOne thing.';
+		const { container } = render(Shell);
+		await waitFor(() => expect(activeBody(container).querySelector('blockquote')).toBeTruthy());
+		expect(reads('hub_recent_work')).toHaveLength(1);
+		const before = calls.length;
+		for (const el of activeBody(container).querySelectorAll('a, button')) {
+			await fireEvent.mouseEnter(el);
+			await fireEvent.mouseOver(el);
+		}
+		expect(calls.length).toBe(before);
+
+		tabs.open({ kind: 'place', place: 'settings' }, { where: 'new' });
+		tabs.activate(HOME_TAB);
+		await waitFor(() => expect(reads('hub_recent_work')).toHaveLength(2));
 	});
 
 	it('home is pinned: no close, no way out, no room strip', () => {
