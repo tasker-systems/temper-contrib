@@ -7,13 +7,13 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
     ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
     SessionConfigOption, SessionConfigOptionValue, SessionModeState, SessionNotification,
     SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Error};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
 
@@ -247,9 +247,33 @@ impl AskBoard {
     }
 }
 
+/// What is in view in the person's room, shared with the agent as a reference:
+/// a URI the agent's own temper tools resolve, and the name temper gives it.
+/// The desktop shares where the person is looking; it never sends the body.
+#[derive(Debug, Clone, Deserialize)]
+pub struct PromptReference {
+    pub uri: String,
+    pub name: String,
+}
+
+/// The content of one prompt: the person's text, then — when a room is in view
+/// and has changed since it was last shared — a `resource_link` to it. Every ACP
+/// agent accepts `text` and `resource_link` blocks, so no capability is asked.
+pub fn prompt_blocks(text: String, reference: Option<PromptReference>) -> Vec<ContentBlock> {
+    let mut blocks = vec![ContentBlock::Text(TextContent::new(text))];
+    if let Some(reference) = reference {
+        blocks.push(ContentBlock::ResourceLink(ResourceLink::new(
+            reference.name,
+            reference.uri,
+        )));
+    }
+    blocks
+}
+
 pub enum ConversationCommand {
     Prompt {
         text: String,
+        reference: Option<PromptReference>,
         reply: oneshot::Sender<Result<String, String>>,
     },
     SetMode {
@@ -450,11 +474,15 @@ async fn run_conversation(
 
     while let Some(command) = commands.recv().await {
         match command {
-            ConversationCommand::Prompt { text, reply } => {
+            ConversationCommand::Prompt {
+                text,
+                reference,
+                reply,
+            } => {
                 let result = connection
                     .send_request(PromptRequest::new(
                         session_id.clone(),
-                        vec![ContentBlock::Text(TextContent::new(text))],
+                        prompt_blocks(text, reference),
                     ))
                     .block_task()
                     .await;
@@ -558,12 +586,14 @@ pub async fn acp_answer_permission(
 }
 
 /// Sends a prompt into a live conversation and waits for the turn to end.
-/// Streamed output arrives as `acp-update` events, not in this reply.
+/// Streamed output arrives as `acp-update` events, not in this reply. A
+/// `reference` goes with the text as a `resource_link` block.
 #[tauri::command]
 pub async fn acp_prompt(
     state: tauri::State<'_, AcpState>,
     conversation_id: String,
     text: String,
+    reference: Option<PromptReference>,
 ) -> Result<String, String> {
     let commands = conversation_commands(&state, &conversation_id)?;
 
@@ -571,6 +601,7 @@ pub async fn acp_prompt(
     if commands
         .send(ConversationCommand::Prompt {
             text,
+            reference,
             reply: reply_tx,
         })
         .is_err()
@@ -785,10 +816,19 @@ mod tests {
     }
 
     async fn prompt(commands: &mpsc::UnboundedSender<ConversationCommand>, text: &str) -> String {
+        prompt_with(commands, text, None).await
+    }
+
+    async fn prompt_with(
+        commands: &mpsc::UnboundedSender<ConversationCommand>,
+        text: &str,
+        reference: Option<PromptReference>,
+    ) -> String {
         let (reply_tx, reply_rx) = oneshot::channel();
         commands
             .send(ConversationCommand::Prompt {
                 text: text.to_string(),
+                reference,
                 reply: reply_tx,
             })
             .expect("conversation should still be open");
@@ -811,6 +851,68 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    // --- The prompt's reference ----------------------------------------------
+
+    use super::{prompt_blocks, PromptReference};
+
+    #[test]
+    fn a_prompt_carries_its_text_and_then_the_room_in_view() {
+        let reference = PromptReference {
+            uri: "temper:build-the-desktop-shell-01a0e32f-27e5-7ca3-9327-5812961bdbff".into(),
+            name: "Build the desktop shell".into(),
+        };
+        let blocks = prompt_blocks("What is next?".into(), Some(reference));
+        assert_eq!(blocks.len(), 2);
+        match &blocks[0] {
+            ContentBlock::Text(text) => assert_eq!(text.text, "What is next?"),
+            other => panic!("the text comes first, got {other:?}"),
+        }
+        match &blocks[1] {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.name, "Build the desktop shell");
+                assert!(link.uri.starts_with("temper:build-the-desktop-shell-"));
+            }
+            other => panic!("the reference is a resource_link, got {other:?}"),
+        }
+        let wire = serde_json::to_value(&blocks[1]).unwrap();
+        assert_eq!(wire["type"], "resource_link");
+    }
+
+    #[test]
+    fn a_prompt_with_nothing_in_view_is_text_alone() {
+        let blocks = prompt_blocks("Hello".into(), None);
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], ContentBlock::Text(_)));
+    }
+
+    /// Witness that a real agent accepts the room in view: a prompt carrying a
+    /// `resource_link` completes its turn. Requires opencode on PATH. Run
+    /// locally: `cargo test -p desktop --lib -- --ignored`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode on PATH"]
+    async fn opencode_accepts_a_prompt_with_the_room_in_view() {
+        let (commands, _recorded, _info) = start_test_conversation(
+            opencode_witness_agent(),
+            AskBoard::default(),
+            silent_ask_sink(),
+        )
+        .await;
+        let reference = PromptReference {
+            uri: "temper:01a0e32f-27e5-7ca3-9327-5812961bdbff".into(),
+            name: "Build the desktop shell".into(),
+        };
+        let stop = prompt_with(
+            &commands,
+            "Reply with exactly the name of the resource I shared, nothing else.",
+            Some(reference),
+        )
+        .await;
+        assert_eq!(
+            stop, "end_turn",
+            "a turn with a resource_link should end normally"
+        );
     }
 
     // --- The permission-ask seam ---------------------------------------------

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import renderer from '../components/MarkdownRenderer.svelte?raw';
+import palette from '../shell/CommandPalette.svelte?raw';
 import masthead from '../shell/Masthead.svelte?raw';
 import roomStrip from '../shell/RoomStrip.svelte?raw';
 import shell from '../shell/Shell.svelte?raw';
 import tabStrip from '../shell/TabStrip.svelte?raw';
 import unbuiltLens from '../shell/UnbuiltLens.svelte?raw';
+import waysIn from '../shell/WaysIn.svelte?raw';
 
 /**
  * The theme-coupling witness (rendering-baseline design): the rendered-document stylesheet
@@ -44,7 +46,9 @@ const components: [string, string, RegExp][] = [
 			['tab strip', tabStrip, /\.tab/],
 			['room strip', roomStrip, /\.room-strip/],
 			['shell', shell, /\.agent-pending/],
-			['unbuilt lens', unbuiltLens, /\.words/]
+			['unbuilt lens', unbuiltLens, /\.words/],
+			['ways-in panel', waysIn, /\.ways-in/],
+			['command palette', palette, /\.palette/]
 		] as const
 	).map(([name, source, marker]): [string, string, RegExp] => [
 		`the ${name} stylesheet`,

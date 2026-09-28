@@ -13,6 +13,8 @@ import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
+import { temperViews } from '$lib/temper-views.svelte';
+import { shellPanels } from './panels.svelte';
 import Shell from './Shell.svelte';
 import { HOME_TAB, tabs } from './tabs.svelte';
 
@@ -39,6 +41,24 @@ const opened = (id: string): DocOpened => ({
 	bodyHash: 'h1'
 });
 
+/** A page per list: goals hold 2, tasks 11 (more than a first page), sessions none. */
+function listPage(filter: { docType?: string }) {
+	const totals: Record<string, number> = { goal: 2, task: 11, session: 0 };
+	const total = totals[filter?.docType ?? ''] ?? 0;
+	const limit = 8;
+	return {
+		total,
+		rows: Array.from({ length: Math.min(total, limit) }, (_, i) => ({
+			id: `${filter.docType}-${i}`,
+			decoratedRef: `${filter.docType}-${i}-${i === 0 ? A : B}`,
+			title: `${filter.docType} ${i}`,
+			docType: filter.docType,
+			contextRef: '+temper-dev/contrib',
+			updated: '2026-09-27T00:00:00Z'
+		}))
+	};
+}
+
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
@@ -50,6 +70,19 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 			return Promise.resolve({ state: 'present', data: { total: 0, edges: [] } });
 		case 'temper_resolve_refs':
 			return Promise.resolve([]);
+		case 'temper_list_resources':
+			return Promise.resolve(listPage(args?.filter as { docType?: string }));
+		case 'temper_contexts':
+			return Promise.resolve([
+				{
+					id: 'ctx-1',
+					name: 'contrib',
+					slug: 'contrib',
+					ownerRef: '+temper-dev',
+					resourceCount: 59,
+					updated: '2026-09-27T00:00:00Z'
+				}
+			]);
 		default:
 			return Promise.resolve(null);
 	}
@@ -86,7 +119,12 @@ describe('the shell', () => {
 			return () => {};
 		});
 		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
+		tabs.setAside = [];
 		tabs.activate(HOME_TAB);
+		shellPanels.setWaysOpen(true);
+		shellPanels.setPaletteOpen(false);
+		temperViews.reset();
+		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
 		agentSession.messages = [];
 		agentSession.asks = [];
@@ -281,5 +319,174 @@ describe('the shell', () => {
 		expect(container.querySelector('aside[aria-label="Agent"]')).toBe(panel);
 		expect(container.textContent).toContain('Write witness.txt');
 		expect(reads('acp_start')).toHaveLength(1);
+	});
+
+	// --- Slice 3: the ways-in panel and the tab bound -------------------------------------------
+
+	it('the ways-in panel groups its entries by plugin, each list bounded and saying what it omits', async () => {
+		// Contexts and recent work are the window's shared reads (the layout starts them).
+		await temperViews.refreshContexts();
+		const { container } = render(Shell);
+		const ways = container.querySelector('nav[aria-label="Ways in"]') as HTMLElement;
+		expect(ways).not.toBeNull();
+		const groups = [...ways.querySelectorAll('section')].map((g) => g.getAttribute('aria-label'));
+		expect(groups).toEqual(['Ways in from core', 'Ways in from temper-workflows']);
+
+		await waitFor(() =>
+			expect(ways.textContent).toContain('8 of 11 tasks in progress; 3 not shown.')
+		);
+		expect(ways.textContent).toContain('All 2 active goals.');
+		expect(ways.textContent).toContain('+temper-dev/contrib');
+		expect(ways.textContent).toContain('2 plugins enabled · core, temper-workflows');
+		const filters = reads('temper_list_resources').map((c) => c.args?.filter);
+		expect(filters).toEqual([
+			{ docType: 'goal', status: 'active' },
+			{ docType: 'task', stage: 'in-progress' },
+			{ docType: 'session' }
+		]);
+	});
+
+	it('a ways-in entry opens its subject in a tab: from home, a new one', async () => {
+		const { container } = render(Shell);
+		const ways = container.querySelector('nav[aria-label="Ways in"]') as HTMLElement;
+		await waitFor(() => expect(ways.querySelector('a[title="goal 0"]')).toBeTruthy());
+		await fireEvent.click(ways.querySelector('a[title="goal 0"]') as Element);
+		expect(tabs.openCount).toBe(1);
+		expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: A });
+	});
+
+	it('the ways-in panel closes, and reopens without reading again', async () => {
+		const { container } = render(Shell);
+		await waitFor(() => expect(reads('temper_list_resources')).toHaveLength(3));
+		const panel = container.querySelector('nav[aria-label="Ways in"]');
+
+		await fireEvent.click(container.querySelector('.ways-toggle') as Element);
+		expect(container.querySelector('.ways')?.hasAttribute('hidden')).toBe(true);
+		await fireEvent.click(container.querySelector('.ways-toggle') as Element);
+		expect(container.querySelector('.ways')?.hasAttribute('hidden')).toBe(false);
+
+		expect(container.querySelector('nav[aria-label="Ways in"]')).toBe(panel);
+		expect(reads('temper_list_resources')).toHaveLength(3);
+	});
+
+	it('a thirteenth tab sets one aside and says which; the strip lists it to reopen', async () => {
+		const { container } = render(Shell);
+		for (let i = 0; i < 13; i++) {
+			tabs.open(
+				{ kind: 'query', context: `+temper-dev/c${String(i).padStart(2, '0')}` },
+				{ where: 'new' }
+			);
+		}
+		await waitFor(() => expect(container.textContent).toContain('12 open · 12 at most'));
+		expect(container.querySelector('.notice')?.textContent).toContain(
+			'Set aside +temper-dev/c00 to open +temper-dev/c12.'
+		);
+
+		const toggle = button(container, 'set aside · 1');
+		await fireEvent.click(toggle);
+		const listed = container.querySelector('ul[aria-label="Tabs set aside"]') as HTMLElement;
+		expect(listed.textContent).toContain('+temper-dev/c00');
+		await fireEvent.click(button(listed, '+temper-dev/c00'));
+		expect(tabs.current(tabs.active).subject).toEqual({
+			kind: 'query',
+			context: '+temper-dev/c00'
+		});
+		expect(tabs.setAside).toHaveLength(1);
+	});
+
+	// --- Slice 4: the palette and the room in view -----------------------------------------------
+
+	it('the palette opens on Ctrl-K, says it does not search, and closes on Escape', async () => {
+		const { container } = render(Shell);
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"][aria-label="Command palette"]');
+		expect(dialog).not.toBeNull();
+		expect(dialog?.textContent).toContain('searching temper is the search lens, not built yet');
+		await fireEvent.keyDown(dialog?.querySelector('input') as Element, { key: 'Escape' });
+		expect(container.querySelector('[role="dialog"]')).toBeNull();
+	});
+
+	it('the palette opens settings, focusing a tab already showing it', async () => {
+		const { container } = render(Shell);
+		tabs.focusOrOpen({ kind: 'place', place: 'settings' });
+		const settings = tabs.activeId;
+		tabs.activate(HOME_TAB);
+
+		await fireEvent.click(container.querySelector('.palette-trigger') as Element);
+		const input = container.querySelector('[role="dialog"] input') as HTMLInputElement;
+		await fireEvent.input(input, { target: { value: 'open settings' } });
+		await fireEvent.keyDown(input, { key: 'Enter' });
+
+		expect(tabs.activeId).toBe(settings);
+		expect(tabs.openCount).toBe(1);
+		expect(container.querySelector('[role="dialog"]')).toBeNull();
+	});
+
+	it('the palette switches the active tab’s lens, keeping its subject', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'resource', id: A }, { where: 'new' });
+		await waitFor(() => expect(activeBody(container)?.querySelector('h1')).toBeTruthy());
+
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		const graph = [...dialog.querySelectorAll('[role="option"]')].find((o) =>
+			o.textContent?.includes('graph lens')
+		);
+		await fireEvent.click(graph as Element);
+		expect(tabs.current(tabs.active).lens).toBe('core/graph');
+		expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: A });
+	});
+
+	it('a palette section is bounded and says how many more a narrower filter would show', async () => {
+		const { container } = render(Shell);
+		await waitFor(() => expect(reads('temper_list_resources')).toHaveLength(3));
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		await waitFor(() => expect(dialog.textContent).toContain('6 of 10 shown; 4 more'));
+	});
+
+	it('the room in view goes with the first prompt, then only when it has changed', async () => {
+		const { container } = render(Shell);
+		agentSession.workingDir = '/tmp/project';
+		await agentSession.start();
+		tabs.open({ kind: 'resource', id: A }, { where: 'new' });
+		await waitFor(() => expect(tabs.current(tabs.active).title).toBe('Build the document room'));
+		expect(container.querySelector('.in-view')?.textContent).toContain(
+			'In view, shared with the agent:'
+		);
+
+		const prompts = () => reads('acp_prompt').map((c) => c.args?.reference ?? null);
+		agentSession.draft = 'What is next?';
+		await agentSession.send();
+		agentSession.draft = 'And after that?';
+		await agentSession.send();
+		tabs.open({ kind: 'resource', id: B }, { where: 'new' });
+		await waitFor(() => expect(tabs.current(tabs.active).title).toBe('The desktop hub'));
+		agentSession.draft = 'And this one?';
+		await agentSession.send();
+
+		expect(prompts()).toEqual([
+			{ uri: `temper:a-document-${A}`, name: 'Build the document room' },
+			null,
+			{ uri: `temper:a-document-${B}`, name: 'The desktop hub' }
+		]);
+		expect(
+			agentSession.messages.filter((m) => m.role === 'user').map((m) => m.with ?? null)
+		).toEqual(['Build the document room', null, 'The desktop hub']);
+		await waitFor(() =>
+			expect(container.querySelector('aside[aria-label="Agent"] .with')?.textContent).toContain(
+				'Build the document room'
+			)
+		);
+	});
+
+	it('a place in view is named and never shared', async () => {
+		const { container } = render(Shell);
+		agentSession.workingDir = '/tmp/project';
+		await agentSession.start();
+		expect(container.querySelector('.in-view')?.textContent).toContain('not shared');
+		agentSession.draft = 'Hello';
+		await agentSession.send();
+		expect(reads('acp_prompt')[0].args?.reference).toBeNull();
 	});
 });

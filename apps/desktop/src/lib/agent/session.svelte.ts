@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { untrack } from 'svelte';
+import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 import {
 	type AcpUpdate,
 	type AskedNotice,
@@ -16,6 +17,20 @@ import {
 	declaredSelection,
 	EMPTY_SELECTION
 } from './reducers';
+
+/** What is in view in the person's room, as the agent is shown it: a reference, never the body. */
+export type InView = { uri: string; name: string };
+
+/**
+ * The active tab's subject as a reference the agent's own temper tools resolve — a `temper:` URI
+ * over the resource's decorated ref, named by its title. Places and queries are not resources and
+ * are never shared.
+ */
+export function inViewReference(): InView | null {
+	const step = tabs.current(tabs.active);
+	if (step.subject.kind !== 'resource') return null;
+	return { uri: `temper:${step.ref ?? step.subject.id}`, name: stepTitle(step) };
+}
 
 type ConversationInfo = {
 	conversationId: string;
@@ -58,6 +73,8 @@ class AgentSession {
 	// The work record's open facts — set when the conversation opens, written when it closes.
 	openedAt = $state<string>('');
 	recordKey = $state<string>('');
+	/** The last reference the agent was shown in this conversation; a new conversation forgets it. */
+	lastReferenceUri = $state<string | null>(null);
 
 	private unlisten: UnlistenFn | null = null;
 	private unlistenAsk: UnlistenFn | null = null;
@@ -195,6 +212,7 @@ class AgentSession {
 			this.conversation = info;
 			this.messages = [];
 			this.asks = [];
+			this.lastReferenceUri = null;
 			// The declared selection is established at conversation start from
 			// what `session/new` declared — never inherited from how the room
 			// was entered, never guessed for an agent that declares nothing.
@@ -213,16 +231,27 @@ class AgentSession {
 		const text = this.draft.trim();
 		if (!text || !this.conversation || this.prompting) return;
 		this.draft = '';
-		this.messages.push({ role: 'user', text });
+		// The room in view goes with the first prompt, then only when it has changed since the last
+		// prompt that carried one. The transcript records exactly what went with the text.
+		const inView = inViewReference();
+		const reference = inView && inView.uri !== this.lastReferenceUri ? inView : null;
+		const previous = this.lastReferenceUri;
+		if (reference) this.lastReferenceUri = reference.uri;
+		this.messages.push(
+			reference ? { role: 'user', text, with: reference.name } : { role: 'user', text }
+		);
 		this.prompting = true;
 		this.error = '';
 		try {
 			await invoke<string>('acp_prompt', {
 				conversationId: this.conversation.conversationId,
-				text
+				text,
+				reference
 			});
 		} catch (e) {
 			this.error = String(e);
+			// Nothing reached the agent: the next prompt shares the room again.
+			if (reference) this.lastReferenceUri = previous;
 		} finally {
 			this.prompting = false;
 		}

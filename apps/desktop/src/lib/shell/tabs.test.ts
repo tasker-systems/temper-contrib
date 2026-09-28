@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Subject } from './subjects';
-import { HOME_TAB, TAB_BOUND, TabModel, TRAIL_BOUND } from './tabs.svelte';
+import { HOME_TAB, SET_ASIDE_BOUND, TAB_BOUND, TabModel, TRAIL_BOUND } from './tabs.svelte';
 
 /** A device store in memory, so each test starts from exactly what it stored. */
 class MemoryStorage implements Storage {
@@ -105,11 +105,70 @@ describe('the tab model', () => {
 		expect(tab.steps.map((s) => s.subject)).toEqual([doc(1), doc(2)]);
 	});
 
-	it('refuses a tab past the bound, and says so in words', () => {
-		for (let i = 0; i < TAB_BOUND; i++) expect(model.open(doc(i), { where: 'new' })).toBe(true);
-		expect(model.open(doc(99), { where: 'new' })).toBe(false);
+	it('a thirteenth tab sets the least-recently-used one aside, and says which', () => {
+		for (let i = 0; i < TAB_BOUND; i++) {
+			clock += 1;
+			model.open(doc(i), { where: 'new' });
+		}
+		const oldest = model.tabs[1];
+		model.setTitle(model.current(oldest).key, 'Chapter 3');
+		// Showing the oldest again makes the second-oldest the least recently used.
+		clock += 1;
+		model.activate(oldest.id);
+		const leastUsed = model.tabs[2];
+		clock += 1;
+		expect(model.open(doc(99), { where: 'new' })).toBe(true);
+
 		expect(model.openCount).toBe(TAB_BOUND);
-		expect(model.notice).toContain(`${TAB_BOUND} tabs are open`);
+		expect(model.tabs.some((t) => t.id === leastUsed.id)).toBe(false);
+		expect(model.setAside.map((t) => t.id)).toEqual([leastUsed.id]);
+		expect(model.mounted[leastUsed.id]).toBeUndefined();
+		expect(model.notice).toBe(`Set aside document to open document.`);
+	});
+
+	it('a set-aside tab reopens with its trail intact, and is found by what it shows', () => {
+		model.open(doc(0), { where: 'new' });
+		model.open(doc(1));
+		const first = model.activeId;
+		for (let i = 2; i <= TAB_BOUND + 1; i++) {
+			clock += 1;
+			model.open(doc(i), { where: 'new' });
+		}
+		expect(model.setAside.map((t) => t.id)).toEqual([first]);
+
+		expect(model.focusOrOpen(doc(1))).toBe(true);
+		expect(model.activeId).toBe(first);
+		expect(model.active.steps.map((s) => s.subject)).toEqual([doc(0), doc(1)]);
+		expect(model.setAside.map((t) => t.id)).not.toContain(first);
+		expect(model.openCount).toBe(TAB_BOUND);
+		expect(model.setAside).toHaveLength(1);
+	});
+
+	it('a tab that declines to leave is never set aside; when all decline, the open is refused with words', () => {
+		for (let i = 0; i < TAB_BOUND; i++) {
+			clock += 1;
+			model.open(doc(i), { where: 'new' });
+		}
+		const [, drafting, ...rest] = model.tabs;
+		model.handle(drafting.id, model.current(drafting).key).beforeLeave(() => 'Unsaved draft.');
+		expect(model.open(doc(50), { where: 'new' })).toBe(true);
+		expect(model.tabs.some((t) => t.id === drafting.id)).toBe(true);
+
+		for (const tab of [...model.tabs.slice(1)]) {
+			model.handle(tab.id, model.current(tab).key).beforeLeave(() => 'Unsaved draft.');
+		}
+		void rest;
+		expect(model.open(doc(51), { where: 'new' })).toBe(false);
+		expect(model.notice).toContain('none can be set aside without losing work');
+		expect(model.openCount).toBe(TAB_BOUND);
+	});
+
+	it('the set-aside list is bounded, oldest dropped', () => {
+		for (let i = 0; i < TAB_BOUND + SET_ASIDE_BOUND + 5; i++) {
+			clock += 1;
+			model.open(doc(i), { where: 'new' });
+		}
+		expect(model.setAside).toHaveLength(SET_ASIDE_BOUND);
 	});
 
 	it('focuses a tab already showing a subject before opening another', () => {
@@ -184,6 +243,22 @@ describe('restoring the tabs', () => {
 		expect(tab.cursor).toBe(0);
 		expect(tab.steps[1].title).toBe('Chapter 2');
 		expect(Object.keys(restored.mounted)).toEqual([kept]);
+	});
+
+	it('restores the set-aside tabs, and reopens them with their trails', () => {
+		model.open(doc(0), { where: 'new' });
+		model.open(doc(1));
+		for (let i = 2; i <= TAB_BOUND + 1; i++) {
+			clock += 1;
+			model.open(doc(i), { where: 'new' });
+		}
+		const aside = model.setAside.map((t) => t.id);
+		expect(aside).toHaveLength(1);
+
+		const restored = new TabModel(storage, () => clock);
+		expect(restored.setAside.map((t) => t.id)).toEqual(aside);
+		expect(restored.reopen(aside[0])).toBe(true);
+		expect(restored.active.steps.map((s) => s.subject)).toEqual([doc(0), doc(1)]);
 	});
 
 	it('an unreadable store yields home alone, never an error', () => {

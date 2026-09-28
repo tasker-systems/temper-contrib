@@ -1,12 +1,13 @@
 // Package names on crates.io are `temperkb-*`; their lib names are `temper_*`.
 use std::sync::Arc;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use temper_client::auth::DiskTokenStore;
 use temper_client::config::build_client;
 use temper_client::error::ClientError;
 use temper_client::TemperClient;
 use temper_workflow::operations::Surface;
+use temper_workflow::types::resource::{ResourceListParams, ResourceSortField, SortOrder};
 
 /// The temper connection held by the Rust core.
 ///
@@ -298,14 +299,71 @@ pub async fn temper_recent_work(
     limit: i64,
     offset: i64,
 ) -> Result<TemperRecentWork, String> {
-    let params = temper_workflow::types::resource::ResourceListParams {
-        sort: Some(temper_workflow::types::resource::ResourceSortField::Updated),
-        order: Some(temper_workflow::types::resource::SortOrder::Desc),
-        limit: Some(limit),
-        offset: Some(offset),
-        ..Default::default()
+    list_page(
+        &state,
+        list_params(&ResourceFilter::default(), limit, offset),
+    )
+    .await
+}
+
+/// What a bounded list read narrows by — the left panel's entries name one each
+/// (goals that are active, tasks in progress, recent sessions). Every field is
+/// optional; an empty filter is the recent-work ordering itself.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceFilter {
+    pub doc_type: Option<String>,
+    /// Task workflow stage (`backlog`, `in-progress`, `done`, `cancelled`).
+    pub stage: Option<String>,
+    /// Goal lifecycle status (`active`, `completed`, `paused`, `cancelled`).
+    pub status: Option<String>,
+    /// A context ref (`@owner/slug`, `+team/slug`, or a UUID).
+    pub context_ref: Option<String>,
+}
+
+/// The largest page a list read asks for: a list is bounded and says what it
+/// omits, so a caller walks further with `offset` rather than asking for all.
+pub const LIST_PAGE_MAX: i64 = 100;
+
+/// The list params a filter reads as: newest update first, the page bounded,
+/// blank filter fields dropped rather than sent as a filter matching nothing.
+pub fn list_params(filter: &ResourceFilter, limit: i64, offset: i64) -> ResourceListParams {
+    let given = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
     };
-    let page = temper_client(&state)?
+    ResourceListParams {
+        doc_type_name: given(&filter.doc_type),
+        stage: given(&filter.stage),
+        status: given(&filter.status),
+        context_ref: given(&filter.context_ref),
+        sort: Some(ResourceSortField::Updated),
+        order: Some(SortOrder::Desc),
+        limit: Some(limit.clamp(1, LIST_PAGE_MAX)),
+        offset: Some(offset.max(0)),
+        ..Default::default()
+    }
+}
+
+/// One bounded page of visible resources under a filter, newest update first —
+/// answered in the recent-work shape, so every list says its total.
+#[tauri::command]
+pub async fn temper_list_resources(
+    state: tauri::State<'_, TemperState>,
+    filter: ResourceFilter,
+    limit: i64,
+    offset: i64,
+) -> Result<TemperRecentWork, String> {
+    list_page(&state, list_params(&filter, limit, offset)).await
+}
+
+async fn list_page(
+    state: &tauri::State<'_, TemperState>,
+    params: ResourceListParams,
+) -> Result<TemperRecentWork, String> {
+    let page = temper_client(state)?
         .resources()
         .list_meta(&params)
         .await
@@ -347,7 +405,35 @@ pub async fn temper_resolve_refs(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ref;
+    use super::{list_params, parse_ref, ResourceFilter, LIST_PAGE_MAX};
+    use temper_workflow::types::resource::{ResourceSortField, SortOrder};
+
+    #[test]
+    fn a_filter_reads_as_newest_first_and_bounded() {
+        let filter = ResourceFilter {
+            doc_type: Some("task".into()),
+            stage: Some("in-progress".into()),
+            status: Some("  ".into()),
+            context_ref: None,
+        };
+        let params = list_params(&filter, 10, 20);
+        assert_eq!(params.doc_type_name.as_deref(), Some("task"));
+        assert_eq!(params.stage.as_deref(), Some("in-progress"));
+        // A blank field is no filter, never a filter matching nothing.
+        assert_eq!(params.status, None);
+        assert_eq!(params.context_ref, None);
+        assert!(matches!(params.sort, Some(ResourceSortField::Updated)));
+        assert!(matches!(params.order, Some(SortOrder::Desc)));
+        assert_eq!((params.limit, params.offset), (Some(10), Some(20)));
+    }
+
+    #[test]
+    fn a_page_is_bounded_whatever_is_asked() {
+        let params = list_params(&ResourceFilter::default(), 10_000, -5);
+        assert_eq!(params.limit, Some(LIST_PAGE_MAX));
+        assert_eq!(params.offset, Some(0));
+        assert_eq!(list_params(&ResourceFilter::default(), 0, 0).limit, Some(1));
+    }
 
     #[test]
     fn parses_bare_and_decorated_refs() {

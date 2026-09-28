@@ -49,6 +49,19 @@ core in `src-tauri/`.
   (`lenses.ts`, `contributions/`): resolved from the lens asked for, then a
   plugin lens declaring the doc type, then core's default. A lens not built yet
   says so and what lands it. SvelteKit's router moves nobody between rooms.
+  - **Ways in** — the left panel groups entries by the plugin that contributed
+    them: core's contexts and recent work, temper-workflows' active goals, tasks
+    in progress and recent sessions (`temper_list_resources`, one bounded read
+    each, cached with its age). It closes and reopens without reading again.
+  - **The tab bound** — twelve tabs beside home. A thirteenth sets the
+    least-recently-used tab aside (never one whose lens declines to leave) and
+    says which; set-aside tabs reopen from the strip with their trails.
+  - **The palette** — ⌘K / Ctrl K. It filters what the desktop already holds
+    (tabs, recent work, contexts, the workflow entries), switches lens and opens
+    settings or setup; it does not search temper, and says so.
+  - **The room in view** — a resource tab is shared with the agent as an ACP
+    `resource_link` (`temper:<ref>`) on the first prompt and whenever it
+    changes; the transcript records what went with each prompt.
 - **The document room** — the core document lens opens a document body first:
   what temper calls it, its properties (`src/lib/properties.ts`, ported from
   temper-ui) and the rendered body. Its tab reads the body once, on opening.
@@ -74,7 +87,8 @@ core in `src-tauri/`.
 - **Witness** — `cargo make desktop-csp-witness` builds for production and drives the real
   webview through `tauri-driver` (`scripts/csp-witness.py`): the shell is driven — a document
   in a tab, a second tab, a switch back that keeps the room, a lens switch, settings and setup
-  as tabs — with no violations; injected scripts, eval, inline handlers and style attributes, remote images and
+  as tabs, the palette (a lens switched from it), the ways-in panel closed and reopened — with
+  no violations; injected scripts, eval, inline handlers and style attributes, remote images and
   remote fetches are all refused; the `__TAURI__` global is absent and a command outside the
   capability is refused. Verify against a production build, never the dev server.
 

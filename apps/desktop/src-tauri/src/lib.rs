@@ -6,6 +6,7 @@ mod hub;
 mod person_context;
 mod settings;
 mod temper;
+mod window;
 mod work;
 
 use tauri::Manager;
@@ -16,6 +17,9 @@ pub fn run() {
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             app.manage(settings::SettingsState::load(dir));
+            if let Some(main) = app.get_webview_window("main") {
+                window::fit_to_monitor(&main);
+            }
             Ok(())
         })
         .manage(temper::TemperState::connect())
@@ -42,6 +46,7 @@ pub fn run() {
             temper::temper_contexts,
             temper::temper_context_create,
             temper::temper_recent_work,
+            temper::temper_list_resources,
             work::temper_write_work_record,
             hub::hub_commit_recent_work,
             hub::hub_recent_work,

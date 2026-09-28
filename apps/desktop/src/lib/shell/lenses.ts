@@ -8,6 +8,7 @@
  */
 import type { Component } from 'svelte';
 import type { DocOpened } from '$lib/document';
+import type { ListFilter } from '$lib/temper-views.svelte';
 import type { Place, Subject } from './subjects';
 
 /** What a lens may ask of the tab it is mounted in. */
@@ -52,11 +53,19 @@ export interface LensDecl {
 	build: LensBuild;
 }
 
-/** A left-panel entry. Typed here, drawn by the ways-in panel. */
-export interface WayInDecl {
+/**
+ * A left-panel entry: a way in, never a folder. Each names the read it lists — core's contexts
+ * and recent work, or a bounded list of resources under a filter — and every row opens its
+ * subject through the one door.
+ */
+export type WayInDecl = {
+	/** Unique within its plugin. */
 	id: string;
+	/** What the entry is called in the panel. */
 	label: string;
-}
+	/** What the rows are, in words — the bounded list's omission sentence is composed from it. */
+	scope: string;
+} & ({ source: 'contexts' } | { source: 'recent' } | { source: 'list'; filter: ListFilter });
 
 /** Typed now, empty in this build: property vocabularies and renderers. */
 export interface VocabularyDecl {

@@ -31,6 +31,29 @@ export type TemperRecentPage = { total: number; rows: TemperRecentRow[] };
 /** The recent-work list's first page, and how far each Show-more step extends it. */
 export const RECENT_STEP = 10;
 
+/** What a bounded list read narrows by (the `temper_list_resources` filter). */
+export type ListFilter = { docType?: string; stage?: string; status?: string; contextRef?: string };
+
+/** One bounded list's read: its page, when it landed, and whether it is this session's. */
+export type ListView = {
+	page: TemperRecentPage | null;
+	fetchedAt: number | null;
+	fresh: boolean;
+	error: string;
+	limit: number;
+};
+
+/** A list's first page, and how far each Show-more step extends it. */
+export const LIST_STEP = 8;
+
+const emptyList = (): ListView => ({
+	page: null,
+	fetchedAt: null,
+	fresh: false,
+	error: '',
+	limit: LIST_STEP
+});
+
 /** The store's default context name until a setting says otherwise. The Rust core
  * owns the value (`DeviceSettings::DEFAULT_TEMPER_CONTEXT`); this is its echo, offered. */
 export const DEFAULT_TEMPER_CONTEXT = 'temper-desktop';
@@ -62,6 +85,10 @@ type PersistedCache = {
 	recent?: TemperRecentPage | null;
 	recentFetchedAt?: number | null;
 	recentLimit?: number | null;
+	lists?: Record<
+		string,
+		{ page: TemperRecentPage | null; fetchedAt: number | null; limit: number }
+	>;
 };
 
 /** How long ago a cached read landed, as words. Not ticking — the age is said when rendered. */
@@ -111,6 +138,9 @@ class TemperViews {
 	recentError = $state('');
 	/** How far into the recent-work ordering the current page reaches. */
 	recentLimit = $state(RECENT_STEP);
+
+	/** Bounded list reads by key — the left panel's entries, each its own read. */
+	lists = $state<Record<string, ListView>>({});
 
 	#initialised = false;
 
@@ -195,6 +225,41 @@ class TemperViews {
 		await this.refreshRecent();
 	}
 
+	/** A list's read as it stands — nothing known yet is a list with no page. */
+	list(key: string): ListView {
+		return this.lists[key] ?? emptyList();
+	}
+
+	/** Reads one bounded list, newest update first; a failure keeps the cached page, with its age. */
+	async refreshList(key: string, filter: ListFilter): Promise<void> {
+		const current = this.lists[key] ?? emptyList();
+		this.lists[key] = current;
+		try {
+			const page = await invoke<TemperRecentPage>('temper_list_resources', {
+				filter,
+				limit: current.limit,
+				offset: 0
+			});
+			this.lists[key] = {
+				page,
+				fetchedAt: Date.now(),
+				fresh: true,
+				error: '',
+				limit: current.limit
+			};
+			this.#saveCache();
+		} catch (e) {
+			this.lists[key] = { ...(this.lists[key] ?? current), fresh: false, error: String(e) };
+		}
+	}
+
+	/** Widens one list's page by a step and re-reads the same ordering. */
+	async showMoreList(key: string, filter: ListFilter): Promise<void> {
+		const current = this.lists[key] ?? emptyList();
+		this.lists[key] = { ...current, limit: current.limit + LIST_STEP };
+		await this.refreshList(key, filter);
+	}
+
 	/** Test and reset seam: back to nothing known, cache included. */
 	reset(): void {
 		this.profileIdentity = null;
@@ -216,6 +281,7 @@ class TemperViews {
 		this.recentFresh = false;
 		this.recentError = '';
 		this.recentLimit = RECENT_STEP;
+		this.lists = {};
 		try {
 			localStorage.removeItem(CACHE_KEY);
 		} catch {
@@ -245,6 +311,18 @@ class TemperViews {
 			if (typeof parsed.recentLimit === 'number' && parsed.recentLimit > 0) {
 				this.recentLimit = parsed.recentLimit;
 			}
+			if (parsed.lists && typeof parsed.lists === 'object') {
+				for (const [key, cached] of Object.entries(parsed.lists)) {
+					if (!cached || typeof cached !== 'object') continue;
+					this.lists[key] = {
+						page: cached.page ?? null,
+						fetchedAt: typeof cached.fetchedAt === 'number' ? cached.fetchedAt : null,
+						fresh: false,
+						error: '',
+						limit: typeof cached.limit === 'number' && cached.limit > 0 ? cached.limit : LIST_STEP
+					};
+				}
+			}
 		} catch {
 			// a cache that cannot be read is no cache; the session starts on live reads alone
 		}
@@ -261,7 +339,13 @@ class TemperViews {
 				contextsFetchedAt: this.contextsFetchedAt,
 				recent: this.recent,
 				recentFetchedAt: this.recentFetchedAt,
-				recentLimit: this.recentLimit
+				recentLimit: this.recentLimit,
+				lists: Object.fromEntries(
+					Object.entries(this.lists).map(([key, l]) => [
+						key,
+						{ page: l.page, fetchedAt: l.fetchedAt, limit: l.limit }
+					])
+				)
 			};
 			localStorage.setItem(CACHE_KEY, JSON.stringify(persisted));
 		} catch {

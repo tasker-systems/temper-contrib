@@ -3,6 +3,9 @@
 	import { askLabel } from '$lib/agent/reducers';
 	import RegionState from '$lib/components/RegionState.svelte';
 	import Transcript from '$lib/components/Transcript.svelte';
+	import { enabled } from '$lib/shell/contributions';
+	import { lensById } from '$lib/shell/lenses';
+	import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 
 	/** The agent panel: a view of the engagement store, holding no conversation
 	 *  state of its own. Closing it hides the view — the store, the listeners
@@ -12,6 +15,13 @@
 	/** What the agent's own category reads as: its word, whatever it is.
 	 *  `model_config` and `thought_level` carry their underscore; the words
 	 *  are the agent's declared vocabulary, never a desktop rewrite. */
+	/** The room in view: what the agent is shown with the next prompt, or why nothing is. */
+	const inViewStep = $derived(tabs.current(tabs.active));
+	const inViewLens = $derived(
+		inViewStep.lens ? (lensById(inViewStep.lens, enabled)?.name ?? inViewStep.lens) : ''
+	);
+	const inViewShared = $derived(inViewStep.subject.kind === 'resource');
+
 	function categoryLabel(category: string | null): string {
 		return category ?? 'option';
 	}
@@ -31,7 +41,7 @@
 		</div>
 		<p class="who">
 			<span class="agent-mark" aria-hidden="true">◆</span>
-			{session.agentLabel()}{#if session.conversation}
+			{session.agentLabel() || 'no agent chosen'}{#if session.conversation}
 				<span aria-hidden="true"> · </span>session
 				<span class="strip-em">{session.conversation.sessionId}</span>{/if}
 		</p>
@@ -49,6 +59,16 @@
 			</p>
 		{/if}
 	</header>
+
+	<p class="in-view">
+		{#if inViewShared}
+			In view, shared with the agent:
+		{:else}
+			In view, not shared — a place is not a resource:
+		{/if}
+		<em>{stepTitle(inViewStep)}</em>
+		{#if inViewLens}<span class="in-view-lens">· {inViewLens}</span>{/if}
+	</p>
 
 	{#if session.conversation}
 		<div class="selection" aria-label="The agent's declared selection">
@@ -195,6 +215,19 @@
 	.head-row .t-label {
 		flex: 1;
 		margin: 0;
+	}
+	.in-view {
+		margin: 0;
+		font: 0.78rem var(--tp-font-ui);
+		color: var(--tp-text-muted);
+	}
+	.in-view em {
+		font: italic 0.85rem var(--tp-font-reading);
+		color: var(--tp-text);
+	}
+	.in-view-lens {
+		font: 0.62rem var(--tp-font-doing);
+		color: var(--tp-text-subtle);
 	}
 	.who {
 		margin: 0;

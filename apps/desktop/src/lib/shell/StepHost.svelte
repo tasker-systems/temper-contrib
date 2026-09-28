@@ -40,10 +40,16 @@
 		arriving ? null : resolveLens(subject, docType, step.lens, enabled)
 	);
 
+	const ref = $derived(opened?.state === 'opened' ? opened.decoratedRef : null);
+
 	$effect(() => {
 		if (!resolution) return;
-		if (step.lens !== resolution.lens.id || (docType && step.docType !== docType)) {
-			tabs.resolved(stepKey, resolution.lens.id, docType);
+		if (
+			step.lens !== resolution.lens.id ||
+			(docType && step.docType !== docType) ||
+			(ref && step.ref !== ref)
+		) {
+			tabs.resolved(stepKey, resolution.lens.id, docType, ref);
 		}
 	});
 

@@ -15,17 +15,26 @@
 	import { agentSession } from '$lib/agent/session.svelte';
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import TemperProfile from '$lib/components/TemperProfile.svelte';
+	import CommandPalette from './CommandPalette.svelte';
 	import { follow } from './follow';
 	import Masthead from './Masthead.svelte';
+	import { shellPanels } from './panels.svelte';
 	import RoomStrip from './RoomStrip.svelte';
 	import TabHost from './TabHost.svelte';
 	import TabStrip from './TabStrip.svelte';
 	import { stepTitle, tabs } from './tabs.svelte';
+	import WaysIn from './WaysIn.svelte';
 
 	// Idempotent: the store's listeners register once, whatever mounts.
 	agentSession.init();
 
 	let root: HTMLDivElement | undefined = $state();
+
+	/** The palette's shortcut as this platform writes it. */
+	const paletteKeys =
+		typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+			? '⌘K'
+			: 'Ctrl K';
 
 	$effect(() => {
 		if (!root) return;
@@ -36,6 +45,18 @@
 			root?.removeEventListener('click', onFollow);
 			root?.removeEventListener('auxclick', onFollow);
 		};
+	});
+
+	// ⌘K / Ctrl-K opens the palette from anywhere in the window; it toggles closed again.
+	$effect(() => {
+		const onKey = (event: KeyboardEvent) => {
+			if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+				event.preventDefault();
+				shellPanels.setPaletteOpen(!shellPanels.paletteOpen);
+			}
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
 	});
 
 	$effect(() => {
@@ -50,6 +71,27 @@
 
 {#snippet profileSlot()}
 	<TemperProfile />
+{/snippet}
+
+{#snippet waysToggle()}
+	<button
+		class="t-action ways-toggle"
+		aria-pressed={shellPanels.waysOpen}
+		aria-label={shellPanels.waysOpen ? 'Close the ways-in panel' : 'Open the ways-in panel'}
+		onclick={() => shellPanels.setWaysOpen(!shellPanels.waysOpen)}>ways in</button
+	>
+{/snippet}
+
+{#snippet paletteTrigger()}
+	<button
+		class="palette-trigger"
+		aria-haspopup="dialog"
+		aria-expanded={shellPanels.paletteOpen}
+		onclick={() => shellPanels.setPaletteOpen(true)}
+	>
+		<span>Open, switch lens, or run a command…</span>
+		<span class="keys" aria-hidden="true">{paletteKeys}</span>
+	</button>
 {/snippet}
 
 {#snippet agentToggle()}
@@ -69,8 +111,13 @@
 {/snippet}
 
 <div class="shell" bind:this={root}>
-	<Masthead agentToggle={agentToggle} profile={profileSlot} />
+	<Masthead {waysToggle} palette={paletteTrigger} {agentToggle} profile={profileSlot} />
 	<div class="body">
+		{#if shellPanels.waysShown}
+			<div class="ways" hidden={!shellPanels.waysOpen}>
+				<WaysIn />
+			</div>
+		{/if}
 		<main class="rooms">
 			<TabStrip />
 			<RoomStrip />
@@ -93,6 +140,9 @@
 			<AgentPanel />
 		</div>
 	</div>
+	{#if shellPanels.paletteOpen}
+		<CommandPalette />
+	{/if}
 </div>
 
 <style>
@@ -124,6 +174,46 @@
 	}
 	.tab-body[hidden] {
 		display: none;
+	}
+	.ways-toggle {
+		white-space: nowrap;
+	}
+	.ways {
+		display: flex;
+		flex: none;
+		min-height: 0;
+	}
+	.ways[hidden] {
+		display: none;
+	}
+	.palette-trigger {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		width: min(26rem, 32vw);
+		height: 1.9rem;
+		box-sizing: border-box;
+		margin-left: 1rem;
+		padding: 0 0.75rem;
+		border: 1px solid var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+		background: var(--tp-surface);
+		font: 0.8rem var(--tp-font-ui);
+		color: var(--tp-text-subtle);
+		cursor: pointer;
+	}
+	.palette-trigger:hover {
+		border-color: var(--tp-accent-line-soft);
+	}
+	.palette-trigger span:first-child {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+	.keys {
+		flex: none;
+		font: 0.68rem var(--tp-font-doing);
 	}
 	.agent {
 		display: flex;

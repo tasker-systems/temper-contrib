@@ -24,11 +24,15 @@
 		{/if}
 	{/if}
 	{#if v.connected === false}
-		<span class="state">Not connected{#if v.connectError} — {v.connectError}{/if}.</span>
+		<span class="state" title={v.connectError ?? undefined}
+			>Not connected{#if v.connectError} — {v.connectError}{/if}.</span
+		>
 	{:else if v.connected === true && v.profileIdentity}
 		<span class="state">connected</span>
 	{:else if v.connected === true}
-		<span class="state">identity not read{#if v.profileError} — {v.profileError}{/if}.</span>
+		<span class="state" title={v.profileError || undefined}
+			>identity not read{#if v.profileError} — {v.profileError}{/if}.</span
+		>
 	{/if}
 </span>
 

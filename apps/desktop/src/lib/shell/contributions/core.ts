@@ -65,7 +65,20 @@ export const core: Contribution = {
 			build: { state: 'unbuilt', landsWith: 'the search lens' }
 		}
 	],
-	waysIn: [],
+	waysIn: [
+		{
+			id: 'contexts',
+			label: 'contexts',
+			scope: 'of the contexts your temper credentials can see',
+			source: 'contexts'
+		},
+		{
+			id: 'recent',
+			label: 'recent work',
+			scope: 'recently updated resources',
+			source: 'recent'
+		}
+	],
 	vocabularies: [],
 	skills: []
 };
