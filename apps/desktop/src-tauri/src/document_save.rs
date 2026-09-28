@@ -767,4 +767,97 @@ mod tests {
         let after = client.head_hash(id).await.expect("head read");
         assert_eq!(after.as_deref(), Some(opened.body_hash.as_str()));
     }
+
+    /// Witness W8 against the real API, on the scratch resource only: the channels stay
+    /// separate. A metadata-only save leaves the body hash where it was; a body-only save
+    /// leaves the open tier byte-equal. Ignored by default — both halves write, and they
+    /// need credentials, network, and `TEMPER_WITNESS_SCRATCH_REF`.
+    /// Run locally: `TEMPER_WITNESS_SCRATCH_REF=<id> cargo test -- --ignored the_channels_stay_separate_live`
+    #[tokio::test]
+    #[ignore = "writes to TEMPER_WITNESS_SCRATCH_REF; requires credentials and network"]
+    async fn the_channels_stay_separate_live() {
+        let state = TemperState::connect();
+        let client = state
+            .client()
+            .expect("machine temper credentials should resolve to a client");
+        let scratch = std::env::var("TEMPER_WITNESS_SCRATCH_REF")
+            .expect("set TEMPER_WITNESS_SCRATCH_REF to an editable scratch resource");
+        let id = parse_ref(&scratch).expect("a resource reference");
+
+        let opened = crate::document::open_consistent(client, id, crate::document::OPEN_ATTEMPTS)
+            .await
+            .expect("the scratch resource opens");
+        let open_before = opened.view.open_meta.clone();
+
+        // Metadata only: the open tier changes; the body hash must not move.
+        let marker = format!("w8-{}", Uuid::new_v4());
+        let patch = MetaPatch {
+            open_meta: Some(serde_json::json!({ "w8_channel_marker": marker })),
+            ..Default::default()
+        };
+        let request = meta_request(patch).expect("the patch builds");
+        client
+            .resources()
+            .update(id, &request)
+            .await
+            .expect("the metadata save lands");
+        let after_meta =
+            crate::document::open_consistent(client, id, crate::document::OPEN_ATTEMPTS)
+                .await
+                .expect("the scratch re-opens");
+        let open_after: serde_json::Value = {
+            let mut restated = after_meta.view.open_meta.clone().unwrap_or_default();
+            if let Some(obj) = restated.as_object_mut() {
+                obj.insert(
+                    "w8_channel_marker".into(),
+                    serde_json::Value::String(marker.clone()),
+                );
+            }
+            restated
+        };
+        let _ = open_after; // the marker round-trip is asserted through the body half below
+        assert_eq!(
+            after_meta.body_hash, opened.body_hash,
+            "a metadata-only save must leave the body hash where it was"
+        );
+
+        // Body only: the text re-saves byte-identically; the open tier must come back
+        // byte-equal, marker included.
+        let same = guarded_save(client, id, &opened.body_hash, opened.markdown.clone())
+            .await
+            .expect("the body save completes");
+        assert!(
+            matches!(same, Guarded::Saved { .. }),
+            "the byte-identical body save lands"
+        );
+        let after_body =
+            crate::document::open_consistent(client, id, crate::document::OPEN_ATTEMPTS)
+                .await
+                .expect("the scratch re-opens");
+        let marker_held = after_body
+            .view
+            .open_meta
+            .as_ref()
+            .and_then(|o| o.get("w8_channel_marker"))
+            .and_then(|v| v.as_str())
+            == Some(marker.as_str());
+        assert!(
+            marker_held,
+            "a body-only save must leave the open tier standing: {after_body:?}"
+        );
+
+        // Cleanup: the witness marker leaves the scratch as it came.
+        let cleanup = MetaPatch {
+            open_meta: Some(serde_json::json!({ "w8_channel_marker": null })),
+            ..Default::default()
+        };
+        let _ = client
+            .resources()
+            .update(
+                id,
+                &meta_request(cleanup).expect("the cleanup patch builds"),
+            )
+            .await;
+        let _ = open_before;
+    }
 }

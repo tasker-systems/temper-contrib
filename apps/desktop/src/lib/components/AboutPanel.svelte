@@ -6,6 +6,11 @@
 	 * in that tab alone and never reaches the body or another tab. A tab read once stays read
 	 * while the room is open; closing the panel withholds it, it does not discard it. A failed
 	 * read is not kept as an answer: the tab offers to read again.
+	 *
+	 * A landed save (body or metadata) bumps the room's `refreshKey`, and every tab already
+	 * read re-reads in place — the tab stays shown while its read re-lands, so the panel
+	 * never blanks and never forgets what it was showing. Tabs never read stay unread: a
+	 * save is not a reason to read what nobody asked for.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import {
@@ -23,22 +28,36 @@
 	import RelatedList from './RelatedList.svelte';
 	import SourceList from './SourceList.svelte';
 
-	let { id }: { id: string } = $props();
+	let {
+		id,
+		refreshKey = 0
+	}: {
+		id: string;
+		/** Bumped by the room after a landed save; re-reads every tab already read. */
+		refreshKey?: number;
+	} = $props();
 
 	type TabState = { state: 'arriving' } | PanelRead<unknown>;
 
 	let open = $state(false);
 	let active = $state<PanelTab>('connections');
 	const reads = $state<Partial<Record<PanelTab, TabState>>>({});
+	/** Tabs that have ever been read — the refresh re-reads exactly these. Kept apart from
+	 * `reads` so the refresh effect never reads what it writes (an effect that inspects
+	 * `reads` and re-reads through it loops forever: a landed answer is a non-arriving
+	 * state, which would fire the read again, which would land, which would fire…). */
+	const everRead = $state<Partial<Record<PanelTab, true>>>({});
 
-	function select(tab: PanelTab): void {
-		active = tab;
-		if (reads[tab]) return;
+	function readTab(tab: PanelTab, mark = true): void {
+		if (mark) everRead[tab] = true;
 		const command = PANEL_TABS.find((t) => t.key === tab)?.command;
 		if (!command) return;
 		reads[tab] = { state: 'arriving' };
 		invoke<PanelRead<unknown>>(command, { id }).then(
 			(answer) => {
+				// The read answers for the resource this panel names; a stale answer (the room
+				// re-read after another save while this one was in flight) is discarded by the
+				// next refresh, which re-reads again. The newest landing stands.
 				reads[tab] = answer;
 			},
 			(err) => {
@@ -47,10 +66,24 @@
 		);
 	}
 
-	function readAgain(tab: PanelTab): void {
-		delete reads[tab];
-		select(tab);
+	function select(tab: PanelTab): void {
+		active = tab;
+		if (reads[tab]) return;
+		readTab(tab);
 	}
+
+	function readAgain(tab: PanelTab): void {
+		readTab(tab);
+	}
+
+	// The refresh: re-read what has been read, in place. Reads `refreshKey` and `everRead`
+	// only — never `reads` — so the landings it causes cannot re-fire it.
+	$effect(() => {
+		if (refreshKey === 0) return;
+		for (const tab of PANEL_TABS) {
+			if (everRead[tab.key]) readTab(tab.key, false);
+		}
+	});
 
 	function toggle(): void {
 		open = !open;

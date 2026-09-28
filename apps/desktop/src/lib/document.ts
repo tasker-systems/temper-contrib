@@ -138,6 +138,13 @@ export interface Sources {
 	blocks: BlockSources[];
 }
 
+/** What a metadata save answers: saved, or why nothing was sent or landed. */
+export type MetaSaved =
+	| { state: 'saved' }
+	| { state: 'refused'; reason: string }
+	| { state: 'unresolved'; reason: string }
+	| { state: 'failed'; message: string };
+
 /** The panel's tabs, in the order they sit, each named by the read it makes. */
 export const PANEL_TABS = [
 	{ key: 'connections', label: 'Connections', command: 'doc_connections' },

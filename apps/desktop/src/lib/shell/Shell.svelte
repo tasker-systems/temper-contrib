@@ -12,6 +12,7 @@
 	 * somewhere an ask is being put to the person.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
+	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { agentSession } from '$lib/agent/session.svelte';
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import TemperProfile from '$lib/components/TemperProfile.svelte';
@@ -66,6 +67,19 @@
 		return () => {
 			invoke('acp_ask_surface', { conversationId: id, present: false }).catch(() => {});
 		};
+	});
+
+	// The window-close draft guard: the core prevented a close over a dirty draft and says so.
+	// The person confirms here; the confirm clears the flag and closes, past the guard. The
+	// webview's own confirm() is the ask — no capability widened, no new channel minted.
+	let unlistenClose: UnlistenFn | null = null;
+	listen('doc-close-requested', () => {
+		const confirmed = window.confirm(
+			'This document has an unsaved draft — close anyway? The draft is kept until you close the tab.'
+		);
+		if (confirmed) invoke('doc_close_confirmed').catch(() => {});
+	}).then((u) => {
+		unlistenClose = u;
 	});
 </script>
 

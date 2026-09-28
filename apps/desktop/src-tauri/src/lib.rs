@@ -37,8 +37,10 @@ pub fn run() {
             if pending {
                 hub_queue::commit_soon(app.handle().clone());
             }
+            app.manage(window::DraftState::new());
             if let Some(main) = app.get_webview_window("main") {
                 window::fit_to_monitor(&main);
+                window::register_close_guard(&main);
             }
             Ok(())
         })
@@ -63,6 +65,8 @@ pub fn run() {
             document_save::doc_save_body,
             document_save::doc_save_meta,
             document_save::doc_show_changes,
+            window::doc_draft_state,
+            window::doc_close_confirmed,
             temper::temper_teams,
             temper::temper_contexts,
             temper::temper_context_create,
