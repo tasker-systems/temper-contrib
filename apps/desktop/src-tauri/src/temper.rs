@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use temper_client::auth::DiskTokenStore;
-use temper_client::config::build_client;
+use temper_client::config::{api_url, build_client, load_cloud_config};
 use temper_client::error::ClientError;
 use temper_client::TemperClient;
 use temper_workflow::operations::Surface;
@@ -18,18 +18,28 @@ use temper_workflow::types::resource::{ResourceListParams, ResourceSortField, So
 pub struct TemperState {
     client: Option<Arc<TemperClient>>,
     connect_error: Option<String>,
+    /// The deployed server's address, as the machine's config resolved it —
+    /// the one temper-shaped URL shape a rendered markdown link intercepts
+    /// into a tab. None when the machine has no configured server.
+    server_url: Option<String>,
 }
 
 impl TemperState {
     pub fn connect() -> Self {
+        let server_url = load_cloud_config()
+            .ok()
+            .map(|config| api_url(&config))
+            .filter(|url| !url.trim().is_empty());
         match Self::try_connect() {
             Ok(client) => Self {
                 client: Some(Arc::new(client)),
                 connect_error: None,
+                server_url,
             },
             Err(err) => Self {
                 client: None,
                 connect_error: Some(err),
+                server_url,
             },
         }
     }
@@ -50,6 +60,10 @@ impl TemperState {
 pub struct ConnectionStatus {
     connected: bool,
     error: Option<String>,
+    /// The deployed server's address, as the machine's config resolved it —
+    /// the one temper-shaped URL shape a rendered markdown link intercepts
+    /// into a tab. None when the machine has no configured server.
+    server_url: Option<String>,
 }
 
 #[tauri::command]
@@ -57,6 +71,7 @@ pub fn temper_connection_status(state: tauri::State<TemperState>) -> ConnectionS
     ConnectionStatus {
         connected: state.client.is_some(),
         error: state.connect_error.clone(),
+        server_url: state.server_url.clone(),
     }
 }
 

@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window: event listening only. The UI's own commands (generate_handler! in lib.rs) need no permission here; nothing else is granted.",
+  "description": "Capability for the main window: event listening, and opening a non-temper URL in the person's configured browser (the opener plugin's default-url scope: http, https, mailto, tel). The UI's own commands (generate_handler! in lib.rs) need no permission here; nothing else is granted.",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:event:default"
+    "core:event:default",
+    "opener:allow-default-urls"
   ]
 }
