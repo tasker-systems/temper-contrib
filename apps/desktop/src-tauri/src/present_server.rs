@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use agent_client_protocol::schema::v1::{HttpHeader, McpServer, McpServerHttp};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Router;
@@ -188,6 +189,18 @@ pub struct RunningServer {
 }
 
 impl RunningServer {
+    /// The `session/new` server entry this conversation's agent receives: the
+    /// URL and the secret in the wire names the ACP schema declares, built
+    /// from the running server's own facts — never restated by a caller.
+    pub fn as_mcp_server(&self) -> McpServer {
+        McpServer::Http(
+            McpServerHttp::new("temper", self.url.clone())
+                .headers(vec![HttpHeader::new(SECRET_HEADER, self.secret.clone())]),
+        )
+    }
+}
+
+impl RunningServer {
     /// Binds loopback, generates the secret, and serves until
     /// [`RunningServer::stop`]. Stateless mode with json responses — the
     /// same assembly temper-mcp runs, minus the deployment-specific pieces.
@@ -277,6 +290,44 @@ impl RunningServer {
     }
 }
 
+/// What closing a conversation leaves: a closed guard's drop shuts the
+/// server down — the graceful path's complement, for the arm where the
+/// conversation loop is not polled to completion (the agent's process died
+/// with the connection future). The signal send is sync; the join is not
+/// awaited from drop, so no drop spins or blocks.
+pub struct RunningServerGuard {
+    running: Option<RunningServer>,
+}
+
+impl RunningServerGuard {
+    pub fn new(running: RunningServer) -> Self {
+        Self {
+            running: Some(running),
+        }
+    }
+
+    /// Whether the guard still holds its server — read by the drop-path
+    /// witness only, to name precisely which arm it drove.
+    #[cfg(test)]
+    fn holds_server(&self) -> bool {
+        self.running.is_some()
+    }
+
+    /// Relinquishes the server for a graceful, awaited stop — the explicit
+    /// close path. The guard's remaining drop then does nothing.
+    pub fn take(mut self) -> RunningServer {
+        self.running.take().expect("the server is present on take")
+    }
+}
+
+impl Drop for RunningServerGuard {
+    fn drop(&mut self) {
+        if let Some(running) = self.running.take() {
+            let _ = running.shutdown.send(true);
+        }
+    }
+}
+
 /// The secret: two concatenated uuidv4s — 256 bits, minted in this process.
 pub fn new_secret() -> String {
     format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4())
@@ -320,6 +371,80 @@ async fn mcp_gateway(
 
 async fn wait_shutdown(mut shutdown_rx: tokio::sync::watch::Receiver<bool>) {
     let _ = shutdown_rx.wait_for(|stopped| *stopped).await;
+}
+
+/// The wire entry one conversation's agent receives in its `session/new`:
+/// the ACP `http` shape with the secret in its header, exactly as the
+/// schema's own serialization test composes it.
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread")]
+async fn the_server_rides_session_new_as_the_acp_http_shape() {
+    let (shutdown, _) = tokio::sync::watch::channel(false);
+    let server = RunningServer {
+        url: "http://127.0.0.1:54321/mcp".to_string(),
+        secret: "secret-x".to_string(),
+        shutdown,
+        handle: tokio::spawn(std::future::pending()),
+    };
+    let McpServer::Http(http) = server.as_mcp_server() else {
+        panic!("the entry is the http variant");
+    };
+    assert_eq!(http.url.as_str(), "http://127.0.0.1:54321/mcp");
+    assert_eq!(http.name.as_str(), "temper");
+    let headers: Vec<&HttpHeader> = http.headers.iter().collect();
+    assert_eq!(headers.len(), 1, "exactly the secret header, nothing else");
+    assert_eq!(headers[0].name.as_str(), "x-temper-presentation");
+    assert_eq!(headers[0].value.as_str(), "secret-x");
+}
+
+/// Two conversations' servers carry distinct secrets and distinct ports: the
+/// secret is per conversation at bind time, never shared across sessions.
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread")]
+async fn two_conversations_carry_distinct_secrets() {
+    let a = RunningServer::start()
+        .await
+        .expect("the first server binds");
+    let b = RunningServer::start()
+        .await
+        .expect("the second server binds");
+    assert_ne!(a.url, b.url, "each bind takes its own ephemeral port");
+    assert_ne!(a.secret, b.secret, "each conversation's secret is its own");
+    a.stop().await;
+    b.stop().await;
+}
+
+/// The drop path: a guard dropped without `take` — the agent-death arm —
+/// releases the port. Rebinding the SAME ephemeral port is not observable,
+/// so the witness is the shutdown signal itself: the watch sees the send,
+/// meaning the graceful shutdown has been triggered with the guard gone.
+#[cfg(test)]
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dropped_guard_shuts_the_server_down() {
+    use std::time::Duration;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
+    // Mirrors RunningServer's fields exactly — the guard's contract is
+    // against the signal, and this drives it without a second live bind.
+    let running = RunningServer {
+        url: "http://127.0.0.1:1/mcp".to_string(),
+        secret: new_secret(),
+        shutdown: shutdown_tx,
+        handle: tokio::spawn(wait_shutdown(shutdown_rx.clone())),
+    };
+    {
+        let guard = RunningServerGuard::new(running);
+        assert!(guard.holds_server());
+        // Dropped here, mid-scope, with the conversation's loop never polled
+        // again — the agent-death shape.
+    }
+    // The signal has gone out; the serve loop's graceful shutdown runs.
+    tokio::time::timeout(
+        Duration::from_millis(100),
+        shutdown_rx.wait_for(|stopped| *stopped),
+    )
+    .await
+    .expect("the drop shut the server down")
+    .expect("the watch is alive");
 }
 
 #[cfg(test)]

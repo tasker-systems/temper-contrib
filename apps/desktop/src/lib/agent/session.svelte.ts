@@ -52,6 +52,11 @@ type ConversationInfo = {
 	agentInfo: unknown;
 	modes?: DeclaredSelection['modes'];
 	configOptions?: DeclaredConfigOption[] | null;
+	/** Whether the conversation's presentation surface rides with the session —
+	 *  or why not. `unsupported` names the agent's own lack (no MCP HTTP
+	 *  support); the agent panel renders the distinction in the presented-views
+	 *  surface work. */
+	presentations?: { state: 'available' } | { state: 'unsupported'; reason: string };
 };
 type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate };
 
