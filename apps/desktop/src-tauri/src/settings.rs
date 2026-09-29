@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 
 /// One agent's launch facts, as the device store holds them. `command` is
 /// a launch command string — `opencode acp`, `npx -y @zed-industries/
@@ -196,6 +197,9 @@ impl SettingsState {
     }
 }
 
+/// The event the webview's agent store listens for: the roster changed, re-read it.
+pub const ROSTER_CHANGED: &str = "device-roster-changed";
+
 #[tauri::command]
 pub fn settings_get(state: tauri::State<SettingsState>) -> DeviceSettings {
     state.get()
@@ -235,19 +239,25 @@ pub fn settings_set_device_label(
 
 #[tauri::command]
 pub fn settings_set_agent(
+    app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
     key: String,
     launch: AgentLaunch,
 ) -> Result<(), String> {
-    state.set_agent(key, launch)
+    state.set_agent(key, launch)?;
+    let _ = app.emit(ROSTER_CHANGED, ());
+    Ok(())
 }
 
 #[tauri::command]
 pub fn settings_remove_agent(
+    app: tauri::AppHandle,
     state: tauri::State<SettingsState>,
     key: String,
 ) -> Result<(), String> {
-    state.remove_agent(&key)
+    state.remove_agent(&key)?;
+    let _ = app.emit(ROSTER_CHANGED, ());
+    Ok(())
 }
 
 #[cfg(test)]

@@ -27,6 +27,7 @@ uuid = "1"
 chrono = "0.4"
 similar = { version = "3", features = ["inline"] }
 regex = "1"
+toml = "0.9"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
 # The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
