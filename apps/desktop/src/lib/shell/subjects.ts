@@ -73,6 +73,13 @@ export function subjectFromAddress(pathname: string, search: URLSearchParams): S
 		const id = refId(decodeURIComponent(room[1]));
 		return id ? { kind: 'resource', id } : null;
 	}
+	// A bare UUID as the whole path — an authored relative citation (`./<uuid>`)
+	// resolved by the browser against the page — is entry by address, as ruled.
+	// Only the exact 36-character form: anything looser is a guess.
+	const bare = pathname.match(
+		/^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
+	);
+	if (bare) return { kind: 'resource', id: bare[1].toLowerCase() };
 	if (pathname === '/q' || pathname === '/q/') {
 		const query: Subject = { kind: 'query' };
 		const context = search.get('context');

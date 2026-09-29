@@ -102,9 +102,11 @@ async function openInBrowser(event: MouseEvent, url: URL): Promise<void> {
 	event.preventDefault();
 	try {
 		await invoke('plugin:opener|open_url', { url: url.href });
-	} catch {
-		// No opener to ask: the click falls through and the webview may
-		// navigate — the lesser failure, named in the task. The alternative
-		// (swallowing the click) loses the address entirely.
+	} catch (e) {
+		// The opener refused. The click is already prevented (a webview
+		// navigation would kill a live session), so the address is spoken
+		// where the person can still use it — the browser's own bar — named
+		// as the failure it is, never swallowed into silence.
+		console.error(`the desktop could not open ${url.href} in a browser: ${String(e)}`);
 	}
 }
