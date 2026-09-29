@@ -134,8 +134,12 @@
 		min-width: 0;
 	}
 	.sub {
-		flex: 1;
-		min-width: 0;
+		/* Grown from the leftover, and floored: when the row cannot offer the
+		   floor inline, the row wraps .sub to its own full line — prose at a
+		   readable measure, never the word-per-line sliver a bare flex:1 leaves
+		   beside a long chip. */
+		flex: 1 1 auto;
+		min-width: 20ch;
 		font-size: 0.8rem;
 		color: var(--tp-text-subtle);
 	}
