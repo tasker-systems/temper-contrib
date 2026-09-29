@@ -23,6 +23,16 @@ describe('reading an address back into a subject', () => {
 		expect(at('/settings')).toEqual({ kind: 'place', place: 'settings' });
 	});
 
+	it('reads a bare-UUID path as entry by address — the authored relative citation', () => {
+		expect(at(`/${ID}`)).toEqual({ kind: 'resource', id: ID });
+		expect(at(`/${ID}/`)).toEqual({ kind: 'resource', id: ID });
+		const slugUuid = `build-the-document-room-${ID}`;
+		// A decorated or slug-bearing path is NOT bare: no guessing.
+		expect(at(`/${slugUuid}`)).toBeNull();
+		expect(at('/abc')).toBeNull();
+		expect(at('/01a0e8eb-75b0-71c3-b788')).toBeNull();
+	});
+
 	it('leaves an address it does not recognise alone', () => {
 		expect(at('/r/not-a-reference')).toBeNull();
 		expect(at('/q')).toBeNull();

@@ -27,6 +27,7 @@ pub fn run() {
     };
     #[cfg(not(feature = "webdriver"))]
     let builder = tauri::Builder::default();
+    let builder = builder.plugin(tauri_plugin_opener::init());
     builder
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
