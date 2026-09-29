@@ -5,6 +5,7 @@ mod document_save;
 mod hub;
 mod hub_queue;
 mod person_context;
+mod roster;
 mod settings;
 mod temper;
 mod window;
@@ -54,6 +55,7 @@ pub fn run() {
             settings::settings_set_device_label,
             settings::settings_set_agent,
             settings::settings_remove_agent,
+            roster::roster_get,
             temper::temper_connection_status,
             temper::temper_whoami,
             temper::temper_resolve_refs,

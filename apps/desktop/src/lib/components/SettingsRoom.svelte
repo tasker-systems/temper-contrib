@@ -43,6 +43,54 @@
 	let agentsError = $state('');
 	let agentNotice = $state('');
 
+	// The ACP roster: launch presets for the common agents, as shipped data.
+	// An entry whose binary is not on $PATH offers nothing — its row does not
+	// render. Already-configured keys drop out of the offers too: selecting a
+	// preset that is already configured is not a choice the room shows.
+	type RosterOffer = {
+		key: string;
+		label: string;
+		binary: string;
+		command: string;
+		status: 'present' | 'absent' | 'noCommand';
+	};
+	let roster = $state<RosterOffer[]>([]);
+	let rosterError = $state('');
+
+	const rosterOffers = $derived(
+		roster.filter((r) => r.status === 'present' && !(r.key in agents))
+	);
+
+	async function refreshRoster(): Promise<void> {
+		try {
+			const offers = await invoke<unknown>('roster_get');
+			// A read that answers something other than the roster is a failed
+			// read, not an empty one — adopting null here would render the
+			// section as if $PATH held nothing.
+			if (!Array.isArray(offers)) throw new Error('the roster did not read as a list');
+			roster = offers as RosterOffer[];
+			rosterError = '';
+		} catch (e) {
+			rosterError = String(e);
+		}
+	}
+
+	async function selectPreset(offer: RosterOffer): Promise<void> {
+		agentsError = '';
+		agentNotice = '';
+		try {
+			await invoke('settings_set_agent', {
+				key: offer.key,
+				launch: { label: offer.label, command: offer.command }
+			});
+			const settings = await invoke<{ agents?: Record<string, AgentLaunch> }>('settings_get');
+			agents = settings.agents ?? {};
+			agentNotice = `added ${offer.label} from the ACP roster`;
+		} catch (e) {
+			agentsError = String(e);
+		}
+	}
+
 	const dirty = $derived(workingDir !== stored);
 	// "saved" holds only while the field still shows what was saved; an edit retracts it.
 	const saved = $derived(justSaved && !dirty);
@@ -85,6 +133,7 @@
 		} catch (e) {
 			loadError = String(e);
 		}
+		await refreshRoster();
 	});
 
 	async function saveWorkingDir(): Promise<void> {
@@ -232,6 +281,28 @@
 				launch specs and labels live in this machine's device store
 			{/if}
 		</p>
+		{#if rosterError}
+			<p class="ed-notice" role="alert">
+				The ACP roster could not be read — the hand configuration below still works. {rosterError}
+			</p>
+		{/if}
+		{#if rosterOffers.length > 0}
+			<div class="roster" aria-label="Agents the ACP roster offers">
+				<p class="t-strip">
+					from the <a href="https://agentclientprotocol.com/get-started/agents" target="_blank" rel="noreferrer">ACP roster</a>,
+					on this machine's path
+				</p>
+				<ul class="agent-list">
+					{#each rosterOffers as offer (offer.key)}
+						<li>
+							<span class="agent-name">{offer.label}</span>
+							<code class="agent-command">{offer.command}</code>
+							<button class="t-action" onclick={() => selectPreset(offer)}>add</button>
+						</li>
+					{/each}
+				</ul>
+			</div>
+		{/if}
 		<ul class="agent-list">
 			{#each Object.entries(agents) as [key, launch] (key)}
 				<li>
@@ -398,5 +469,13 @@
 		width: 100%;
 		padding-top: 0.8rem;
 		border-top: 1px solid var(--tp-rule);
+	}
+	.roster {
+		display: grid;
+		gap: 0.5rem;
+		width: 100%;
+	}
+	.roster a {
+		color: var(--tp-accent);
 	}
 </style>
