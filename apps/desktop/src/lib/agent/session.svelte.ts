@@ -62,6 +62,7 @@ type AcpEvent = { conversationId: string; sessionId: string; update: AcpUpdate }
 export type ConfiguredAgent = { key: string; label: string; command: string };
 
 const STORE_KEY = 'temper-agent-panel-v1';
+const EXPANDED_KEY = 'temper-agent-panel-expanded-v1';
 
 /**
  * The engagement, as one module-level store: the conversation, its
@@ -84,6 +85,9 @@ class AgentSession {
 	agentKey = $state<string>('');
 	workingDir = $state<string>('');
 	panelOpen = $state<boolean>(true);
+	/** The engagement's width: expanded when the work needs room. Closed with the panel —
+	 *  the expand choice is a device fact like the panel's own. */
+	expanded = $state<boolean>(false);
 	// The work record's open facts — set when the conversation opens, written when it closes.
 	openedAt = $state<string>('');
 	recordKey = $state<string>('');
@@ -155,6 +159,8 @@ class AgentSession {
 		try {
 			const raw = localStorage.getItem(STORE_KEY);
 			if (raw !== null) this.panelOpen = raw === 'true';
+			const wide = localStorage.getItem(EXPANDED_KEY);
+			if (wide !== null) this.expanded = wide === 'true';
 		} catch {
 			// Unavailable storage keeps the default; nothing else depends on it.
 		}
@@ -164,6 +170,15 @@ class AgentSession {
 		this.panelOpen = open;
 		try {
 			localStorage.setItem(STORE_KEY, String(open));
+		} catch {
+			// The preference is best-effort; the panel itself is unaffected.
+		}
+	}
+
+	setExpanded(expanded: boolean): void {
+		this.expanded = expanded;
+		try {
+			localStorage.setItem(EXPANDED_KEY, String(expanded));
 		} catch {
 			// The preference is best-effort; the panel itself is unaffected.
 		}

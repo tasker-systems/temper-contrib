@@ -187,4 +187,31 @@ describe('the agent panel', () => {
 		// No ask-surface call was made by the panel itself.
 		expect(persisted).toBeUndefined();
 	});
+
+	it('the panel expands for the work and returns, and the choice persists', async () => {
+		const { container } = render(AgentPanel);
+		const aside = container.querySelector('aside[aria-label="Agent"]') as HTMLElement;
+		const expand = () =>
+			[...container.querySelectorAll('button')].find(
+				(b) => b.getAttribute('aria-label') === 'Expand the agent panel for more room'
+			) as HTMLButtonElement;
+		const narrow = () =>
+			[...container.querySelectorAll('button')].find(
+				(b) => b.getAttribute('aria-label') === 'Return the agent panel to its usual width'
+			) as HTMLButtonElement;
+
+		expect(agentSession.expanded).toBe(false);
+		expect(expand()).toBeDefined();
+		await fireEvent.click(expand());
+		expect(agentSession.expanded).toBe(true);
+		expect(aside.className).toContain('expanded');
+		expect(aside.getAttribute('aria-label')).toBe('Agent');
+
+		await fireEvent.click(narrow());
+		expect(agentSession.expanded).toBe(false);
+		expect(aside.className).not.toContain('expanded');
+
+		// The choice is a device fact — setExpanded persisted it, restorePanel reads it back.
+		expect(localStorage.getItem('temper-agent-panel-expanded-v1')).toBe(JSON.stringify(false));
+	});
 });

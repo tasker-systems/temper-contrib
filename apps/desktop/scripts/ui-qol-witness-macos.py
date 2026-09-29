@@ -12,6 +12,9 @@ directly. This witness reuses that shape for the layout-overflow clause of the U
 2. The panel closes. The rooms region recovers its width (the tab body widens), and the rows
    still bound inside their column.
 3. The panel reopens. The rooms region returns to the same width, and the rows still bound.
+4. The engagement expands for the work: the panel widens (the rooms region narrows to give
+   it), the transcript stays in view, and nothing overlaps — then returns to its usual
+   width, leaving no room state behind.
 
 Bite property: with the clamps removed, the longest nowrap title in the hub holds a track at its
 min-content width and a row paints past the column — `anyChipPastHome` and the widening both
@@ -144,6 +147,44 @@ def main() -> int:
             screenshot(driver, SHOTS / "ui-qol-closed.png")
             toggle_agent(driver)
             reopened_m = measure(driver, "reopened")
+
+            # The engagement expands for the work, then returns.
+            expand = driver.execute_script(
+                """
+                const b = [...document.querySelectorAll('button')]
+                  .find(x => x.getAttribute('aria-label') === 'Expand the agent panel for more room');
+                if (!b) return null;
+                b.click();
+                return true;
+                """
+            )
+            time.sleep(0.8)
+            if expand is None or not expand:
+                failures.append("the agent panel has no expand affordance")
+            else:
+                expanded_m = measure(driver, "expanded")
+                screenshot(driver, SHOTS / "ui-qol-expanded.png")
+                report["expanded"] = expanded_m
+                panel_w = driver.execute_script(
+                    "const p = document.querySelector('aside.panel');"
+                    " return p ? Math.round(p.getBoundingClientRect().width) : null;"
+                )
+                if not panel_w or panel_w < 700:
+                    failures.append(f"the expanded panel is still narrow ({panel_w}px)")
+                driver.execute_script(
+                    """
+                    const b = [...document.querySelectorAll('button')]
+                      .find(x => x.getAttribute('aria-label') === 'Return the agent panel to its usual width');
+                    if (b) b.click();
+                    """
+                )
+                time.sleep(0.8)
+                restacked = measure(driver, "expanded-returned")
+                report["expanded-returned"] = restacked
+                if restacked.get("homeSW") != reopened_m.get("homeSW") or restacked.get(
+                    "homeRight"
+                ) != reopened_m.get("homeRight"):
+                    failures.append("returning to the usual width left a different rooms geometry")
 
             for tag, m in (("open", open_m), ("closed", closed_m), ("reopened", reopened_m)):
                 report[tag] = m
