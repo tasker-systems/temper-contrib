@@ -214,4 +214,44 @@ describe('the agent panel', () => {
 		// The choice is a device fact — setExpanded persisted it, restorePanel reads it back.
 		expect(localStorage.getItem('temper-agent-panel-expanded-v1')).toBe(JSON.stringify(false));
 	});
+
+	// The settings room rewrites the roster and the core says so; the store
+	// re-reads on the event, so the panel's picker follows without a rebuild.
+	// Before the event existed, a save or removal in the settings room left the
+	// panel stale until the app restarted — this witness bites on exactly that.
+	it('the picker follows the roster when the settings room changes it', async () => {
+		render(AgentPanel);
+		await vi.waitFor(() =>
+			expect(
+				[...document.querySelectorAll('[aria-label="Agent"] button')].map((b) => b.textContent)
+			).toContain('opencode')
+		);
+		expect(
+			[...document.querySelectorAll('[aria-label="Agent"] button')].map((b) => b.textContent)
+		).not.toContain('gemini');
+
+		// The settings room saves gemini; the store's answer now carries it.
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'settings_get') {
+				return Promise.resolve({
+					workingDir: null,
+					temperContext: null,
+					agents: {
+						opencode: { label: 'opencode', command: 'opencode acp' },
+						gemini: { label: 'Gemini CLI', command: 'gemini --acp' }
+					}
+				});
+			}
+			return Promise.resolve(null);
+		}) as never);
+		const fire = handlers['device-roster-changed'];
+		expect(fire).toBeDefined();
+		fire({ payload: {} });
+
+		await vi.waitFor(() =>
+			expect(
+				[...document.querySelectorAll('[aria-label="Agent"] button')].map((b) => b.textContent)
+			).toContain('Gemini CLI')
+		);
+	});
 });

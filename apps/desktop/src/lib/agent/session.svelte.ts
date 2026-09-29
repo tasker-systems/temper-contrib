@@ -108,6 +108,7 @@ class AgentSession {
 	 *  surface it decorates, and closing the conversation ends the conversation itself. */
 	private unlisten: (() => void) | null = null;
 	private unlistenAsk: (() => void) | null = null;
+	private unlistenRoster: (() => void) | null = null;
 	private initialised = false;
 
 	init(): void {
@@ -225,6 +226,14 @@ class AgentSession {
 			applyNotice(this.messages, this.asks, event.payload);
 		}).then((u) => {
 			this.unlistenAsk = u;
+		});
+		// The settings room rewrites the roster (a hand save, a removal, a preset
+		// selection): the core says so, and the picker re-reads. The listener lives here,
+		// with the store, so every surface that renders the roster follows.
+		listen('device-roster-changed', () => {
+			this.loadAgents();
+		}).then((u) => {
+			this.unlistenRoster = u;
 		});
 	}
 
