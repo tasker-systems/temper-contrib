@@ -90,5 +90,7 @@
 		max-width: 44rem;
 		margin: 0 auto;
 		padding: 2rem 1.5rem 4rem;
+		/* Same track-clamp as home: a nowrap chip's min-content must not widen the column. */
+		min-width: 0;
 	}
 </style>
