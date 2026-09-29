@@ -129,9 +129,13 @@
 	}
 	.row {
 		flex-wrap: wrap;
+		/* The chip's nowrap title would hold the row at its min-content width; let the row
+		   shrink so the chip bounds and the title's ellipsis engages. */
+		min-width: 0;
 	}
 	.sub {
 		flex: 1;
+		min-width: 0;
 		font-size: 0.8rem;
 		color: var(--tp-text-subtle);
 	}

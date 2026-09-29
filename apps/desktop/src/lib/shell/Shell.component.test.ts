@@ -224,7 +224,6 @@ describe('the shell', () => {
 		for (const tab of [...tabs.tabs]) if (tab.id !== HOME_TAB) tabs.close(tab.id);
 		tabs.setAside = [];
 		tabs.activate(HOME_TAB);
-		shellPanels.setWaysOpen(true);
 		shellPanels.setPaletteOpen(false);
 		temperViews.reset();
 		homeReads.reset();
@@ -718,6 +717,7 @@ describe('the shell', () => {
 	// --- Slice 3: the ways-in panel and the tab bound -------------------------------------------
 
 	it('the ways-in panel groups its entries by plugin, each list bounded and saying what it omits', async () => {
+		shellPanels.setWaysOpen(true);
 		// Contexts and recent work are the window's shared reads (the layout starts them).
 		await temperViews.refreshContexts();
 		const { container } = render(Shell);
@@ -741,6 +741,7 @@ describe('the shell', () => {
 	});
 
 	it('a ways-in entry opens its subject in a tab: from home, a new one', async () => {
+		shellPanels.setWaysOpen(true);
 		const { container } = render(Shell);
 		const ways = container.querySelector('nav[aria-label="Ways in"]') as HTMLElement;
 		await waitFor(() => expect(ways.querySelector('a[title="goal 0"]')).toBeTruthy());
@@ -749,15 +750,25 @@ describe('the shell', () => {
 		expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: A });
 	});
 
-	it('the ways-in panel closes, and reopens without reading again', async () => {
+	it('the ways-in panel closes, from its own affordance, and reopens without reading again', async () => {
+		shellPanels.setWaysOpen(true);
 		const { container } = render(Shell);
 		await waitFor(() => expect(reads('temper_list_resources')).toHaveLength(3));
 		const panel = container.querySelector('nav[aria-label="Ways in"]');
 
-		await fireEvent.click(container.querySelector('.ways-toggle') as Element);
+		await fireEvent.click(
+			panel?.querySelector('button[aria-label="Close the ways-in panel"]') as Element
+		);
 		expect(container.querySelector('.ways')?.hasAttribute('hidden')).toBe(true);
-		await fireEvent.click(container.querySelector('.ways-toggle') as Element);
+		expect(shellPanels.waysOpen).toBe(false);
+
+		// The menu chip's entry reopens it: the menu opens, the entry is chosen, the menu closes.
+		await fireEvent.click(container.querySelector('.chrome-menu .trigger') as Element);
+		const entry = container.querySelector('.chrome-menu .entry-action') as HTMLButtonElement;
+		expect(entry?.textContent).toContain('ways in');
+		await fireEvent.click(entry);
 		expect(container.querySelector('.ways')?.hasAttribute('hidden')).toBe(false);
+		expect(shellPanels.waysOpen).toBe(true);
 
 		expect(container.querySelector('nav[aria-label="Ways in"]')).toBe(panel);
 		expect(reads('temper_list_resources')).toHaveLength(3);

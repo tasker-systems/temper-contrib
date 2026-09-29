@@ -5,8 +5,8 @@ Content-Security-Policy in tauri.conf.json both ways.
    answering, and no `securitypolicyviolation` is raised while it is driven — a document opened
    in a tab, a second tab, a switch between them (the room kept, not remounted), a switch to a
    lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
-   from it), the ways-in panel closed and reopened, settings and setup opened as tabs, and home
-   again.
+   from it), the ways-in panel opened from the menu chip and closed and reopened from the
+   panel's own ×, settings and setup opened as tabs, and home again.
 2. The policy is a backstop: an injected inline script, eval, an inline event handler, an inline
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
    as a violation naming its directive. Styling through the CSSOM, which Svelte's `style:`
@@ -346,17 +346,38 @@ def main() -> int:
                 lambda d: not d.find_elements(By.CSS_SELECTOR, '[role="dialog"]')
             )
 
-            # The ways-in panel closes and reopens as the same node: hidden, never remounted.
+            # The ways-in panel opens from the menu chip's entry, closes and reopens from the
+            # panel's own ×: hidden, never remounted. (The panel is closed by default — the
+            # room is the first thing the window offers.)
             ways = driver.execute_script(
                 "return document.querySelector('nav[aria-label=\"Ways in\"]')"
             )
-            if ways is None:
-                failures.append("the ways-in panel did not render")
-            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            if ways is not None:
+                failures.append("the ways-in panel rendered while closed by default")
+            driver.find_element(By.CSS_SELECTOR, ".chrome-menu .trigger").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, ".chrome-menu .entry-action")
+            )
+            driver.find_element(By.CSS_SELECTOR, ".chrome-menu .entry-action").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.execute_script("return document.querySelector('.ways').hidden")
+            )
+            ways_open = driver.execute_script(
+                "return document.querySelector('nav[aria-label=\"Ways in\"]')"
+            )
+            # The panel closes from its own ×, and reopening it re-reads nothing.
+            driver.find_element(
+                By.CSS_SELECTOR,
+                'nav[aria-label="Ways in"] button[aria-label="Close the ways-in panel"]',
+            ).click()
             WebDriverWait(driver, 10).until(
                 lambda d: d.execute_script("return document.querySelector('.ways').hidden")
             )
-            driver.find_element(By.CSS_SELECTOR, ".ways-toggle").click()
+            driver.find_element(By.CSS_SELECTOR, ".chrome-menu .trigger").click()
+            WebDriverWait(driver, 10).until(
+                lambda d: d.find_elements(By.CSS_SELECTOR, ".chrome-menu .entry-action")
+            )
+            driver.find_element(By.CSS_SELECTOR, ".chrome-menu .entry-action").click()
             WebDriverWait(driver, 10).until(
                 lambda d: not d.execute_script("return document.querySelector('.ways').hidden")
             )
@@ -364,9 +385,17 @@ def main() -> int:
                 driver.execute_script(
                     "return document.querySelector('nav[aria-label=\"Ways in\"]')"
                 )
-                != ways
+                != ways_open
             ):
                 failures.append("reopening the ways-in panel remounted it")
+            # The menu is open from the reopen; a synthetic outside pointerdown closes it (its
+            # own document listener; synthetic, so nothing else receives it).
+            driver.execute_script(
+                "document.body.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));"
+            )
+            WebDriverWait(driver, 10).until(
+                lambda d: not d.find_elements(By.CSS_SELECTOR, ".chrome-menu .entries")
+            )
             step("the ways-in panel closed and reopened")
 
             # Settings and setup open as tabs, from the chrome menu — the way a person does.

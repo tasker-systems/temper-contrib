@@ -164,6 +164,9 @@
 	.explore {
 		display: grid;
 		gap: 0.6rem;
+		/* Track clamp: this section bounds the rows it holds; a nowrap title inside must
+		   not widen the column past the room. */
+		min-width: 0;
 	}
 	.card {
 		display: grid;

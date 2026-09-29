@@ -139,6 +139,9 @@
 		border: 1px solid var(--tp-rule);
 		border-radius: var(--tp-radius-panel);
 		background: var(--tp-surface);
+		/* Track clamp: this section bounds the rows it holds; a nowrap title inside must
+		   not widen the column past the room. */
+		min-width: 0;
 	}
 	.line,
 	.live,

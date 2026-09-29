@@ -9,8 +9,6 @@
 	 * what belongs to the session (reach, pending asks) is the agent panel's.
 	 */
 	interface Props {
-		/** The ways-in panel's toggle, at the masthead's left edge. */
-		waysToggle?: Snippet;
 		/** The command palette's trigger. */
 		palette?: Snippet;
 		/** The agent panel's toggle, carrying the pending-ask count while the panel is closed. */
@@ -19,13 +17,10 @@
 		profile?: Snippet;
 	}
 
-	let { waysToggle, palette, agentToggle, profile }: Props = $props();
+	let { palette, agentToggle, profile }: Props = $props();
 </script>
 
 <header class="masthead">
-	{#if waysToggle}
-		<span class="t-slot-waysToggle">{@render waysToggle()}</span>
-	{/if}
 	<ChromeMenu />
 	<svg viewBox="0 0 32 32" aria-hidden="true">
 		<path d="M 12 7 L 12 25" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" fill="none" />

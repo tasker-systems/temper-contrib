@@ -87,15 +87,6 @@
 	<TemperProfile />
 {/snippet}
 
-{#snippet waysToggle()}
-	<button
-		class="t-action ways-toggle"
-		aria-pressed={shellPanels.waysOpen}
-		aria-label={shellPanels.waysOpen ? 'Close the ways-in panel' : 'Open the ways-in panel'}
-		onclick={() => shellPanels.setWaysOpen(!shellPanels.waysOpen)}>ways in</button
-	>
-{/snippet}
-
 {#snippet paletteTrigger()}
 	<button
 		class="palette-trigger"
@@ -125,7 +116,7 @@
 {/snippet}
 
 <div class="shell" bind:this={root}>
-	<Masthead {waysToggle} palette={paletteTrigger} {agentToggle} profile={profileSlot} />
+	<Masthead palette={paletteTrigger} {agentToggle} profile={profileSlot} />
 	<div class="body">
 		{#if shellPanels.waysShown}
 			<div class="ways" hidden={!shellPanels.waysOpen}>
@@ -188,9 +179,6 @@
 	}
 	.tab-body[hidden] {
 		display: none;
-	}
-	.ways-toggle {
-		white-space: nowrap;
 	}
 	.ways {
 		display: flex;

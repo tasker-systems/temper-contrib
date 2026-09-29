@@ -67,6 +67,9 @@
 		max-width: 46rem;
 		margin: 0 auto;
 		padding: 2.5rem 1.5rem 4rem;
+		/* The column's auto minimum is home's min-content width; clamp it so the sections' rows
+		   bound to the visible column rather than the column expanding to the rows. */
+		min-width: 0;
 	}
 	.masthead {
 		display: grid;
@@ -79,6 +82,11 @@
 	.section {
 		display: grid;
 		gap: 0.5rem;
+		/* The track's auto minimum is the section's min-content width; a nowrap title inside a
+		   ResourceRef chip (min-content = the whole unwrapped title) would otherwise blow the
+		   track past the home column and paint under the agent panel. The rows shrink instead;
+		   the chip's own ellipsis engages. */
+		min-width: 0;
 	}
 	.heading {
 		margin: 0.9rem 0 0;

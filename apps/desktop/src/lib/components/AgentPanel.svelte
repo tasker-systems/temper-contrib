@@ -27,17 +27,29 @@
 	}
 </script>
 
-<aside class="panel" aria-label="Agent">
+	<aside class="panel" class:expanded={session.expanded} aria-label="Agent">
 	<header class="head">
 		<div class="head-row">
 			<p class="t-label">the engagement</p>
-			<button
-				class="t-action close"
-				aria-label="Close the agent panel"
-				onclick={() => session.setPanelOpen(false)}
-			>
-				×</button
-			>
+			<div class="head-actions">
+				<button
+					class="t-action expand"
+					aria-pressed={session.expanded}
+					aria-label={session.expanded
+						? 'Return the agent panel to its usual width'
+						: 'Expand the agent panel for more room'}
+					onclick={() => session.setExpanded(!session.expanded)}
+				>
+					{session.expanded ? 'narrow' : 'expand'}</button
+				>
+				<button
+					class="t-action close"
+					aria-label="Close the agent panel"
+					onclick={() => session.setPanelOpen(false)}
+				>
+					×</button
+				>
+			</div>
 		</div>
 		<p class="who">
 			<span class="agent-mark" aria-hidden="true">◆</span>
@@ -207,6 +219,11 @@
 		background: var(--tp-surface);
 		overflow-y: auto;
 	}
+	.panel.expanded {
+		/* The work needs room: the panel takes the space the room can spare — about the
+		   document column's width — instead of its usual narrow strip. */
+		width: 44rem;
+	}
 	.head {
 		display: grid;
 		gap: 0.35rem;
@@ -221,6 +238,11 @@
 	.head-row .t-label {
 		flex: 1;
 		margin: 0;
+	}
+	.head-actions {
+		display: flex;
+		align-items: baseline;
+		gap: 0.7rem;
 	}
 	.in-view {
 		margin: 0;
