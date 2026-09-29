@@ -139,6 +139,8 @@
 	.recent {
 		display: grid;
 		gap: 0.3rem;
+		/* Track clamp: the section's rows bound to it, never hold it at a nowrap chip's width. */
+		min-width: 0;
 	}
 	.heading,
 	.honest {

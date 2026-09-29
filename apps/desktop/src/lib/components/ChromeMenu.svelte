@@ -1,13 +1,20 @@
 <script lang="ts">
 	/**
 	 * The chrome's standing menu, at the masthead's left: what the building offers
-	 * from any room. Bounded — settings and app setup are its entries, each opening
-	 * core's place in a tab (a tab already showing it is focused). It opens only
-	 * when the person opens it; nothing on the app's behalf opens it, and nothing
-	 * opens a setup tab unprompted.
+	 * from any room. Bounded — ways in, settings and app setup are its entries, the
+	 * panels and places opening in a tab (a tab already showing it is focused). It
+	 * opens only when the person opens it; nothing on the app's behalf opens it,
+	 * and nothing opens a setup tab unprompted.
 	 */
+	import { shellPanels } from '$lib/shell/panels.svelte';
+
 	let open = $state(false);
 	let root: HTMLDivElement | undefined = $state();
+
+	function showWaysIn(): void {
+		shellPanels.setWaysOpen(true);
+		open = false;
+	}
 
 	function onDocumentPointerDown(event: PointerEvent): void {
 		if (root && !root.contains(event.target as Node)) open = false;
@@ -38,6 +45,9 @@
 	</button>
 	{#if open}
 		<ul class="entries">
+			<li>
+				<button type="button" class="entry-action" onclick={showWaysIn}>ways in</button>
+			</li>
 			<li>
 				<a href="/settings" onclick={() => (open = false)}>settings</a>
 			</li>
@@ -95,6 +105,23 @@
 		text-decoration: none;
 	}
 	.entries a:hover {
+		background: var(--tp-surface-raised);
+		color: var(--tp-accent);
+	}
+	.entries .entry-action {
+		display: block;
+		box-sizing: border-box;
+		width: 100%;
+		padding: 0.35rem 0.55rem;
+		border: none;
+		border-radius: var(--tp-radius-chip);
+		background: none;
+		color: var(--tp-text);
+		font: 0.8rem var(--tp-font-doing);
+		text-align: left;
+		cursor: pointer;
+	}
+	.entries .entry-action:hover {
 		background: var(--tp-surface-raised);
 		color: var(--tp-accent);
 	}

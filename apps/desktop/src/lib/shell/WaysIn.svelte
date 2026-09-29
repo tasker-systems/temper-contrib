@@ -21,6 +21,7 @@
 	} from '$lib/temper-views.svelte';
 	import { enabled } from './contributions';
 	import type { WayInDecl } from './lenses';
+	import { shellPanels } from './panels.svelte';
 	import { contextHref } from './subjects';
 
 	const v = temperViews;
@@ -69,6 +70,16 @@
 {/snippet}
 
 <nav class="ways-in" aria-label="Ways in">
+	<header class="panel-head">
+		<p class="t-label" aria-hidden="true">the ways in</p>
+		<button
+			class="t-action close"
+			aria-label="Close the ways-in panel"
+			onclick={() => shellPanels.setWaysOpen(false)}
+		>
+			×</button
+		>
+	</header>
 	<div class="groups">
 		{#each groups as group (group.plugin)}
 			<section class="group" aria-label={`Ways in from ${group.plugin}`}>
@@ -135,6 +146,19 @@
 </nav>
 
 <style>
+	.panel-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.6rem;
+		padding: 0.9rem 1.1rem 0;
+	}
+	.panel-head .t-label {
+		margin: 0;
+	}
+	.panel-head .close {
+		padding: 0;
+	}
 	.ways-in {
 		display: flex;
 		flex-direction: column;
@@ -152,14 +176,19 @@
 		display: grid;
 		align-content: start;
 		gap: 1.2rem;
+		/* Track clamp: same as .group below — the panels' grids bound to the column they have. */
+		min-width: 0;
 	}
 	.group {
 		display: grid;
 		gap: 1rem;
+		/* Track clamp: a nowrap title's min-content must not widen the column past the panel. */
+		min-width: 0;
 	}
 	.way {
 		display: grid;
 		gap: 0.4rem;
+		min-width: 0;
 	}
 	.head {
 		display: flex;

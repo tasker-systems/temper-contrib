@@ -56,6 +56,12 @@
 {/if}
 
 <style>
+	.bounded {
+		/* A grid item (inside the section that hosts this list) with default min-width: auto
+		   floors at its content's min-content width — the full nowrap title — and overflows
+		   its track. Clamp it: everything below, .rows and the rows, already shrink. */
+		min-width: 0;
+	}
 	.rows {
 		min-width: 0;
 	}

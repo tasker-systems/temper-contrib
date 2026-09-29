@@ -79,6 +79,10 @@
 		border: 1px solid var(--tp-rule);
 		background: var(--tp-surface-raised);
 		border-radius: var(--tp-radius-chip);
+		/* When space is contested — a row that also carries "when" words and a return — the
+		   chip shrinks to the space the row offers it and its title ellipsizes, instead of
+		   holding the full nowrap title and starving its neighbours to a word a line. */
+		min-width: 0;
 	}
 	a.ref {
 		text-decoration: none;
@@ -94,6 +98,8 @@
 		text-transform: uppercase;
 	}
 	.title {
+		flex: 1;
+		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
