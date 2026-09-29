@@ -10,6 +10,12 @@ mod person_context;
 // replaces it, so the probe is compiled out of every non-test build.
 #[cfg(test)]
 mod present_probe;
+// Chunk 2 wires the presentation server into the conversation's session/new;
+// until then only its tests consume its surface, so the lib build's
+// dead-code warnings are silenced at the declaration, with the wiring
+// promised here rather than guessed at the items.
+#[allow(dead_code)]
+mod present_server;
 mod roster;
 mod settings;
 mod temper;

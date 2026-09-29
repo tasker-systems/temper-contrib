@@ -1,14 +1,13 @@
 //! The harness-fidelity probe: a minimal MCP streamable-HTTP server that
-//! advertises one tool, `temper_present_view`, whose `inputSchema` is
-//! projected from the closed `temper` catalog. It exists to answer one
-//! question before the real server consumes this shape: does each ACP
-//! harness pass the tool's schema through to its model faithfully enough
-//! that the model constructs closed-catalog-conforming specs, or does it
-//! mangle `$defs` / `oneOf` / `additionalProperties: false`?
+//! advertises one tool, `temper_present_view`, whose `inputSchema` comes
+//! from the real presentation server's projection. It answers one question:
+//! does each ACP harness pass that schema through to its model faithfully
+//! enough that the model constructs closed-catalog-conforming specs, or
+//! does it mangle `$defs` / `oneOf` / `additionalProperties: false`?
 //!
-//! This mirrors the dependency shape temper-mcp runs (rmcp `server` +
-//! `transport-streamable-http-server`, axum) so the probe serves the tool
-//! exactly as core serves its own.
+//! The tool's schema and result vocabulary are the server's own — the probe
+//! projects nothing of its own and names no catalog constant, so what the
+//! harnesses see is byte-for-byte what the shipped server serves.
 
 use std::sync::{Arc, Mutex};
 
@@ -23,85 +22,16 @@ use rmcp::transport::streamable_http_server::{
     session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
 use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-/// The catalog file the webview validates against — the same source, so the
-/// probe cannot describe a catalog the app would refuse.
-const CATALOG_JSON: &str = include_str!("../../src/lib/catalog/temper.catalog.json");
+use crate::present_server::{
+    catalog_version, present_view_input_schema, PresentViewArgs, CATALOG_JSON,
+};
 
-/// The catalog version a refusal must name, read from the file rather than
-/// restated, so version drift is caught here where the projection runs.
-fn catalog_version() -> String {
-    let v: Value = serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
-    format!("temper@{}", v["version"].as_str().expect("catalog version"))
-}
-
-/// The tool `inputSchema`: the closed spec shape with each catalog
-/// component's props in `$defs`, referenced through a `oneOf` in `elements`.
-/// This is exactly the schema whose fidelity to the model this probe asks.
-fn present_view_input_schema() -> Value {
-    let catalog: Value = serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
-    let components = catalog["components"]
-        .as_object()
-        .expect("the catalog carries components");
-    let defs: serde_json::Map<String, Value> = components
-        .iter()
-        .map(|(name, c)| (name.clone(), c["props"].clone()))
-        .collect();
-    let element_branches: Vec<Value> = components
-        .keys()
-        .map(|name| {
-            json!({
-                "type": "object",
-                "additionalProperties": false,
-                "required": ["type", "props"],
-                "properties": {
-                    "type": { "const": name },
-                    "props": { "$ref": format!("#/$defs/{name}") },
-                    "children": { "type": "array", "items": { "type": "string" } }
-                }
-            })
-        })
-        .collect();
-    json!({
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["spec"],
-        "properties": {
-            "spec": {
-                "type": "object",
-                "additionalProperties": false,
-                "$defs": defs,
-                "required": ["root", "elements"],
-                "properties": {
-                    "root": { "type": "string" },
-                    "elements": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "oneOf": element_branches
-                        }
-                    }
-                }
-            }
-        }
-    })
-}
-
-/// The tool call's arguments, named after the schema so a harness that
-/// reorders fields still parses.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct PresentViewArgs {
-    /// The json-render spec to check against the `temper` catalog.
-    pub spec: Value,
-}
-
-/// The probe's service: tools only, one tool. The `ToolRouter` is not stored
-/// as a field — under rmcp ≥ 1.4 the `#[tool_handler]` macro defaults
-/// `list_tools`/`call_tool` to `Self::tool_router()`, so storing it would
-/// double the routes. Every `temper_present_view` call is recorded so the
-/// fidelity witness can inspect what the harness's model actually sent.
+/// The probe's service: the presentation server's tool, recorded. The
+/// `ToolRouter` is not stored as a field — under rmcp ≥ 1.4 the
+/// `#[tool_handler]` macro defaults `list_tools`/`call_tool` to
+/// `Self::tool_router()`, so storing it would double the routes.
 struct PresentProbe {
     calls: Arc<Mutex<Vec<Value>>>,
 }
@@ -125,8 +55,10 @@ impl PresentProbe {
             .lock()
             .unwrap()
             .push(serde_json::to_value(raw.0.clone()).unwrap_or(Value::Null));
-        let args = raw.0;
-        let checked = check_spec(&args.spec);
+        // The probe's own closed-catalog check — the same shape the webview's
+        // checkSpec judges, run here so the verdict a call earns is what the
+        // witness reads.
+        let checked = check_spec(&raw.0.spec);
         let result = match checked {
             Ok(()) => json!({ "ok": "rendered", "catalogVersion": catalog_version() }),
             Err(errors) => json!({
@@ -141,10 +73,8 @@ impl PresentProbe {
     }
 }
 
-/// The tool `inputSchema` on the wire: the router's derived schema replaced
-/// by the catalog projection, so what the harnesses' models read is exactly
-/// the schema the webview validates against — the property this whole probe
-/// exists to test.
+/// The tool `inputSchema` on the wire: the catalog projection the shipped
+/// server serves — the probe names no schema of its own.
 fn tools_with_catalog_schema() -> Vec<rmcp::model::Tool> {
     PresentProbe::tool_router()
         .list_all()
@@ -173,7 +103,8 @@ impl ServerHandler for PresentProbe {
 
     /// Manual override — `#[tool_handler]` generates `list_tools` only when
     /// the impl lacks one (the same door temper-mcp uses to filter its blob
-    /// doors at the wire). The schema on the wire is the catalog projection.
+    /// doors at the wire). The schema on the wire is the catalog projection
+    /// the shipped server serves.
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,

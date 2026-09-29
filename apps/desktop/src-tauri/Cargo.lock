@@ -1070,6 +1070,7 @@ dependencies = [
  "chrono",
  "http",
  "regex",
+ "reqwest 0.12.28",
  "rmcp",
  "schemars 1.2.2",
  "serde",
