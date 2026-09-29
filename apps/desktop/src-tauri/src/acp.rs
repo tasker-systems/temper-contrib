@@ -876,6 +876,36 @@ mod tests {
             .collect()
     }
 
+    /// Every update kind the conversation delivered, in order, as words —
+    /// what a cancelled or empty turn needs its evidence read from. A tool
+    /// call's kind is followed by its title or toolCallId, the two things an
+    /// unreadable turn first gives.
+    fn update_kinds(recorded: &Recorded) -> Vec<String> {
+        recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|event| match &event.update {
+                SessionUpdate::AgentMessageChunk(_) => "chunk".to_string(),
+                SessionUpdate::ToolCall(call) => {
+                    format!("tool_call[{}] id={}", call.title, call.tool_call_id)
+                }
+                SessionUpdate::ToolCallUpdate(update) => format!(
+                    "tool_call_update id={:?} {:?}",
+                    update.tool_call_id, update.fields.status
+                ),
+                SessionUpdate::Plan(_) => "plan".to_string(),
+                other => format!(
+                    "other[{}]",
+                    serde_json::to_value(other)
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                        .len()
+                ),
+            })
+            .collect()
+    }
+
     // --- The prompt's reference ----------------------------------------------
 
     use super::{prompt_blocks, PromptReference};
@@ -1302,6 +1332,64 @@ whole. Change nothing outside it, and write nothing else inside it.";
         Arc::new(|_| {})
     }
 
+    /// An ask surface that answers every ask with the agent's first declared
+    /// allow option, and records the resolution. The fidelity witness does
+    /// not judge the ask surface — it judges whether the harness's model can
+    /// compose a spec once any tool flow it needs is permitted. An ask the
+    /// harness makes while composing (agy lists the workspace before
+    /// composing) must be allowed, or the turn cancels and the finding dies
+    /// at the ask, unread.
+    fn auto_allow_ask_sink(board: &AskBoard, conversation: &str) -> (AskSink, AskRecorded) {
+        let (sink, recorded) = recording_ask_sink();
+        let board = board.clone();
+        let conversation = conversation.to_string();
+        board.set_surface(&conversation, true);
+        let listening: AskSink = Arc::new(move |notice| {
+            sink(notice.clone());
+            if let AskNotice::Asked {
+                ask_id, options, ..
+            } = &notice
+            {
+                // The first declared allow_once, else the first option.
+                let allow = options
+                    .as_array()
+                    .and_then(|opts| {
+                        opts.iter().find_map(|o| {
+                            if o.get("kind").and_then(|k| k.as_str()) == Some("allow_once") {
+                                o.get("optionId").and_then(|v| v.as_str()).map(String::from)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .or_else(|| {
+                        options
+                            .as_array()
+                            .and_then(|o| o.first())
+                            .and_then(|o| o.get("optionId"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    });
+                if let Some(option) = allow {
+                    // The ask's notice is emitted before its park, so a
+                    // resolve in this closure would hit "unknown ask" — the
+                    // parked sender does not exist yet. The answer lands on
+                    // a spawned task instead, after the park has taken.
+                    let ask_id = ask_id.clone();
+                    let conversation = conversation.clone();
+                    let sink = sink.clone();
+                    let board = board.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(50));
+                        let _ =
+                            board.resolve(&conversation, &ask_id, AskAnswer::Choose(option), &sink);
+                    });
+                }
+            }
+        });
+        (listening, recorded)
+    }
+
     /// Witness for the conversation clause: one `opencode acp` process serves
     /// initialize, session creation, and three prompts — the answer streams
     /// as agent message chunks rather than arriving whole at turn end, and
@@ -1668,13 +1756,19 @@ whole. Change nothing outside it, and write nothing else inside it.";
     }
 
     /// Builds the agent an arm runs: `opencode-witness` is the clean-config
-    /// witness agent; anything else parses as its own launch string.
+    /// witness agent; anything else parses as its own launch string. Every
+    /// arm carries the debug callback, so a turn that ends other than
+    /// normally has the agent's stderr to read — an unreadable turn with no
+    /// stderr is itself the finding.
     fn arm_agent(spec: &str) -> AcpAgent {
-        if spec == "opencode-witness" {
+        let agent = if spec == "opencode-witness" {
             opencode_witness_agent()
         } else {
             AcpAgent::from_str(spec).expect("the launch string parses")
-        }
+        };
+        agent.with_debug(|line, direction| {
+            eprintln!("agent {:?}: {}", direction, line);
+        })
     }
 
     fn which_probe(command: &str) -> bool {
@@ -1717,13 +1811,10 @@ whole. Change nothing outside it, and write nothing else inside it.";
                 McpServerHttp::new("temper", url)
                     .headers(vec![HttpHeader::new("x-temper-presentation", "probe")]),
             );
-            let (commands, recorded, info) = start_test_conversation_with_mcp(
-                agent,
-                AskBoard::default(),
-                silent_ask_sink(),
-                vec![server],
-            )
-            .await;
+            let board = AskBoard::default();
+            let (ask_sink, _ask_recorded) = auto_allow_ask_sink(&board, "test-conversation");
+            let (commands, recorded, info) =
+                start_test_conversation_with_mcp(agent, board, ask_sink, vec![server]).await;
             assert!(!info.session_id.is_empty(), "{name}: session created");
 
             let stop = tokio::time::timeout(
@@ -1745,7 +1836,26 @@ whole. Change nothing outside it, and write nothing else inside it.";
                 );
                 panic!("{name}: the presentation turn should end within 120s");
             });
-            assert_eq!(stop, "end_turn", "{name}: the turn should end normally");
+            if stop != "end_turn" {
+                // A cancelled or errored turn is a finding too: the table
+                // must carry what the conversation delivered before it ended.
+                let said = streamed_chunks(&recorded).join(" ");
+                let kinds = update_kinds(&recorded);
+                findings.lock().unwrap().push_str(&format!(
+                    "\n- {name}: turn `{stop}` — updates {:?}, said: {}",
+                    kinds,
+                    if said.len() > 400 {
+                        &said[..400]
+                    } else {
+                        &said
+                    }
+                ));
+                eprintln!(
+                    "harness-fidelity findings so far:{}",
+                    findings.lock().unwrap()
+                );
+                assert_eq!(stop, "end_turn", "{name}: the turn should end normally");
+            }
 
             let calls = probe.recorded_calls();
             findings.lock().unwrap().push_str(&format!(
