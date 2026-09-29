@@ -6,11 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
-    SelectedPermissionOutcome, SessionConfigOption, SessionConfigOptionValue, SessionModeState,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
-    TextContent,
+    AgentCapabilities, ContentBlock, InitializeRequest, McpServer, NewSessionRequest,
+    PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    ResourceLink, SelectedPermissionOutcome, SessionConfigOption, SessionConfigOptionValue,
+    SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Error};
@@ -297,6 +297,22 @@ struct ConversationReady {
     /// neither carries neither.
     modes: Option<SessionModeState>,
     config_options: Option<Vec<SessionConfigOption>>,
+    /// Whether the conversation's presentation surface rides with the
+    /// session: `Available` when the MCP HTTP server was started and
+    /// delivered, `Unsupported` when the agent's init answer named no HTTP
+    /// MCP support — the harness's lack, named, never widened into silence.
+    presentations: PresentationsState,
+}
+
+/// The two states a conversation's presentation surface can be in, carried
+/// out in [`ConversationInfo`] so the room can say which one it is in —
+/// an agent that cannot present is an agent that cannot present, not an
+/// agent with nothing to say.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "state", rename_all = "kebab-case")]
+pub enum PresentationsState {
+    Available,
+    Unsupported { reason: String },
 }
 
 #[derive(Clone)]
@@ -321,6 +337,11 @@ pub struct ConversationInfo {
     pub agent_info: serde_json::Value,
     pub modes: Option<SessionModeState>,
     pub config_options: Option<Vec<SessionConfigOption>>,
+    /// Whether the conversation's presentation surface rides with the
+    /// session — or why not. `available` says the agent can call the tool;
+    /// `unsupported` with its reason names the agent's own lack, never a
+    /// silent absence.
+    pub presentations: PresentationsState,
 }
 
 /// Spawns an ACP agent subprocess, completes the `initialize` handshake,
@@ -407,7 +428,7 @@ pub async fn acp_start(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| {
-            run_conversation(connection, command_rx, ready_tx, cwd, Vec::new())
+            run_conversation(connection, command_rx, ready_tx, cwd, Vec::new(), true)
         });
 
     // The connection future outlives this command; the conversation loop keeps
@@ -431,6 +452,7 @@ pub async fn acp_start(
         agent_info: info.agent_info,
         modes: info.modes,
         config_options: info.config_options,
+        presentations: info.presentations,
     })
 }
 
@@ -445,12 +467,43 @@ fn permission_response_for(answer: AskAnswer) -> RequestPermissionResponse {
     }
 }
 
+/// What the conversation's `session/new` offers the agent. `mcp_servers`
+/// rides through verbatim — the probe path composes its own servers, the
+/// app passes none. `wire_presentations` is the presentation wiring itself:
+/// the desktop starts its own MCP HTTP server for this session when the
+/// init answer says the agent can reach one over HTTP, and the gate lives
+/// between initialize and `session/new`, where the server step is.
+/// What the gate decided: start the desktop's own presentation server and
+/// hand it to `session/new`, skip it and name why in `ConversationInfo`, or
+/// pass the caller's servers through untouched — the probe's path.
+#[derive(Debug, PartialEq)]
+enum PresentationStart {
+    Start,
+    Skip,
+    PassThrough,
+}
+
+/// The gate's decision, pure: the desktop only starts a presentation server
+/// when the conversation carries the wiring AND the agent's init answer
+/// declared MCP HTTP support. Everything else passes through unchanged.
+fn wants_presentation_server(
+    wire_presentations: bool,
+    capabilities: &AgentCapabilities,
+) -> PresentationStart {
+    match (wire_presentations, capabilities.mcp_capabilities.http) {
+        (true, true) => PresentationStart::Start,
+        (true, false) => PresentationStart::Skip,
+        (false, _) => PresentationStart::PassThrough,
+    }
+}
+
 async fn run_conversation(
     connection: ConnectionTo<Agent>,
     mut commands: mpsc::UnboundedReceiver<ConversationCommand>,
     ready: oneshot::Sender<Result<ConversationReady, String>>,
     cwd: PathBuf,
     mcp_servers: Vec<McpServer>,
+    wire_presentations: bool,
 ) -> Result<(), Error> {
     let init = connection
         .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -459,8 +512,37 @@ async fn run_conversation(
     let agent_info = serde_json::to_value(&init)
         .map_err(|e| agent_client_protocol::util::internal_error(e.to_string()))?;
 
+    // The capability gate, between initialize and `session/new`: the desktop
+    // starts its presentation server only for a conversation whose agent
+    // answered that it can reach an MCP server over HTTP — a port is held
+    // for an agent that can never call it only if the gate is skipped.
+    // The server starts here, before `session/new`: the URL and secret are
+    // ready when the request is composed, no race between the answer and
+    // the server's bind.
+    let want = wants_presentation_server(wire_presentations, &init.agent_capabilities);
+    let (attached_servers, presentations, server_guard) = match want {
+        PresentationStart::Start => {
+            let server = crate::present_server::RunningServer::start()
+                .await
+                .map_err(agent_client_protocol::util::internal_error)?;
+            let entry = server.as_mcp_server();
+            let guard = crate::present_server::RunningServerGuard::new(server);
+            (vec![entry], PresentationsState::Available, Some(guard))
+        }
+        PresentationStart::Skip => (
+            Vec::new(),
+            PresentationsState::Unsupported {
+                reason: "the agent declared no MCP HTTP support, so the presentation server was \
+                     not started for this conversation"
+                    .to_string(),
+            },
+            None,
+        ),
+        PresentationStart::PassThrough => (mcp_servers, PresentationsState::Available, None),
+    };
+
     let new_session = connection
-        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers))
+        .send_request(NewSessionRequest::new(cwd).mcp_servers(attached_servers))
         .block_task()
         .await?;
     let session_id = new_session.session_id.clone();
@@ -470,8 +552,14 @@ async fn run_conversation(
         agent_info,
         modes: new_session.modes.clone(),
         config_options: new_session.config_options.clone(),
+        presentations,
     }));
 
+    // The guard's graceful stop happens here — loop end, on every arm:
+    // `acp_close` drops the conversation's handle, which ends this loop, and
+    // the agent's death completes (or drops) the connection future, whose
+    // guard-drop sends the same shutdown signal. A parked `acp_prompt`'s
+    // reply already carried the error before this runs.
     while let Some(command) = commands.recv().await {
         match command {
             ConversationCommand::Prompt {
@@ -520,6 +608,13 @@ async fn run_conversation(
                 });
             }
         }
+    }
+    // The conversation ended (close via the dropped command channel, or the
+    // agent's death via the connection future): the presentation server's
+    // shutdown signal goes out on every arm, then the graceful stop waits.
+    if let Some(guard) = server_guard {
+        let server = guard.take();
+        server.stop().await;
     }
     Ok(())
 }
@@ -723,7 +818,10 @@ fn expand_cwd(spec: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{HttpHeader, McpServerHttp};
+    use agent_client_protocol::schema::v1::{
+        AgentCapabilities, HttpHeader, McpCapabilities, McpServerHttp, ToolCallContent,
+        ToolCallStatus,
+    };
     use agent_client_protocol::AcpAgentConfig;
 
     type Recorded = Arc<Mutex<Vec<AcpEvent>>>;
@@ -774,7 +872,7 @@ mod tests {
         Recorded,
         ConversationReady,
     ) {
-        start_test_conversation_with_mcp(agent, ask_board, ask_sink, Vec::new()).await
+        start_test_conversation_with(agent, ask_board, ask_sink, Vec::new(), true).await
     }
 
     async fn start_test_conversation_with_mcp(
@@ -782,6 +880,20 @@ mod tests {
         ask_board: AskBoard,
         ask_sink: AskSink,
         mcp_servers: Vec<McpServer>,
+    ) -> (
+        mpsc::UnboundedSender<ConversationCommand>,
+        Recorded,
+        ConversationReady,
+    ) {
+        start_test_conversation_with(agent, ask_board, ask_sink, mcp_servers, false).await
+    }
+
+    async fn start_test_conversation_with(
+        agent: AcpAgent,
+        ask_board: AskBoard,
+        ask_sink: AskSink,
+        mcp_servers: Vec<McpServer>,
+        wire_presentations: bool,
     ) -> (
         mpsc::UnboundedSender<ConversationCommand>,
         Recorded,
@@ -822,7 +934,14 @@ mod tests {
                 agent_client_protocol::on_receive_request!(),
             )
             .connect_with(agent, move |connection: ConnectionTo<Agent>| {
-                run_conversation(connection, command_rx, ready_tx, witness_cwd(), mcp_servers)
+                run_conversation(
+                    connection,
+                    command_rx,
+                    ready_tx,
+                    witness_cwd(),
+                    mcp_servers,
+                    wire_presentations,
+                )
             });
         tokio::spawn(connection);
 
@@ -1725,7 +1844,180 @@ whole. Change nothing outside it, and write nothing else inside it.";
 
     // ── The presented-view probe's gates ────────────────────────────────
 
+    /// The gate's three arms in words: HTTP support declared → the server
+    /// starts; HTTP support absent → skip and name why; the probe's wiring
+    /// passes the caller's servers through untouched.
+    #[test]
+    fn the_gate_starts_only_for_a_http_capable_agent() {
+        let mut http = AgentCapabilities::default();
+        http.mcp_capabilities = McpCapabilities::default().http(true);
+        let mut no_http = AgentCapabilities::default();
+        no_http.mcp_capabilities = McpCapabilities::default().http(false);
+
+        assert_eq!(
+            wants_presentation_server(true, &http),
+            PresentationStart::Start,
+            "an HTTP-capable agent gets the presentation server"
+        );
+        assert_eq!(
+            wants_presentation_server(true, &no_http),
+            PresentationStart::Skip,
+            "an agent without MCP HTTP support gets no server — nothing pretends otherwise"
+        );
+        assert_eq!(
+            wants_presentation_server(false, &http),
+            PresentationStart::PassThrough,
+            "the probe's wiring passes its own servers through"
+        );
+        assert_eq!(
+            wants_presentation_server(false, &no_http),
+            PresentationStart::PassThrough
+        );
+    }
+
+    /// The unsupported arm speaks: the reason an agent cannot present is the
+    /// agent's own lack, named — never a silent absence.
+    #[test]
+    fn the_unsupported_arm_names_the_agent_s_lack_in_words() {
+        assert_eq!(
+            PresentationsState::Unsupported {
+                reason: "the agent declared no MCP HTTP support, so the presentation \
+                         server was not started for this conversation"
+                    .to_string()
+            },
+            PresentationsState::Unsupported {
+                reason: "the agent declared no MCP HTTP support, so the presentation \
+                         server was not started for this conversation"
+                    .to_string()
+            }
+        );
+    }
+
     use crate::present_probe::ProbeServer;
+
+    /// Witness for chunk 2's gate, against a live agent: opencode declares
+    /// MCP HTTP support (`mcpCapabilities.http` — probed in chunk 0's
+    /// fidelity runs), so the desktop starts its own presentation server,
+    /// `session/new` carries it, and the model — able to see the tool —
+    /// calls it; the turn ends with the stubbed refused answer, which the
+    /// tool call's completed content carries. The conversation's info says
+    /// `available`.
+    /// Run locally: `cargo test -p desktop --lib -- --ignored
+    /// opencode_presents_a_view_and_learns_rendered`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode on PATH"]
+    async fn opencode_presents_a_view_and_learns_rendered() {
+        // The gate's facts, asserted before anything else: the wiring is on,
+        // the agent said http — the start arm is what runs.
+        let mut http = AgentCapabilities::default();
+        http.mcp_capabilities = McpCapabilities::default().http(true);
+        assert_eq!(
+            wants_presentation_server(true, &http),
+            PresentationStart::Start
+        );
+
+        let agent = opencode_witness_agent().with_debug(|line, direction| {
+            eprintln!("opencode {:?}: {}", direction, line);
+        });
+
+        let (commands, recorded, info) =
+            start_test_conversation(agent, AskBoard::default(), silent_ask_sink()).await;
+        assert!(
+            !info.session_id.is_empty(),
+            "opencode should create a session"
+        );
+        assert_eq!(
+            info.presentations,
+            PresentationsState::Available,
+            "the conversation's info names the surface available, not silent"
+        );
+
+        // A clearly conforming spec, named from the tool's own schema: a
+        // bounded list of two resource references, composed from the catalog.
+        // The prompt forbids detours — the witness judges the presentation
+        // path, and a bash/grep detour is a failed turn, not evidence.
+        let stop = tokio::time::timeout(
+            Duration::from_secs(120),
+            prompt(
+                &commands,
+                "Your next action, before anything else: call the temper_present_view tool \
+                 once, with a spec showing a bounded list of two resource references, \
+                 composed strictly from the tool's inputSchema. Do not run bash, read files, \
+                 or call any other tool. After the tool answers, state its reply in one line.",
+            ),
+        )
+        .await
+        .expect("the presentation turn should end within 120s");
+        assert_eq!(
+            stop, "end_turn",
+            "the turn ends with the tool's stubbed answer — it does not wait on anyone"
+        );
+
+        // The tool call reached completion and its content carries the
+        // stub's refused end — deterministically asserted; the spec's exact
+        // shape is the model's, judged already by the fidelity probe.
+        let completed: Vec<(String, ToolCallUpdateFields)> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match &event.update {
+                SessionUpdate::ToolCall(call) => Some((
+                    call.tool_call_id.to_string(),
+                    ToolCallUpdateFields::new()
+                        .status(call.status)
+                        .content(call.content.clone())
+                        .raw_output(call.raw_output.clone()),
+                )),
+                SessionUpdate::ToolCallUpdate(update) => {
+                    Some((update.tool_call_id.to_string(), update.fields.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        let (call_id, fields) = completed
+            .iter()
+            .find(|(_, f)| f.status == Some(ToolCallStatus::Completed))
+            .expect("the presented tool call should complete");
+        let said = fields
+            .content
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|c| match c {
+                ToolCallContent::Content(content) => match &content.content {
+                    ContentBlock::Text(text) => Some(text.text.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let raw_output = fields
+            .raw_output
+            .as_ref()
+            .map(|v| v.to_string())
+            .unwrap_or_default();
+        let result: serde_json::Value = serde_json::from_str(&said)
+            .or_else(|_| serde_json::from_str(&raw_output))
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the completed tool call's content or raw_output is the stub's result \
+                     json — got content {said:?} and raw_output {raw_output:?}"
+                )
+            });
+        assert_eq!(
+            result["ok"], "refused",
+            "the stub answers refused until the board exists (chunk 3)"
+        );
+        assert!(
+            result["reasons"]
+                .as_array()
+                .map(|r| !r.is_empty())
+                .unwrap_or(false),
+            "the refusal names its reason, never a silent hang"
+        );
+        let _ = (call_id, recorded);
+    }
 
     /// The launch spec for each harness the fidelity probe exercises, with
     /// the reason it is expected to work on this machine. A harness missing
