@@ -31,6 +31,14 @@ toml = "0.9"
 tauri-plugin-opener = "2.5.5"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
+# The presentation probe's MCP server: the same dependency shape temper-mcp runs,
+# so the harness-fidelity probe serves the closed catalog exactly as core serves its tools.
+rmcp = { version = "3.4.1", features = ["server", "transport-streamable-http-server"] }
+axum = { version = "0.8", features = ["json"] }
+http = "1"
+# The probe's tool-args derive: the projected catalog schema is hand-written,
+# but `Parameters` demands the derive exist on the args type.
+schemars = "1"
 # The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
 # WKWebView driver. Behind a feature: the witness builds with `--features webdriver`, so
 # development and release builds never compile an endpoint.

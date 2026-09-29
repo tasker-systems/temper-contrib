@@ -5,6 +5,11 @@ mod document_save;
 mod hub;
 mod hub_queue;
 mod person_context;
+// The harness-fidelity probe is a test fixture, not an app surface: the only
+// caller is the witness. The real presentation server (Chunk 1's module)
+// replaces it, so the probe is compiled out of every non-test build.
+#[cfg(test)]
+mod present_probe;
 mod roster;
 mod settings;
 mod temper;

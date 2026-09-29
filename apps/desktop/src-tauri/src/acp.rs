@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::v1::{
-    ContentBlock, InitializeRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigOption, SessionConfigOptionValue, SessionModeState, SessionNotification,
-    SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
+    ContentBlock, InitializeRequest, McpServer, NewSessionRequest, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
+    SelectedPermissionOutcome, SessionConfigOption, SessionConfigOptionValue, SessionModeState,
+    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, SetSessionModeRequest,
+    TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Error};
@@ -406,7 +407,7 @@ pub async fn acp_start(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| {
-            run_conversation(connection, command_rx, ready_tx, cwd)
+            run_conversation(connection, command_rx, ready_tx, cwd, Vec::new())
         });
 
     // The connection future outlives this command; the conversation loop keeps
@@ -449,6 +450,7 @@ async fn run_conversation(
     mut commands: mpsc::UnboundedReceiver<ConversationCommand>,
     ready: oneshot::Sender<Result<ConversationReady, String>>,
     cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
 ) -> Result<(), Error> {
     let init = connection
         .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -458,7 +460,7 @@ async fn run_conversation(
         .map_err(|e| agent_client_protocol::util::internal_error(e.to_string()))?;
 
     let new_session = connection
-        .send_request(NewSessionRequest::new(cwd))
+        .send_request(NewSessionRequest::new(cwd).mcp_servers(mcp_servers))
         .block_task()
         .await?;
     let session_id = new_session.session_id.clone();
@@ -721,6 +723,7 @@ fn expand_cwd(spec: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{HttpHeader, McpServerHttp};
     use agent_client_protocol::AcpAgentConfig;
 
     type Recorded = Arc<Mutex<Vec<AcpEvent>>>;
@@ -759,7 +762,9 @@ mod tests {
     /// Starts a conversation the way [`acp_start`] does, with a recording
     /// output sink instead of Tauri events and the caller's ask board and
     /// sink, and returns the handles the test drives prompts with. The caller
-    /// keeps its own ask record clone to inspect.
+    /// keeps its own ask record clone to inspect. `mcp_servers` rides into
+    /// `session/new` (empty by default), which is how the MCP-fidelity
+    /// witness attaches the probe server.
     async fn start_test_conversation(
         agent: AcpAgent,
         ask_board: AskBoard,
@@ -769,6 +774,20 @@ mod tests {
         Recorded,
         ConversationReady,
     ) {
+        start_test_conversation_with_mcp(agent, ask_board, ask_sink, Vec::new()).await
+    }
+
+    async fn start_test_conversation_with_mcp(
+        agent: AcpAgent,
+        ask_board: AskBoard,
+        ask_sink: AskSink,
+        mcp_servers: Vec<McpServer>,
+    ) -> (
+        mpsc::UnboundedSender<ConversationCommand>,
+        Recorded,
+        ConversationReady,
+    ) {
+        let agent_name = format!("{agent:?}");
         let (commands, command_rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = oneshot::channel();
         let (sink, recorded) = recording_sink();
@@ -803,13 +822,18 @@ mod tests {
                 agent_client_protocol::on_receive_request!(),
             )
             .connect_with(agent, move |connection: ConnectionTo<Agent>| {
-                run_conversation(connection, command_rx, ready_tx, witness_cwd())
+                run_conversation(connection, command_rx, ready_tx, witness_cwd(), mcp_servers)
             });
         tokio::spawn(connection);
 
         let info = ready_rx
             .await
-            .expect("ready signal should arrive")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "the conversation ended before it was ready (agent: {agent_name}) — the \
+                     agent process may have failed to start or answered no handshake"
+                )
+            })
             .expect("conversation should become ready");
         (commands, recorded, info)
     }
@@ -1609,5 +1633,158 @@ whole. Change nothing outside it, and write nothing else inside it.";
             Some("OK".to_string()),
             "the pre-approved write should have happened"
         );
+    }
+
+    // ── The presented-view probe's gates ────────────────────────────────
+
+    use crate::present_probe::ProbeServer;
+
+    /// The launch spec for each harness the fidelity probe exercises, with
+    /// the reason it is expected to work on this machine. A harness missing
+    /// here is skipped by name with its reason in the output — never silently.
+    /// Launch strings, not built agents: `AcpAgent` is not `Clone`, and each
+    /// arm parses its own.
+    async fn probed_harnesses() -> Vec<(&'static str, &'static str)> {
+        let mut harnesses = Vec::new();
+        if which_probe("opencode") {
+            harnesses.push(("opencode-witness", "opencode acp (1.18.32)"));
+        } else {
+            eprintln!("skip arm: opencode not on PATH");
+        }
+        if which_probe("claude-agent-acp") {
+            harnesses.push(("claude-agent-acp", "claude-agent-acp 0.84.0"));
+        } else {
+            eprintln!("skip arm: claude-agent-acp not on PATH");
+        }
+        // codex-acp is installed but unauthenticated here (its authStatus is
+        // "none" even after a handshake), so its arm is skipped with this
+        // reason rather than run to a guaranteed not-ready failure.
+        if std::env::var("OPENAI_API_KEY").is_ok() && which_probe("codex-acp") {
+            harnesses.push(("codex-acp", "codex-acp 2.0.0"));
+        } else {
+            eprintln!("skip arm: codex-acp installed but not authenticated on this machine");
+        }
+        harnesses
+    }
+
+    /// Builds the agent an arm runs: `opencode-witness` is the clean-config
+    /// witness agent; anything else parses as its own launch string.
+    fn arm_agent(spec: &str) -> AcpAgent {
+        if spec == "opencode-witness" {
+            opencode_witness_agent()
+        } else {
+            AcpAgent::from_str(spec).expect("the launch string parses")
+        }
+    }
+
+    fn which_probe(command: &str) -> bool {
+        std::process::Command::new("which")
+            .arg(command)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// Witness for the probe's gate: does each installed ACP harness pass
+    /// the tool's `inputSchema` through to its model faithfully enough for
+    /// the model to produce a conforming spec, and does a non-conforming
+    /// construction reach the probe's own check (which refuses) rather than
+    /// being silently mangled by the harness? Each recorded call is asserted
+    /// only on deterministic facts — the shape the model sent, and whether
+    /// the probe's own closed-catalog check ran on it as `rendered` or
+    /// `refused` with reasons; model behaviour that could vary between runs
+    /// is printed, not asserted.
+    /// Run locally: `cargo test -p desktop --lib -- --ignored present_mcp_harness_fidelity`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires at least one ACP harness on PATH"]
+    async fn present_mcp_harness_fidelity() {
+        let harnesses = probed_harnesses().await;
+        assert!(
+            !harnesses.is_empty(),
+            "no probed harness is on PATH; state the machine's gap rather than passing vacuously"
+        );
+        let findings = Arc::new(Mutex::new(String::new()));
+        for (spec, name) in &harnesses {
+            let findings = findings.clone();
+            findings
+                .lock()
+                .unwrap()
+                .push_str(&format!("\n- arm: {name}"));
+            let agent = arm_agent(spec);
+            let probe = ProbeServer::start().await.expect("probe server binds");
+            let url = probe.base_url.clone();
+            let server = McpServer::Http(
+                McpServerHttp::new("temper", url)
+                    .headers(vec![HttpHeader::new("x-temper-presentation", "probe")]),
+            );
+            let (commands, recorded, info) = start_test_conversation_with_mcp(
+                agent,
+                AskBoard::default(),
+                silent_ask_sink(),
+                vec![server],
+            )
+            .await;
+            assert!(!info.session_id.is_empty(), "{name}: session created");
+
+            let stop = tokio::time::timeout(
+                Duration::from_secs(120),
+                prompt(
+                    &commands,
+                    "Call the temper_present_view tool with a spec that shows a bounded list of \
+                     two resource references. Compose the spec strictly from the tool's \
+                     inputSchema — its elements, its $defs, its closed property sets.",
+                ),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                // A timeout is a finding too: the table must carry what the
+                // model did before it stalled, not vanish with the panic.
+                eprintln!(
+                    "harness-fidelity findings so far:{}",
+                    findings.lock().unwrap()
+                );
+                panic!("{name}: the presentation turn should end within 120s");
+            });
+            assert_eq!(stop, "end_turn", "{name}: the turn should end normally");
+
+            let calls = probe.recorded_calls();
+            findings.lock().unwrap().push_str(&format!(
+                "\n- {name}: {} tool call(s), stop `{stop}`",
+                calls.len()
+            ));
+            // What the model said instead of calling, when it did not call:
+            // a stated gap needs its words, never just its absence.
+            if calls.is_empty() {
+                let said = streamed_chunks(&recorded).join(" ");
+                findings.lock().unwrap().push_str(&format!(
+                    "\n  - said in the turn instead: {}",
+                    if said.len() > 300 {
+                        &said[..300]
+                    } else {
+                        &said
+                    }
+                ));
+            }
+            for (i, call) in calls.iter().enumerate() {
+                let verdict = crate::present_probe::check_spec_public(&call["spec"]);
+                findings
+                    .lock()
+                    .unwrap()
+                    .push_str(&format!("\n  - call {i}: {}", verdict.describe()));
+            }
+            // A harness whose model never calls the tool is a FINDING, not a
+            // test failure: the fidelity table must carry it — the gap is
+            // stated, never assumed away.
+            if calls.is_empty() {
+                findings
+                    .lock()
+                    .unwrap()
+                    .push_str("\n  - GAP: the model never called the presentation tool this turn");
+            }
+            probe.stop().await;
+            let _ = &recorded;
+        }
+        println!("harness-fidelity findings:{}", findings.lock().unwrap());
+        eprintln!("(probed {} harness(es))", harnesses.len());
     }
 }
