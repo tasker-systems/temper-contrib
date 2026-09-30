@@ -207,7 +207,16 @@ describe('applyPresentNotice', () => {
 			})
 		);
 		expect(pending).toEqual([]);
-		expect(messages).toEqual([{ role: 'system', text: 'presented a view — checked and rendered' }]);
+		expect(messages).toEqual([
+			{
+				role: 'system',
+				text: 'presented a view — checked and rendered',
+				tab: {
+					resource: '00000000-0000-0000-0000-00000000000a',
+					artifact: '00000000-0000-0000-0000-00000000000b'
+				}
+			}
+		]);
 	});
 
 	it('lands a refused end once with its catalog version and every reason', () => {

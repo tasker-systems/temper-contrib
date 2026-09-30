@@ -58,6 +58,8 @@ export type ChatMessage = {
 	with?: string;
 	toolCallId?: string;
 	status?: string;
+	/** Where a rendered presentation's record lives — the tab line's rebuildable subject. */
+	tab?: { resource: string; artifact: string };
 };
 
 /** The declared selection, established from what the agent declares and
@@ -226,6 +228,7 @@ export function applyPresentNotice(
 		text:
 			outcome.ok === 'rendered'
 				? 'presented a view — checked and rendered'
-				: `presented a view — refused by ${outcome.catalogVersion}: ${shownReasons(outcome.reasons)}`
+				: `presented a view — refused by ${outcome.catalogVersion}: ${shownReasons(outcome.reasons)}`,
+		tab: outcome.ok === 'rendered' ? outcome.tab : undefined
 	});
 }

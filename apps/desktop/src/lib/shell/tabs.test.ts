@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { Subject } from './subjects';
+import { type Subject, subjectKey } from './subjects';
 import { HOME_TAB, SET_ASIDE_BOUND, TAB_BOUND, TabModel, TRAIL_BOUND } from './tabs.svelte';
 
 /** A device store in memory, so each test starts from exactly what it stored. */
@@ -28,6 +28,12 @@ class MemoryStorage implements Storage {
 const doc = (n: number): Subject => ({
 	kind: 'resource',
 	id: `01a0e020-a6d7-7420-b924-${String(n).padStart(12, '0')}`
+});
+
+const presentation = (r: number, a: number): Subject => ({
+	kind: 'presentation',
+	resource: `01a0f000-0000-7000-8000-${String(r).padStart(12, '0')}`,
+	artifact: `01a0f000-0000-7000-8000-${String(a).padStart(12, '0')}`
 });
 
 let storage: MemoryStorage;
@@ -178,6 +184,87 @@ describe('the tab model', () => {
 		model.focusOrOpen({ kind: 'place', place: 'settings' });
 		expect(model.activeId).toBe(settings);
 		expect(model.openCount).toBe(1);
+	});
+
+	it('a background open appears in the strip, and the active tab is unchanged', () => {
+		model.open(doc(1), { where: 'new' });
+		const active = model.activeId;
+		const opened = model.open(presentation(1, 2), {
+			where: 'new',
+			lens: 'core/presentation',
+			focus: false
+		});
+		expect(opened).toBe(true);
+		expect(model.openCount).toBe(2);
+		expect(model.activeId).toBe(active);
+		const subject = presentation(1, 2);
+		const tab = model.tabs.find(
+			(t) => subjectKey(t.steps[t.cursor].subject) === subjectKey(subject)
+		);
+		expect(tab).toBeDefined();
+		expect(tab?.steps[0].lens).toBe('core/presentation');
+		expect(tab?.steps[0].title).toBeNull();
+	});
+
+	it('a background open does not mount the tab', () => {
+		model.open(presentation(1, 2), {
+			where: 'new',
+			lens: 'core/presentation',
+			focus: false
+		});
+		const tab = model.tabs[1];
+		expect(model.mounted[tab.id]).toBeUndefined();
+	});
+
+	it('a background open at the bound sets a tab aside, and still opens unfocused', () => {
+		model.open(doc(1), { where: 'new' });
+		for (let i = 0; i < TAB_BOUND - 1; i++) model.open(doc(i + 2), { where: 'new' });
+		expect(model.openCount).toBe(TAB_BOUND);
+		const active = model.activeId;
+		const setAsideCount = model.setAside.length;
+		const opened = model.open(presentation(9, 9), {
+			where: 'new',
+			lens: 'core/presentation',
+			focus: false
+		});
+		expect(opened).toBe(true);
+		expect(model.activeId).toBe(active);
+		expect(model.setAside.length).toBe(setAsideCount + 1);
+	});
+
+	it('the same presentation reuses its tab; a different one opens another', () => {
+		model.open(doc(1), { where: 'new' });
+		const active = model.activeId;
+		model.focusOrOpen(presentation(1, 2), 'core/presentation');
+		// focusOrOpen on a subject nothing shows opens a new tab — and focuses it.
+		const first = model.activeId;
+		expect(first).not.toBe(active);
+		model.activate(active);
+		// The same record, opened again from its second resolution: reused, focused.
+		model.focusOrOpen(presentation(1, 2), 'core/presentation');
+		expect(model.activeId).toBe(first);
+		expect(model.openCount).toBe(2);
+		// A different record is a different subject: another tab.
+		model.activate(active);
+		model.open(presentation(3, 4), { where: 'new', lens: 'core/presentation', focus: false });
+		expect(model.openCount).toBe(3);
+		expect(model.tabs.filter((t) => t.id === first).length).toBe(1);
+	});
+
+	it('a closed presentation tab reopens from its record, not from memory', () => {
+		model.focusOrOpen(presentation(1, 2), 'core/presentation');
+		const first = model.activeId;
+		model.close(first);
+		expect(model.tabs.find((t) => t.id === first)).toBeUndefined();
+		// The record's subject is still addressable: opening it again makes a live tab whose
+		// step carries the same subject — the lens reads the record from temper, never from
+		// the closed tab's past.
+		model.focusOrOpen(presentation(1, 2), 'core/presentation');
+		const reopened = model.activeId;
+		expect(reopened).not.toBe(first);
+		const step = model.current(model.active);
+		expect(step.subject).toEqual(presentation(1, 2));
+		expect(step.lens).toBe('core/presentation');
 	});
 
 	it('closing the active tab activates its neighbour', () => {

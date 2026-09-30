@@ -16,6 +16,7 @@ export type Subject =
 	| { kind: 'resource'; id: string }
 	| { kind: 'query'; context?: string; docType?: string; text?: string }
 	| { kind: 'neighbourhood'; id: string; depth: 1 }
+	| { kind: 'presentation'; resource: string; artifact: string }
 	| { kind: 'place'; place: Place };
 
 const PLACES: readonly Place[] = ['home', 'settings', 'setup'];
@@ -27,6 +28,8 @@ export function subjectKey(subject: Subject): string {
 			return `resource:${subject.id}`;
 		case 'neighbourhood':
 			return `neighbourhood:${subject.id}:${subject.depth}`;
+		case 'presentation':
+			return `presentation:${subject.resource}:${subject.artifact}`;
 		case 'place':
 			return `place:${subject.place}`;
 		case 'query':
@@ -41,6 +44,8 @@ export function subjectWords(subject: Subject): string {
 			return 'document';
 		case 'neighbourhood':
 			return 'neighbourhood';
+		case 'presentation':
+			return 'presented view';
 		case 'place':
 			return subject.place;
 		case 'query':
@@ -106,6 +111,10 @@ export function parseSubject(raw: unknown): Subject | null {
 			return str(s.id) ? { kind: 'resource', id: s.id } : null;
 		case 'neighbourhood':
 			return str(s.id) ? { kind: 'neighbourhood', id: s.id, depth: 1 } : null;
+		case 'presentation':
+			return str(s.resource) && str(s.artifact)
+				? { kind: 'presentation', resource: s.resource, artifact: s.artifact }
+				: null;
 		case 'place':
 			return (PLACES as readonly unknown[]).includes(s.place)
 				? { kind: 'place', place: s.place as Place }

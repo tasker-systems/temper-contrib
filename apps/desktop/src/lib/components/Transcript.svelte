@@ -6,6 +6,8 @@
 		with?: string;
 		toolCallId?: string;
 		status?: string;
+		/** Where a rendered presentation's record lives — the tab line's rebuildable subject. */
+		tab?: { resource: string; artifact: string };
 	};
 </script>
 
@@ -13,17 +15,22 @@
 	/**
 	 * The conversation transcript. Agents stream markdown, so assistant messages render through
 	 * `MarkdownRenderer` (the sanitized baseline); what the person typed renders as the literal
-	 * text they typed; tool-call entries are one line each, refreshed in place by the page.
+	 * text they typed; tool-call entries are one line each, refreshed in place by the page. A
+	 * rendered presentation's line carries its tab: the link opens the presented view through the
+	 * one door, `onTab` — never a second path into the shell.
 	 */
 	import MarkdownRenderer from './MarkdownRenderer.svelte';
 
 	let {
 		messages,
-		pending = null
+		pending = null,
+		onTab
 	}: {
 		messages: ChatMessage[];
 		/** Who is responding, while a prompt is in flight; null otherwise. */
 		pending?: string | null;
+		/** Follow a rendered presentation's tab line into its recorded view. */
+		onTab?: (tab: { resource: string; artifact: string }) => void;
 	} = $props();
 </script>
 
@@ -33,8 +40,12 @@
 			<div class="assistant"><MarkdownRenderer markdown={message.text} /></div>
 		{:else}
 			<p class={message.role}>
-				{message.text}{message.status ? ` · ${message.status}` : ''}
-				{#if message.with}<span class="with">with: <em>{message.with}</em></span>{/if}
+				{#if message.tab}
+					<button class="tab-link" onclick={() => onTab?.(message.tab!)}>{message.text}</button>
+				{:else}
+					{message.text}{message.status ? ` · ${message.status}` : ''}
+					{#if message.with}<span class="with">with: <em>{message.with}</em></span>{/if}
+				{/if}
 			</p>
 		{/if}
 	{/each}
@@ -44,6 +55,19 @@
 </div>
 
 <style>
+	.tab-link {
+		font: inherit;
+		letter-spacing: inherit;
+		color: var(--tp-text-muted);
+		background: none;
+		border: none;
+		padding: 0;
+		text-align: left;
+		cursor: pointer;
+	}
+	.tab-link:hover {
+		color: var(--tp-text);
+	}
 	.with {
 		display: block;
 		margin-top: 0.2rem;

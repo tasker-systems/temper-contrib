@@ -6,3 +6,4 @@ node_modules/
 tmp/
 .DS_Store/
 apps/desktop/.vitest/
+.claude/worktrees/

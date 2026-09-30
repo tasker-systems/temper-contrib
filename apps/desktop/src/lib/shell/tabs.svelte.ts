@@ -177,9 +177,15 @@ export class TabModel {
 	/**
 	 * The one door in. `here` pushes a step onto the active tab's trail; `new` opens a tab. Home is
 	 * never replaced: a `here` from home opens a new tab, and opening home activates the pinned tab.
-	 * Answers whether the move happened; a refusal says why in `notice`.
+	 * With `focus: false` a `new` tab opens unfocused — the tab appears in the strip and nothing is
+	 * mounted, entered or shown; the person's tab, trail and notice are untouched. It becomes a
+	 * normal tab the first time it is activated. Answers whether the move happened; a refusal says
+	 * why in `notice`.
 	 */
-	open(subject: Subject, options: { where?: 'here' | 'new'; lens?: string | null } = {}): boolean {
+	open(
+		subject: Subject,
+		options: { where?: 'here' | 'new'; lens?: string | null; focus?: boolean } = {}
+	): boolean {
 		if (subject.kind === 'place' && subject.place === 'home') {
 			this.activate(HOME_TAB);
 			return true;
@@ -210,6 +216,11 @@ export class TabModel {
 		if (room === false) return false;
 		const tab: Tab = { id: mint('t'), steps: [step], cursor: 0, usedAt: this.#now() };
 		this.tabs.push(tab);
+		if (options.focus === false) {
+			this.notice = room;
+			this.#save();
+			return true;
+		}
 		this.activate(tab.id);
 		this.notice = room;
 		return true;
