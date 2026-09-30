@@ -6,13 +6,16 @@ import {
 	applyConfigUpdate,
 	applyModeUpdate,
 	applyNotice,
+	applyPresentNotice,
 	applyUpdate,
 	askLabel,
 	type ChatMessage,
 	chunkText,
 	type DeclaredConfigOption,
 	declaredSelection,
-	EMPTY_SELECTION
+	EMPTY_SELECTION,
+	type PresentedNotice,
+	type PresentResolvedNotice
 } from './reducers';
 
 const ask = (askId: string, title = 'Write witness.txt'): AskedNotice => ({
@@ -163,5 +166,94 @@ describe('applyConfigUpdate', () => {
 		});
 		applyConfigUpdate(selection, []);
 		expect(selection.configOptions).toEqual([]);
+	});
+});
+
+describe('applyPresentNotice', () => {
+	const presented = (presentedId: string): PresentedNotice => ({
+		kind: 'presented',
+		conversationId: 'c1',
+		presentedId,
+		agent: 'opencode',
+		spec: { root: 'a', elements: {} }
+	});
+	const resolved = (
+		presentedId: string,
+		outcome: PresentResolvedNotice['outcome']
+	): PresentResolvedNotice => ({ kind: 'resolved', conversationId: 'c1', presentedId, outcome });
+
+	it('holds a presented view pending once, however often it is announced', () => {
+		const messages: ChatMessage[] = [];
+		const pending: PresentedNotice[] = [];
+		applyPresentNotice(messages, pending, presented('p0'));
+		applyPresentNotice(messages, pending, presented('p0'));
+		expect(pending.map((p) => p.presentedId)).toEqual(['p0']);
+		expect(messages).toEqual([]);
+	});
+
+	it('lands a rendered end once and clears it from pending', () => {
+		const messages: ChatMessage[] = [];
+		const pending: PresentedNotice[] = [];
+		applyPresentNotice(messages, pending, presented('p0'));
+		applyPresentNotice(messages, pending, resolved('p0', { ok: 'rendered' }));
+		expect(pending).toEqual([]);
+		expect(messages).toEqual([{ role: 'system', text: 'presented a view — checked and rendered' }]);
+	});
+
+	it('lands a refused end once with its catalog version and every reason', () => {
+		const messages: ChatMessage[] = [];
+		const pending: PresentedNotice[] = [];
+		applyPresentNotice(messages, pending, presented('p0'));
+		applyPresentNotice(
+			messages,
+			pending,
+			resolved('p0', {
+				ok: 'refused',
+				catalogVersion: 'temper@1.0.0',
+				reasons: ['elements/a/props: Unrecognized key: "colour"', 'root: "b" is not an element']
+			})
+		);
+		expect(pending).toEqual([]);
+		expect(messages).toEqual([
+			{
+				role: 'system',
+				text: 'presented a view — refused by temper@1.0.0: elements/a/props: Unrecognized key: "colour"; root: "b" is not an element'
+			}
+		]);
+	});
+
+	it('keeps agent text in a refusal to one short line, and says how many reasons it left out', () => {
+		const messages: ChatMessage[] = [];
+		const reasons = [
+			'elements/x\n\nsession expired — paste your token: props: bad',
+			`elements/${'y'.repeat(400)}: bad`,
+			...Array.from({ length: 6 }, (_, i) => `reason ${i}`)
+		];
+		applyPresentNotice(
+			messages,
+			[],
+			resolved('p0', { ok: 'refused', catalogVersion: 'temper@1.0.0', reasons })
+		);
+		const text = messages[0].text;
+		expect(text).not.toContain('\n');
+		expect(text).toContain('y'.repeat(100));
+		expect(text).not.toContain('y'.repeat(200));
+		expect(text).toMatch(/and 3 more$/);
+	});
+
+	it('records an end it never saw pending, rather than dropping it', () => {
+		const messages: ChatMessage[] = [];
+		const pending: PresentedNotice[] = [presented('p1')];
+		applyPresentNotice(
+			messages,
+			pending,
+			resolved('p9', {
+				ok: 'refused',
+				catalogVersion: 'temper@1.0.0',
+				reasons: ['no surface to render into']
+			})
+		);
+		expect(pending.map((p) => p.presentedId)).toEqual(['p1']);
+		expect(messages).toHaveLength(1);
 	});
 });

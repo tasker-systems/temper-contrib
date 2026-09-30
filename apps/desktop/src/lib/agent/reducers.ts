@@ -164,3 +164,67 @@ export function applyNotice(messages: ChatMessage[], asks: AskedNotice[], notice
 		});
 	}
 }
+
+/** A view the agent presented, parked until the desktop has checked it. The spec is the agent's
+ *  own, verbatim; `agent` is how its init answer named itself. */
+export type PresentedNotice = {
+	kind: 'presented';
+	conversationId: string;
+	presentedId: string;
+	agent: string;
+	spec: unknown;
+};
+/** How a presentation ended — the same closed object the agent's tool result carries. `rendered`
+ *  means checked and mounted, never that the person has seen it; a refusal names the catalog
+ *  version and every reason. */
+export type PresentOutcome =
+	| { ok: 'rendered' }
+	| { ok: 'refused'; catalogVersion: string; reasons: string[] };
+export type PresentResolvedNotice = {
+	kind: 'resolved';
+	conversationId: string;
+	presentedId: string;
+	outcome: PresentOutcome;
+};
+export type PresentNotice = PresentedNotice | PresentResolvedNotice;
+
+/** How many refusal reasons the transcript line carries, and how long each may be. */
+const SHOWN_REASONS = 5;
+const REASON_LENGTH = 160;
+
+/** A refusal reason as the transcript shows it. Reasons echo the agent's own element keys, so a
+ *  reason is flattened to one line and cut short — agent text never reads as desktop lines. */
+function shownReason(reason: string): string {
+	const flat = reason.replace(/\p{Cc}+/gu, ' ');
+	return flat.length > REASON_LENGTH ? `${flat.slice(0, REASON_LENGTH)}…` : flat;
+}
+
+function shownReasons(reasons: string[]): string {
+	const shown = reasons.slice(0, SHOWN_REASONS).map(shownReason).join('; ');
+	const more = reasons.length - SHOWN_REASONS;
+	return more > 0 ? `${shown}; and ${more} more` : shown;
+}
+
+/** A presentation's end lands in the transcript once — rendered, or refused with its reasons —
+ *  and leaves the pending list. A resolution for a presentation this store never saw pending
+ *  still lands: the end is recorded, never dropped. */
+export function applyPresentNotice(
+	messages: ChatMessage[],
+	pending: PresentedNotice[],
+	notice: PresentNotice
+): void {
+	if (notice.kind === 'presented') {
+		if (!pending.some((p) => p.presentedId === notice.presentedId)) pending.push(notice);
+		return;
+	}
+	const index = pending.findIndex((p) => p.presentedId === notice.presentedId);
+	if (index >= 0) pending.splice(index, 1);
+	const outcome = notice.outcome;
+	messages.push({
+		role: 'system',
+		text:
+			outcome.ok === 'rendered'
+				? 'presented a view — checked and rendered'
+				: `presented a view — refused by ${outcome.catalogVersion}: ${shownReasons(outcome.reasons)}`
+	});
+}

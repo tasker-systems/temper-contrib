@@ -75,6 +75,7 @@ describe('the agent panel', () => {
 		agentSession.conversation = null;
 		agentSession.messages = [];
 		agentSession.asks = [];
+		agentSession.presentations = [];
 		agentSession.prompting = false;
 		agentSession.error = '';
 	});
@@ -168,6 +169,90 @@ describe('the agent panel', () => {
 			)
 		);
 		expect(document.body.textContent).not.toContain('waiting for your answer');
+	});
+
+	it('checks a presented view the moment it arrives, shows it pending, and clears it on its end', async () => {
+		render(AgentPanel);
+		await startConversation();
+		await vi.waitFor(() => expect(handlers['acp-present']).toBeDefined());
+
+		const conforming = {
+			root: 'r',
+			elements: {
+				r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
+			}
+		};
+		handlers['acp-present']({
+			payload: {
+				kind: 'presented',
+				conversationId: 'c1',
+				presentedId: 'presented-0',
+				agent: 'opencode',
+				spec: conforming
+			}
+		});
+		const section = await vi.waitFor(() => {
+			const s = document.querySelector('section[aria-label="View presented"]');
+			expect(s).not.toBeNull();
+			return s as HTMLElement;
+		});
+		expect(section.getAttribute('aria-busy')).toBe('true');
+		expect(section.textContent).toContain('opencode presented a view');
+		await vi.waitFor(() =>
+			expect(
+				calls.some(
+					(c) =>
+						c.cmd === 'present_answer' &&
+						c.args?.presentedId === 'presented-0' &&
+						c.args?.rendered === true
+				)
+			).toBe(true)
+		);
+
+		handlers['acp-present']({
+			payload: {
+				kind: 'resolved',
+				conversationId: 'c1',
+				presentedId: 'presented-0',
+				outcome: { ok: 'rendered' }
+			}
+		});
+		await vi.waitFor(() =>
+			expect(document.body.textContent).toContain('presented a view — checked and rendered')
+		);
+		expect(document.querySelector('section[aria-label="View presented"]')).toBeNull();
+	});
+
+	it('answers a non-conforming view refused with checkSpec’s reasons', async () => {
+		render(AgentPanel);
+		await startConversation();
+		await vi.waitFor(() => expect(handlers['acp-present']).toBeDefined());
+
+		handlers['acp-present']({
+			payload: {
+				kind: 'presented',
+				conversationId: 'c1',
+				presentedId: 'presented-1',
+				agent: 'opencode',
+				spec: {
+					root: 'r',
+					elements: {
+						r: {
+							type: 'RegionState',
+							props: { state: 'failed', label: 'history', colour: 'red' },
+							children: []
+						}
+					}
+				}
+			}
+		});
+		const answered = await vi.waitFor(() => {
+			const call = calls.find((c) => c.cmd === 'present_answer');
+			expect(call).toBeDefined();
+			return call?.args as { rendered: boolean; reasons: string[] };
+		});
+		expect(answered.rendered).toBe(false);
+		expect(answered.reasons.some((r) => r.includes('colour'))).toBe(true);
 	});
 
 	it('closing the panel hides the view and keeps the conversation', async () => {

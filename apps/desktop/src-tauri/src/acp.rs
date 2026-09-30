@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::present_board::{PresentSink, PresentationBoard};
+
 /// One streamed notification from a live agent, as the UI receives it.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -327,6 +329,7 @@ pub struct AcpState {
     next_id: AtomicU64,
     conversations: Mutex<HashMap<String, ConversationHandle>>,
     ask_board: AskBoard,
+    pub(crate) present_board: PresentationBoard,
 }
 
 #[derive(Clone, Serialize)]
@@ -390,6 +393,16 @@ pub async fn acp_start(
     };
     let ask_board = state.ask_board.clone();
     let ask_conversation_id = conversation_id.clone();
+    let presentations = PresentWiring {
+        board: state.present_board.clone(),
+        conversation_id: conversation_id.clone(),
+        sink: {
+            let app = app.clone();
+            Arc::new(move |notice| {
+                let _ = app.emit("acp-present", notice);
+            })
+        },
+    };
 
     let connection = Client
         .builder()
@@ -428,7 +441,14 @@ pub async fn acp_start(
             agent_client_protocol::on_receive_request!(),
         )
         .connect_with(agent, move |connection: ConnectionTo<Agent>| {
-            run_conversation(connection, command_rx, ready_tx, cwd, Vec::new(), true)
+            run_conversation(
+                connection,
+                command_rx,
+                ready_tx,
+                cwd,
+                Vec::new(),
+                Some(presentations),
+            )
         });
 
     // The connection future outlives this command; the conversation loop keeps
@@ -467,12 +487,15 @@ fn permission_response_for(answer: AskAnswer) -> RequestPermissionResponse {
     }
 }
 
-/// What the conversation's `session/new` offers the agent. `mcp_servers`
-/// rides through verbatim — the probe path composes its own servers, the
-/// app passes none. `wire_presentations` is the presentation wiring itself:
-/// the desktop starts its own MCP HTTP server for this session when the
-/// init answer says the agent can reach one over HTTP, and the gate lives
-/// between initialize and `session/new`, where the server step is.
+/// The presentation wiring one conversation carries: the board its views
+/// park on, its id there, and where the webview is told. `None` is the
+/// probe's path — its own servers, passed through untouched.
+pub struct PresentWiring {
+    pub board: PresentationBoard,
+    pub conversation_id: String,
+    pub sink: PresentSink,
+}
+
 /// What the gate decided: start the desktop's own presentation server and
 /// hand it to `session/new`, skip it and name why in `ConversationInfo`, or
 /// pass the caller's servers through untouched — the probe's path.
@@ -497,13 +520,20 @@ fn wants_presentation_server(
     }
 }
 
+/// The presenting agent as its own init answer names it — the title when it
+/// gave one, else its name. An agent that named itself nothing is named so.
+fn agent_name(info: Option<&agent_client_protocol::schema::v1::Implementation>) -> String {
+    info.map(|i| i.title.clone().unwrap_or_else(|| i.name.clone()))
+        .unwrap_or_else(|| "an unnamed agent".to_string())
+}
+
 async fn run_conversation(
     connection: ConnectionTo<Agent>,
     mut commands: mpsc::UnboundedReceiver<ConversationCommand>,
     ready: oneshot::Sender<Result<ConversationReady, String>>,
     cwd: PathBuf,
     mcp_servers: Vec<McpServer>,
-    wire_presentations: bool,
+    presentation_wiring: Option<PresentWiring>,
 ) -> Result<(), Error> {
     let init = connection
         .send_request(InitializeRequest::new(ProtocolVersion::V1))
@@ -519,17 +549,27 @@ async fn run_conversation(
     // The server starts here, before `session/new`: the URL and secret are
     // ready when the request is composed, no race between the answer and
     // the server's bind.
-    let want = wants_presentation_server(wire_presentations, &init.agent_capabilities);
-    let (attached_servers, presentations, server_guard) = match want {
-        PresentationStart::Start => {
-            let server = crate::present_server::RunningServer::start()
-                .await
-                .map_err(agent_client_protocol::util::internal_error)?;
+    let want = wants_presentation_server(presentation_wiring.is_some(), &init.agent_capabilities);
+    let closing = presentation_wiring
+        .as_ref()
+        .map(|w| (w.board.clone(), w.conversation_id.clone()));
+    let (attached_servers, presentations, server_guard) = match (want, presentation_wiring) {
+        (PresentationStart::Start, Some(wiring)) => {
+            let server = crate::present_server::RunningServer::start(
+                crate::present_server::PresentContext {
+                    board: wiring.board,
+                    conversation_id: wiring.conversation_id,
+                    agent: agent_name(init.agent_info.as_ref()),
+                    sink: wiring.sink,
+                },
+            )
+            .await
+            .map_err(agent_client_protocol::util::internal_error)?;
             let entry = server.as_mcp_server();
             let guard = crate::present_server::RunningServerGuard::new(server);
             (vec![entry], PresentationsState::Available, Some(guard))
         }
-        PresentationStart::Skip => (
+        (PresentationStart::Skip, _) => (
             Vec::new(),
             PresentationsState::Unsupported {
                 reason: "the agent declared no MCP HTTP support, so the presentation server was \
@@ -538,8 +578,18 @@ async fn run_conversation(
             },
             None,
         ),
-        PresentationStart::PassThrough => (mcp_servers, PresentationsState::Available, None),
+        // The gate answers Start or Skip only for a wired conversation.
+        (PresentationStart::Start, None) | (PresentationStart::PassThrough, _) => {
+            (mcp_servers, PresentationsState::Available, None)
+        }
     };
+
+    // The loop's end — awaited, or dropped with the connection future when
+    // the agent dies — refuses whatever is still parked on the board.
+    // Declared after the server guard on purpose: a dropped future drops
+    // its locals in reverse order, so on the death arm the board is refused
+    // before the server's shutdown can end a parked handler unanswered.
+    let board_closer = closing.map(|(board, id)| board.closer(&id));
 
     let new_session = connection
         .send_request(NewSessionRequest::new(cwd).mcp_servers(attached_servers))
@@ -610,8 +660,10 @@ async fn run_conversation(
         }
     }
     // The conversation ended (close via the dropped command channel, or the
-    // agent's death via the connection future): the presentation server's
-    // shutdown signal goes out on every arm, then the graceful stop waits.
+    // agent's death via the connection future): parked views are refused
+    // first, so no handler holds the graceful stop open; then the server's
+    // shutdown signal goes out on every arm, and the graceful stop waits.
+    drop(board_closer);
     if let Some(guard) = server_guard {
         let server = guard.take();
         server.stop().await;
@@ -621,10 +673,13 @@ async fn run_conversation(
 
 /// Dropping the sender ends the conversation loop, which completes the
 /// connection future and shuts the agent process down. Parked permission asks
-/// of the closing conversation are cancelled and recorded.
+/// of the closing conversation are cancelled and recorded; parked views are
+/// refused as ended — which also ends a turn waiting on one, so the loop is
+/// free to see the dropped channel.
 #[tauri::command]
 pub fn acp_close(state: tauri::State<'_, AcpState>, conversation_id: String) -> Result<(), String> {
     state.ask_board.close(&conversation_id);
+    state.present_board.close(&conversation_id);
     state
         .conversations
         .lock()
@@ -654,7 +709,10 @@ pub fn acp_ask_surface(
     {
         return Err(format!("unknown conversation {conversation_id}"));
     }
+    // One claim, both boards: the room that can put an ask to the person is
+    // the room that checks and mounts a presented view.
     state.ask_board.set_surface(&conversation_id, present);
+    state.present_board.set_surface(&conversation_id, present);
     Ok(())
 }
 
@@ -843,6 +901,70 @@ mod tests {
         dir
     }
 
+    /// Claude Code's ACP adapter, pinned: the witnesses run the adapter the
+    /// app's roster names (`@agentclientprotocol/claude-agent-acp`), at a
+    /// version chosen on purpose, not whatever npx resolves that day.
+    const CLAUDE_AGENT_ACP: &str = "@agentclientprotocol/claude-agent-acp@0.84.0";
+
+    fn claude_code_witness_agent() -> AcpAgent {
+        AcpAgent::new(AcpAgentConfig::new("npx").arg("-y").arg(CLAUDE_AGENT_ACP))
+    }
+
+    /// The model the opencode witnesses run. opencode's own default is a
+    /// small free model, which judges the model more than the desktop; the
+    /// witnesses select a capable one the session declares.
+    /// `TEMPER_WITNESS_OPENCODE_MODEL` overrides it.
+    const OPENCODE_WITNESS_MODEL: &str = "ollama-cloud/kimi-k3";
+
+    fn opencode_witness_model() -> String {
+        std::env::var("TEMPER_WITNESS_OPENCODE_MODEL")
+            .unwrap_or_else(|_| OPENCODE_WITNESS_MODEL.to_string())
+    }
+
+    /// Selects `model` through the session's own declared `model` option —
+    /// the same `session/set_config_option` the room sends. A model the
+    /// session does not declare fails the witness by name; it never falls
+    /// back to the harness default.
+    async fn pin_witness_model(
+        commands: &mpsc::UnboundedSender<ConversationCommand>,
+        info: &ConversationReady,
+        model: &str,
+    ) {
+        let options = serde_json::to_value(&info.config_options).unwrap_or_default();
+        let option = options
+            .as_array()
+            .into_iter()
+            .flatten()
+            .find(|o| o["category"] == "model")
+            .unwrap_or_else(|| panic!("the session declares no model option to pin {model} on"));
+        let declared = option["options"].to_string();
+        assert!(
+            declared.contains(&format!("\"{model}\"")),
+            "the session does not declare {model} (is its provider authenticated on this \
+             machine?) — set TEMPER_WITNESS_OPENCODE_MODEL to one it does"
+        );
+        let config_id = option["id"]
+            .as_str()
+            .expect("the option has an id")
+            .to_string();
+        let (reply, set) = oneshot::channel();
+        commands
+            .send(ConversationCommand::SetConfigOption {
+                config_id,
+                // The wire shape the room sends (`setConfigOption` in the
+                // session store): a value id, typed.
+                value: serde_json::from_value(
+                    serde_json::json!({ "type": "value_id", "value": model }),
+                )
+                .expect("a model id is a value id"),
+                reply,
+            })
+            .expect("the conversation is live");
+        set.await
+            .expect("the option answer arrives")
+            .unwrap_or_else(|e| panic!("the session refused {model}: {e}"));
+    }
+
     /// The witness agent runs against a clean user-level config: agents
     /// inherit the operator's personal agent configuration otherwise, and a
     /// witness that inherits it is not reproducible. Auth is unaffected — it
@@ -872,7 +994,12 @@ mod tests {
         Recorded,
         ConversationReady,
     ) {
-        start_test_conversation_with(agent, ask_board, ask_sink, Vec::new(), true).await
+        let wiring = PresentWiring {
+            board: PresentationBoard::default(),
+            conversation_id: "test-conversation".to_string(),
+            sink: Arc::new(|_| {}),
+        };
+        start_test_conversation_with(agent, ask_board, ask_sink, Vec::new(), Some(wiring)).await
     }
 
     async fn start_test_conversation_with_mcp(
@@ -885,7 +1012,7 @@ mod tests {
         Recorded,
         ConversationReady,
     ) {
-        start_test_conversation_with(agent, ask_board, ask_sink, mcp_servers, false).await
+        start_test_conversation_with(agent, ask_board, ask_sink, mcp_servers, None).await
     }
 
     async fn start_test_conversation_with(
@@ -893,7 +1020,7 @@ mod tests {
         ask_board: AskBoard,
         ask_sink: AskSink,
         mcp_servers: Vec<McpServer>,
-        wire_presentations: bool,
+        presentation_wiring: Option<PresentWiring>,
     ) -> (
         mpsc::UnboundedSender<ConversationCommand>,
         Recorded,
@@ -940,7 +1067,7 @@ mod tests {
                     ready_tx,
                     witness_cwd(),
                     mcp_servers,
-                    wire_presentations,
+                    presentation_wiring,
                 )
             });
         tokio::spawn(connection);
@@ -1088,12 +1215,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires opencode on PATH"]
     async fn opencode_accepts_a_prompt_with_the_room_in_view() {
-        let (commands, _recorded, _info) = start_test_conversation(
+        let (commands, _recorded, info) = start_test_conversation(
             opencode_witness_agent(),
             AskBoard::default(),
             silent_ask_sink(),
         )
         .await;
+        pin_witness_model(&commands, &info, &opencode_witness_model()).await;
         let reference = PromptReference {
             uri: "temper:01a0e32f-27e5-7ca3-9327-5812961bdbff".into(),
             name: "Build the desktop shell".into(),
@@ -1119,12 +1247,13 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires opencode on PATH"]
     async fn opencode_answers_a_handoff_prompt_with_a_proposal_fence() {
-        let (commands, recorded, _info) = start_test_conversation(
+        let (commands, recorded, info) = start_test_conversation(
             opencode_witness_agent(),
             AskBoard::default(),
             silent_ask_sink(),
         )
         .await;
+        pin_witness_model(&commands, &info, &opencode_witness_model()).await;
         // The prompt, as the room composes it (src/lib/handoff.ts `handoffPrompt`): the
         // intent, three fenced versions, the instruction bounding the answer.
         let prompt = "I was editing \"Witness scratch\" in temper, but the document changed since \
@@ -1526,6 +1655,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
             silent_ask_sink(),
         )
         .await;
+        pin_witness_model(&commands, &info, &opencode_witness_model()).await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
 
         let first = prompt(&commands, "Reply with exactly: OK").await;
@@ -1572,6 +1702,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
             silent_ask_sink(),
         )
         .await;
+        pin_witness_model(&commands, &info, &opencode_witness_model()).await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
 
         // What the agent declares at session/new is carried out verbatim.
@@ -1636,17 +1767,15 @@ whole. Change nothing outside it, and write nothing else inside it.";
         }
     }
 
-    /// Witness for the second agent: the real npm adapter
-    /// (`@zed-industries/claude-code-acp`; the name `claude-agent-acp` in the
-    /// task body does not exist on npm) answers initialize and one prompt
+    /// Witness for the second agent: the npm adapter
+    /// [`CLAUDE_AGENT_ACP`], pinned, answers initialize and one prompt
     /// through the same conversation path. Requires `claude` auth on this
     /// machine. Run locally: `cargo test -p desktop --lib -- --ignored`
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "requires npx and local claude auth"]
     async fn claude_code_answers_a_prompt() {
         let (commands, recorded, info) = start_test_conversation(
-            AcpAgent::from_str("npx -y @zed-industries/claude-code-acp")
-                .expect("agent command should parse"),
+            claude_code_witness_agent(),
             AskBoard::default(),
             silent_ask_sink(),
         )
@@ -1676,14 +1805,23 @@ whole. Change nothing outside it, and write nothing else inside it.";
         board.set_surface("test-conversation", true);
         let (ask_sink, asks) = recording_ask_sink();
         let resolve_sink = ask_sink.clone();
-        let (commands, _recorded, info) = start_test_conversation(
-            AcpAgent::from_str("npx -y @zed-industries/claude-code-acp")
-                .expect("agent command should parse"),
-            board.clone(),
-            ask_sink,
-        )
-        .await;
+        let (commands, _recorded, info) =
+            start_test_conversation(claude_code_witness_agent(), board.clone(), ask_sink).await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
+
+        // The adapter opens sessions in its `auto` mode, where Claude decides
+        // permissions itself and no ask is sent. The witness is of the ask,
+        // so it selects the adapter's own declared mode that always asks.
+        let (reply, set) = oneshot::channel();
+        commands
+            .send(ConversationCommand::SetMode {
+                mode_id: "default".to_string(),
+                reply,
+            })
+            .expect("the conversation is live");
+        set.await
+            .expect("the mode answer arrives")
+            .expect("the adapter declares an always-ask mode named `default`");
 
         let path = witness_cwd().join("acp-ask-witness.txt");
         let _ = std::fs::remove_file(&path);
@@ -1795,7 +1933,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
         let agent = AcpAgent::new(
             AcpAgentConfig::new("npx")
                 .arg("-y")
-                .arg("@zed-industries/claude-code-acp")
+                .arg(CLAUDE_AGENT_ACP)
                 .env("CLAUDE_CONFIG_DIR", config_dir.to_string_lossy().as_ref()),
         );
         let board = AskBoard::default();
@@ -1895,128 +2033,260 @@ whole. Change nothing outside it, and write nothing else inside it.";
 
     use crate::present_probe::ProbeServer;
 
-    /// Witness for chunk 2's gate, against a live agent: opencode declares
-    /// MCP HTTP support (`mcpCapabilities.http` — probed in chunk 0's
-    /// fidelity runs), so the desktop starts its own presentation server,
-    /// `session/new` carries it, and the model — able to see the tool —
-    /// calls it; the turn ends with the stubbed refused answer, which the
-    /// tool call's completed content carries. The conversation's info says
-    /// `available`.
-    /// Run locally: `cargo test -p desktop --lib -- --ignored
-    /// opencode_presents_a_view_and_learns_rendered`
-    #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires opencode on PATH"]
-    async fn opencode_presents_a_view_and_learns_rendered() {
-        // The gate's facts, asserted before anything else: the wiring is on,
-        // the agent said http — the start arm is what runs.
-        let mut http = AgentCapabilities::default();
-        http.mcp_capabilities = McpCapabilities::default().http(true);
-        assert_eq!(
-            wants_presentation_server(true, &http),
-            PresentationStart::Start
-        );
-
-        let agent = opencode_witness_agent().with_debug(|line, direction| {
-            eprintln!("opencode {:?}: {}", direction, line);
-        });
-
-        let (commands, recorded, info) =
-            start_test_conversation(agent, AskBoard::default(), silent_ask_sink()).await;
-        assert!(
-            !info.session_id.is_empty(),
-            "opencode should create a session"
-        );
-        assert_eq!(
-            info.presentations,
-            PresentationsState::Available,
-            "the conversation's info names the surface available, not silent"
-        );
-
-        // A clearly conforming spec, named from the tool's own schema: a
-        // bounded list of two resource references, composed from the catalog.
-        // The prompt forbids detours — the witness judges the presentation
-        // path, and a bash/grep detour is a failed turn, not evidence.
-        let stop = tokio::time::timeout(
-            Duration::from_secs(120),
-            prompt(
-                &commands,
-                "Your next action, before anything else: call the temper_present_view tool \
-                 once, with a spec showing a bounded list of two resource references, \
-                 composed strictly from the tool's inputSchema. Do not run bash, read files, \
-                 or call any other tool. After the tool answers, state its reply in one line.",
-            ),
-        )
-        .await
-        .expect("the presentation turn should end within 120s");
-        assert_eq!(
-            stop, "end_turn",
-            "the turn ends with the tool's stubbed answer — it does not wait on anyone"
-        );
-
-        // The tool call reached completion and its content carries the
-        // stub's refused end — deterministically asserted; the spec's exact
-        // shape is the model's, judged already by the fidelity probe.
-        let completed: Vec<(String, ToolCallUpdateFields)> = recorded
-            .lock()
-            .unwrap()
-            .iter()
-            .filter_map(|event| match &event.update {
-                SessionUpdate::ToolCall(call) => Some((
+    /// The completed tool calls' json results, in the order they completed. A
+    /// harness may carry a result in `content`, `raw_output`, or both —
+    /// either is read. A completion carrying no json (a harness's own
+    /// tool-loading step, say) is not a presentation answer and is skipped;
+    /// the caller's comparison with the board's record catches a missing one.
+    fn completed_tool_results(recorded: &Recorded) -> Vec<serde_json::Value> {
+        let mut latest: Vec<(String, ToolCallUpdateFields)> = Vec::new();
+        for event in recorded.lock().unwrap().iter() {
+            let (id, fields) = match &event.update {
+                SessionUpdate::ToolCall(call) => (
                     call.tool_call_id.to_string(),
                     ToolCallUpdateFields::new()
                         .status(call.status)
                         .content(call.content.clone())
                         .raw_output(call.raw_output.clone()),
-                )),
+                ),
                 SessionUpdate::ToolCallUpdate(update) => {
-                    Some((update.tool_call_id.to_string(), update.fields.clone()))
+                    (update.tool_call_id.to_string(), update.fields.clone())
                 }
+                _ => continue,
+            };
+            if fields.status == Some(ToolCallStatus::Completed)
+                && !latest.iter().any(|(seen, _)| *seen == id)
+            {
+                latest.push((id, fields));
+            }
+        }
+        latest
+            .into_iter()
+            .filter_map(|(_, fields)| {
+                let said = fields
+                    .content
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|c| match c {
+                        ToolCallContent::Content(content) => match &content.content {
+                            ContentBlock::Text(text) => Some(text.text.clone()),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let raw_output = fields
+                    .raw_output
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                serde_json::from_str(&said)
+                    .or_else(|_| serde_json::from_str(&raw_output))
+                    .ok()
+            })
+            .collect()
+    }
+
+    /// Runs the webview's own gate, `checkSpec`, on a spec — through bun,
+    /// headless (`scripts/check-spec.ts`), so the witness answers with the
+    /// desktop's check, never a restatement of it.
+    async fn check_spec_as_the_webview_does(spec: &serde_json::Value) -> (bool, Vec<String>) {
+        use tokio::io::AsyncWriteExt;
+        let desktop = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut child = tokio::process::Command::new("bun")
+            .arg("scripts/check-spec.ts")
+            .current_dir(&desktop)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("bun runs the webview's checkSpec");
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        stdin
+            .write_all(spec.to_string().as_bytes())
+            .await
+            .expect("the spec reaches checkSpec");
+        drop(stdin);
+        let out = child.wait_with_output().await.expect("checkSpec answers");
+        let result: serde_json::Value =
+            serde_json::from_slice(&out.stdout).expect("checkSpec's answer is json");
+        let reasons = result["errors"]
+            .as_array()
+            .map(|e| {
+                e.iter()
+                    .filter_map(|r| r.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        (result["ok"] == true, reasons)
+    }
+
+    /// Witness for the presentation round trip, against a live agent: opencode
+    /// declares MCP HTTP support, so the desktop's server rides its
+    /// `session/new`; the model presents one conforming view and one carrying
+    /// a colour prop. The webview's place is taken by an answerer running the
+    /// webview's own `checkSpec` and answering through `present_answer`'s
+    /// logic. The two specs are given literally: composing from the schema
+    /// is the fidelity probe's judgment; this witness judges the round trip.
+    /// A model may still retry from a refusal's reasons, so the witness
+    /// asserts what the channel owes rather than a fixed count: the answers
+    /// the agent was told are exactly the board's resolutions, in order; the
+    /// conforming view renders; the colour prop is refused naming the catalog
+    /// version and the prop; and the turn ends — nothing waits on a person.
+    /// Run locally: `cargo test --lib -- --ignored
+    /// opencode_presents_a_rendered_and_a_refused_view`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires opencode and bun on PATH"]
+    async fn opencode_presents_a_rendered_and_a_refused_view() {
+        let model = opencode_witness_model();
+        presents_a_rendered_and_a_refused_view(opencode_witness_agent(), Some(&model)).await;
+    }
+
+    /// The same round trip through Claude Code's ACP adapter, pinned. Claude
+    /// Code speaks MCP 2026-07-28, which refuses a tools/list result lacking
+    /// `ttlMs`/`cacheScope` — this is the witness that the server's list
+    /// answer is one a current client accepts, not only a lenient one.
+    /// Run locally: `cargo test --lib -- --ignored
+    /// claude_code_presents_a_rendered_and_a_refused_view`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires npx, bun, and local claude auth"]
+    async fn claude_code_presents_a_rendered_and_a_refused_view() {
+        presents_a_rendered_and_a_refused_view(claude_code_witness_agent(), None).await;
+    }
+
+    /// `model`, when given, is pinned through the session's declared model
+    /// option before the prompt; `None` runs the harness's own selection.
+    async fn presents_a_rendered_and_a_refused_view(agent: AcpAgent, model: Option<&str>) {
+        use crate::present_board::{PresentNotice, PresentOutcome};
+
+        let board = PresentationBoard::default();
+        board.set_surface("test-conversation", true);
+        let notices: Arc<Mutex<Vec<PresentNotice>>> = Arc::default();
+        let runtime = tokio::runtime::Handle::current();
+        let sink: crate::present_board::PresentSink = {
+            let board = board.clone();
+            let notices = notices.clone();
+            Arc::new(move |notice| {
+                notices.lock().unwrap().push(notice.clone());
+                // The witness's own record of what the model composed — a
+                // failed run names the spec, not only the reasons.
+                eprintln!(
+                    "present notice: {}",
+                    serde_json::to_string(&notice).unwrap_or_default()
+                );
+                if let PresentNotice::Presented {
+                    conversation_id,
+                    presented_id,
+                    spec,
+                    ..
+                } = notice
+                {
+                    let board = board.clone();
+                    runtime.spawn(async move {
+                        let (rendered, reasons) = check_spec_as_the_webview_does(&spec).await;
+                        let _ = crate::presentation::answer(
+                            &board,
+                            &conversation_id,
+                            &presented_id,
+                            rendered,
+                            reasons,
+                            |_| async { Ok(()) },
+                        )
+                        .await;
+                    });
+                }
+            })
+        };
+        let wiring = PresentWiring {
+            board: board.clone(),
+            conversation_id: "test-conversation".to_string(),
+            sink,
+        };
+
+        let (commands, recorded, info) = start_test_conversation_with(
+            agent,
+            AskBoard::default(),
+            silent_ask_sink(),
+            Vec::new(),
+            Some(wiring),
+        )
+        .await;
+        assert_eq!(info.presentations, PresentationsState::Available);
+        if let Some(model) = model {
+            pin_witness_model(&commands, &info, model).await;
+        }
+
+        // The prompt forbids detours — the witness judges the presentation
+        // path, and a bash/grep detour is a failed turn, not evidence.
+        let stop = tokio::time::timeout(
+            Duration::from_secs(180),
+            prompt(
+                &commands,
+                "Call the temper_present_view tool exactly twice, passing each spec below \
+                 verbatim as the `spec` argument, in this order, even if a call is refused — do \
+                 not alter, fix, or retry either one.\n\
+                 First spec: {\"root\":\"r\",\"elements\":{\"r\":{\"type\":\"RegionState\",\
+                 \"props\":{\"state\":\"failed\",\"label\":\"history\"},\"children\":[]}}}\n\
+                 Second spec: {\"root\":\"r\",\"elements\":{\"r\":{\"type\":\"RegionState\",\
+                 \"props\":{\"state\":\"failed\",\"label\":\"history\",\"colour\":\"red\"},\
+                 \"children\":[]}}}\n\
+                 Do not run bash, read files, or call any other tool — except to load \
+                 temper_present_view first, if your harness defers it. After both answers, \
+                 state each tool reply in one line.",
+            ),
+        )
+        .await
+        .expect("the presentation turn should end within 180s");
+        assert_eq!(
+            stop, "end_turn",
+            "the turn ends; it never waits on a person"
+        );
+
+        // The board's record, in order.
+        let resolved: Vec<PresentOutcome> = notices
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|n| match n {
+                PresentNotice::Resolved { outcome, .. } => Some(outcome.clone()),
                 _ => None,
             })
             .collect();
-        let (call_id, fields) = completed
-            .iter()
-            .find(|(_, f)| f.status == Some(ToolCallStatus::Completed))
-            .expect("the presented tool call should complete");
-        let said = fields
-            .content
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|c| match c {
-                ToolCallContent::Content(content) => match &content.content {
-                    ContentBlock::Text(text) => Some(text.text.clone()),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let raw_output = fields
-            .raw_output
-            .as_ref()
-            .map(|v| v.to_string())
-            .unwrap_or_default();
-        let result: serde_json::Value = serde_json::from_str(&said)
-            .or_else(|_| serde_json::from_str(&raw_output))
-            .unwrap_or_else(|_| {
-                panic!(
-                    "the completed tool call's content or raw_output is the stub's result \
-                     json — got content {said:?} and raw_output {raw_output:?}"
-                )
-            });
-        assert_eq!(
-            result["ok"], "refused",
-            "the stub answers refused until the board exists (chunk 3)"
-        );
         assert!(
-            result["reasons"]
-                .as_array()
-                .map(|r| !r.is_empty())
-                .unwrap_or(false),
-            "the refusal names its reason, never a silent hang"
+            resolved.contains(&PresentOutcome::Rendered),
+            "a conforming view renders: {resolved:?}"
         );
-        let _ = (call_id, recorded);
+        for outcome in &resolved {
+            if let PresentOutcome::Refused {
+                catalog_version,
+                reasons,
+            } = outcome
+            {
+                assert_eq!(*catalog_version, crate::present_server::catalog_version());
+                assert!(!reasons.is_empty(), "a refusal names its reasons");
+            }
+        }
+        assert!(
+            resolved.iter().any(|o| matches!(
+                o,
+                PresentOutcome::Refused { reasons, .. }
+                    if reasons.iter().any(|r| r.contains("colour"))
+            )),
+            "the colour prop is refused by checkSpec, named: {resolved:?}"
+        );
+
+        // What the agent was told is exactly what the board resolved, in the
+        // same order — the channel neither drops, doubles, nor rewords an end.
+        let told: Vec<serde_json::Value> = completed_tool_results(&recorded)
+            .into_iter()
+            .filter(|r| r.get("ok").is_some())
+            .collect();
+        let resolved_json: Vec<serde_json::Value> = resolved
+            .iter()
+            .map(|o| serde_json::to_value(o).expect("an outcome serializes"))
+            .collect();
+        assert_eq!(told, resolved_json, "the agent was told the board's ends");
     }
 
     /// The launch spec for each harness the fidelity probe exercises, with
@@ -2107,6 +2377,9 @@ whole. Change nothing outside it, and write nothing else inside it.";
             let (ask_sink, _ask_recorded) = auto_allow_ask_sink(&board, "test-conversation");
             let (commands, recorded, info) =
                 start_test_conversation_with_mcp(agent, board, ask_sink, vec![server]).await;
+            if *spec == "opencode-witness" {
+                pin_witness_model(&commands, &info, &opencode_witness_model()).await;
+            }
             assert!(!info.session_id.is_empty(), "{name}: session created");
 
             let stop = tokio::time::timeout(
