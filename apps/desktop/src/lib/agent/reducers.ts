@@ -175,10 +175,11 @@ export type PresentedNotice = {
 	spec: unknown;
 };
 /** How a presentation ended — the same closed object the agent's tool result carries. `rendered`
- *  means checked and mounted, never that the person has seen it; a refusal names the catalog
- *  version and every reason. */
+ *  means checked and mounted, never that the person has seen it, and `tab` is where its record
+ *  lives (the owning resource and the artifact id); a refusal names the catalog version and every
+ *  reason. */
 export type PresentOutcome =
-	| { ok: 'rendered' }
+	| { ok: 'rendered'; tab: { resource: string; artifact: string } }
 	| { ok: 'refused'; catalogVersion: string; reasons: string[] };
 export type PresentResolvedNotice = {
 	kind: 'resolved';

@@ -195,7 +195,17 @@ describe('applyPresentNotice', () => {
 		const messages: ChatMessage[] = [];
 		const pending: PresentedNotice[] = [];
 		applyPresentNotice(messages, pending, presented('p0'));
-		applyPresentNotice(messages, pending, resolved('p0', { ok: 'rendered' }));
+		applyPresentNotice(
+			messages,
+			pending,
+			resolved('p0', {
+				ok: 'rendered',
+				tab: {
+					resource: '00000000-0000-0000-0000-00000000000a',
+					artifact: '00000000-0000-0000-0000-00000000000b'
+				}
+			})
+		);
 		expect(pending).toEqual([]);
 		expect(messages).toEqual([{ role: 'system', text: 'presented a view — checked and rendered' }]);
 	});

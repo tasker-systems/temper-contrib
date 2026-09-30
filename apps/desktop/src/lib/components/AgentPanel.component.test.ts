@@ -214,7 +214,13 @@ describe('the agent panel', () => {
 				kind: 'resolved',
 				conversationId: 'c1',
 				presentedId: 'presented-0',
-				outcome: { ok: 'rendered' }
+				outcome: {
+					ok: 'rendered',
+					tab: {
+						resource: '00000000-0000-0000-0000-00000000000a',
+						artifact: '00000000-0000-0000-0000-00000000000b'
+					}
+				}
 			}
 		});
 		await vi.waitFor(() =>
