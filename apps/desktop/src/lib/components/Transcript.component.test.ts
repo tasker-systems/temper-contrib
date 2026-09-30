@@ -1,5 +1,5 @@
 import { render, waitFor } from '@testing-library/svelte';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import Transcript, { type ChatMessage } from './Transcript.svelte';
 
 /**
@@ -48,5 +48,31 @@ describe('Transcript', () => {
 	it('says who is responding while a prompt is in flight', () => {
 		const { getByRole } = render(Transcript, { props: { messages: [], pending: 'opencode' } });
 		expect(getByRole('status').textContent).toContain('opencode is responding');
+	});
+
+	it('a rendered presentation line opens its tab through the one door', () => {
+		const onTab = vi.fn();
+		const seen: ChatMessage[] = [
+			{
+				role: 'system',
+				text: 'presented a view — checked and rendered',
+				tab: { resource: 'r-uuid', artifact: 'a-uuid' }
+			},
+			...messages
+		];
+		const { getByRole } = render(Transcript, { props: { messages: seen, onTab } });
+		getByRole('button', { name: 'presented a view — checked and rendered' }).click();
+		expect(onTab).toHaveBeenCalledExactlyOnceWith({ resource: 'r-uuid', artifact: 'a-uuid' });
+	});
+
+	it('a refused presentation line is words, never a tab link', () => {
+		const onTab = vi.fn();
+		const seen: ChatMessage[] = [
+			{ role: 'system', text: 'presented a view — refused by temper@1: the spec failed' },
+			...messages
+		];
+		const { container } = render(Transcript, { props: { messages: seen, onTab } });
+		expect(container.querySelector('.tab-link')).toBeNull();
+		expect(onTab).not.toHaveBeenCalled();
 	});
 });

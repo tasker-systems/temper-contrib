@@ -14,6 +14,7 @@
 	import { invoke } from '@tauri-apps/api/core';
 	import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 	import { agentSession } from '$lib/agent/session.svelte';
+	import type { ChatMessage } from '$lib/agent/reducers';
 	import AgentPanel from '$lib/components/AgentPanel.svelte';
 	import TemperProfile from '$lib/components/TemperProfile.svelte';
 	import CommandPalette from './CommandPalette.svelte';
@@ -23,6 +24,7 @@
 	import RoomStrip from './RoomStrip.svelte';
 	import TabHost from './TabHost.svelte';
 	import TabStrip from './TabStrip.svelte';
+	import { subjectFromAddress } from './subjects';
 	import { stepTitle, tabs } from './tabs.svelte';
 	import WaysIn from './WaysIn.svelte';
 

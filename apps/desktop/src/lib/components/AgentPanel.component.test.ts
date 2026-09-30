@@ -229,6 +229,82 @@ describe('the agent panel', () => {
 		expect(document.querySelector('section[aria-label="View presented"]')).toBeNull();
 	});
 
+	it('a rendered resolution opens its tab in the strip, unfocused, and its line opens it', async () => {
+		const { tabs } = await import('$lib/shell/tabs.svelte');
+		const activeBefore = tabs.activeId;
+		render(AgentPanel);
+		await startConversation();
+		await vi.waitFor(() => expect(handlers['acp-present']).toBeDefined());
+
+		const conforming = {
+			root: 'r',
+			elements: {
+				r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
+			}
+		};
+		handlers['acp-present']({
+			payload: {
+				kind: 'presented',
+				conversationId: 'c1',
+				presentedId: 'presented-0',
+				agent: 'opencode',
+				spec: conforming
+			}
+		});
+		await vi.waitFor(() =>
+			expect(
+				calls.some((c) => c.cmd === 'present_answer' && c.args?.presentedId === 'presented-0')
+			).toBe(true)
+		);
+		handlers['acp-present']({
+			payload: {
+				kind: 'resolved',
+				conversationId: 'c1',
+				presentedId: 'presented-0',
+				outcome: {
+					ok: 'rendered',
+					tab: {
+						resource: '01a0f000-0000-7000-8000-00000000000a',
+						artifact: '01a0f000-0000-7000-8000-00000000000b'
+					}
+				}
+			}
+		});
+
+		// The tab is in the strip and the active tab is unchanged — the open is a background one.
+		await vi.waitFor(() => {
+			const subject = {
+				kind: 'presentation',
+				resource: '01a0f000-0000-7000-8000-00000000000a',
+				artifact: '01a0f000-0000-7000-8000-00000000000b'
+			} as const;
+			const showing = tabs.tabs.some(
+				(t) => JSON.stringify(t.steps[t.cursor].subject) === JSON.stringify(subject)
+			);
+			expect(showing).toBe(true);
+		});
+		expect(tabs.activeId).toBe(activeBefore);
+
+		// The transcript line carries the tab; clicking it focuses the presented view's tab.
+		const link = await vi.waitFor(() => {
+			const b = [...document.querySelectorAll('.tab-link')].find((b) =>
+				b.textContent?.includes('presented a view')
+			);
+			expect(b).toBeDefined();
+			return b as HTMLButtonElement;
+		});
+		await fireEvent.click(link);
+		await vi.waitFor(() => {
+			expect(tabs.activeId).not.toBe(activeBefore);
+			const step = tabs.current(tabs.active);
+			expect(step.subject).toMatchObject({
+				kind: 'presentation',
+				resource: '01a0f000-0000-7000-8000-00000000000a'
+			});
+			expect(step.lens).toBe('core/presentation');
+		});
+	});
+
 	it('answers a non-conforming view refused with checkSpec’s reasons', async () => {
 		render(AgentPanel);
 		await startConversation();

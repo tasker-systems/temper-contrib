@@ -25,6 +25,15 @@
 	function categoryLabel(category: string | null): string {
 		return category ?? 'option';
 	}
+
+	/** A rendered presentation's transcript line opens its recorded view: the subject seen through
+	 *  the presented-view lens, focused when a tab already shows it, opened unfocused otherwise. */
+	function openPresentedTab(tab: { resource: string; artifact: string }): void {
+		tabs.focusOrOpen(
+			{ kind: 'presentation', resource: tab.resource, artifact: tab.artifact },
+			'core/presentation'
+		);
+	}
 </script>
 
 	<aside class="panel" class:expanded={session.expanded} aria-label="Agent">
@@ -131,7 +140,11 @@
 				{/if}
 			{/each}
 		</div>
-		<Transcript messages={session.messages} pending={session.prompting ? session.agentLabel() : null} />
+		<Transcript
+			messages={session.messages}
+			pending={session.prompting ? session.agentLabel() : null}
+			onTab={openPresentedTab}
+		/>
 		{#each session.asks as ask (ask.askId)}
 			<section
 				class="ask"

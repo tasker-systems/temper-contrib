@@ -75,6 +75,13 @@ export const core: Contribution = {
 			build: { state: 'built', component: () => import('../lenses/SetupLens.svelte') }
 		},
 		{
+			id: 'core/presentation',
+			name: 'presented view',
+			plugin: 'core',
+			accepts: { kinds: ['presentation'] },
+			build: { state: 'built', component: () => import('../lenses/PresentedLens.svelte') }
+		},
+		{
 			id: 'core/table',
 			name: 'table',
 			plugin: 'core',

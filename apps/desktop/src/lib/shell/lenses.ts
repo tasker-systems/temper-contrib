@@ -114,6 +114,8 @@ function defaultLensId(subject: Subject): string {
 			return 'core/table';
 		case 'neighbourhood':
 			return 'core/graph';
+		case 'presentation':
+			return 'core/presentation';
 		case 'place':
 			return `core/${subject.place}`;
 	}

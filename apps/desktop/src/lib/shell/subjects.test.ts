@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { roomHref as resourceHref } from '$lib/document';
-import { contextHref, subjectFromAddress, subjectKey } from './subjects';
+import {
+	contextHref,
+	parseSubject,
+	subjectFromAddress,
+	subjectKey,
+	subjectWords
+} from './subjects';
 
 const ID = '01a0e020-a6d7-7420-b924-68f5e89f354b';
 const at = (href: string) => {
@@ -43,5 +49,28 @@ describe('reading an address back into a subject', () => {
 		const a = at(resourceHref(ID));
 		const b = at(resourceHref(`some-slug-${ID}`));
 		expect(a && b && subjectKey(a) === subjectKey(b)).toBe(true);
+	});
+});
+
+describe('the presentation subject', () => {
+	const record = { resource: ID, artifact: '01a0f100-0000-7000-8000-000000000001' };
+	const subject = { kind: 'presentation', ...record } as const;
+
+	it('is what its words call it — never a guessed title', () => {
+		expect(subjectWords(subject)).toBe('presented view');
+	});
+
+	it('keys on the pair, and only the pair', () => {
+		expect(subjectKey(subject)).toBe(`presentation:${record.resource}:${record.artifact}`);
+		const other = { ...subject, artifact: '01a0f100-0000-7000-8000-000000000002' };
+		expect(subjectKey(other)).not.toBe(subjectKey(subject));
+	});
+
+	it('round-trips through the store, and refuses a stray or missing field', () => {
+		const restored = parseSubject(JSON.parse(JSON.stringify(subject)));
+		expect(restored).toEqual(subject);
+		expect(parseSubject({ kind: 'presentation', resource: record.resource })).toBeNull();
+		expect(parseSubject({ kind: 'presentation', artifact: record.artifact })).toBeNull();
+		expect(parseSubject({ kind: 'presentation' })).toBeNull();
 	});
 });
