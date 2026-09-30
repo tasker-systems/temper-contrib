@@ -15,6 +15,7 @@ mod present_server;
 mod presentation;
 mod roster;
 mod settings;
+mod spec_check;
 mod temper;
 mod window;
 mod work;
@@ -95,7 +96,8 @@ pub fn run() {
             acp::acp_close,
             acp::acp_ask_surface,
             acp::acp_answer_permission,
-            presentation::present_answer
+            presentation::present_answer,
+            presentation::present_read
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

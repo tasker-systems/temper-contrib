@@ -11,6 +11,7 @@ import { z } from 'zod';
 import source from './temper.catalog.json';
 
 type Source = {
+	limits: { maxElements: number; maxDepth: number; maxNameLength: number };
 	components: Record<
 		string,
 		{ description: string; slots: string[]; example?: unknown; props: Record<string, unknown> }
@@ -38,10 +39,15 @@ export const CATALOG_VERSION = `temper@${(source as { version: string }).version
 
 export type SpecCheck = { ok: true; spec: Spec } | { ok: false; errors: string[] };
 
-/** The most elements, and the deepest nesting, a temper@1 view may carry. A view is a bounded
- *  glance, not a document: a spec past either bound is refused, never rendered slowly. */
-export const MAX_ELEMENTS = 256;
-export const MAX_DEPTH = 8;
+/** The most elements, the deepest nesting, and the longest element name a temper@1 view may
+ *  carry — read from the catalog file, which the core's own check reads too. A view is a bounded
+ *  glance, not a document: a spec past any bound is refused, never rendered slowly. */
+export const MAX_ELEMENTS = (source as Source).limits.maxElements;
+export const MAX_DEPTH = (source as Source).limits.maxDepth;
+export const MAX_NAME_LENGTH = (source as Source).limits.maxNameLength;
+
+/** A name's length as JSON Schema's `maxLength` counts it: in code points, not UTF-16 units. */
+const nameLength = (name: string): number => [...name].length;
 
 const SPEC_KEYS = new Set(['root', 'elements']);
 const ELEMENT_KEYS = new Set(['type', 'props', 'children']);
@@ -70,6 +76,11 @@ function shapeErrors(spec: unknown): string[] {
 	const keys = Object.keys(elements);
 	if (keys.length > MAX_ELEMENTS)
 		return [...errors, `elements: ${keys.length} elements, more than ${MAX_ELEMENTS}`];
+	// A name past the bound is not echoed back: the refusal would carry it whole.
+	if (keys.some((key) => nameLength(key) > MAX_NAME_LENGTH))
+		errors.push(`elements: a name longer than ${MAX_NAME_LENGTH} characters`);
+	if (typeof spec.root === 'string' && nameLength(spec.root) > MAX_NAME_LENGTH)
+		errors.push(`root: longer than ${MAX_NAME_LENGTH} characters`);
 	for (const key of keys) {
 		if (RESERVED_KEYS.has(key)) errors.push(`elements/${key}: a reserved name`);
 		const el = elements[key];

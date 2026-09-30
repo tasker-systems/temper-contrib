@@ -9,6 +9,17 @@
 //! the only place a resolution is emitted. Every other path — the answer, a
 //! released surface, a closed conversation, the bound — only delivers an
 //! outcome to it.
+//!
+//! A rendered answer is recorded before it resolves, and the record is a
+//! durable write: so an answer first marks its entry committing
+//! ([`PresentationBoard::begin_commit`]). A close, a released surface and
+//! the bound refuse only what is still parked; a committing entry is the
+//! answer's to resolve, and its [`Committing`] guard resolves it exactly
+//! once even if the answer is dropped. So at the board a record is never
+//! reported refused: no close, release or bound can refuse a view whose
+//! record is landing. Two ends lie beyond the board — a commit abandoned at
+//! its own bound after its request reached temper, and an agent that stops
+//! listening mid-commit, whose view is recorded while it is told nothing.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -30,12 +41,15 @@ pub const MAX_PARKED: usize = 8;
 
 /// How a presentation ended, as the agent's tool result and the webview's
 /// resolution notice both carry it. `rendered` means checked and mounted as
-/// its own tab — never that the person has seen it. A refusal always names
-/// the catalog version.
+/// its own tab — never that the person has seen it; `tab` is where its
+/// record lives, the tab's rebuildable subject. A refusal always names the
+/// catalog version.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "ok", rename_all = "camelCase")]
 pub enum PresentOutcome {
-    Rendered,
+    Rendered {
+        tab: PresentedTab,
+    },
     #[serde(rename_all = "camelCase")]
     Refused {
         catalog_version: String,
@@ -51,6 +65,14 @@ impl PresentOutcome {
             reasons,
         }
     }
+}
+
+/// Where a rendered view's record lives: the resource that owns it and the
+/// artifact's id, both bare UUIDs.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct PresentedTab {
+    pub resource: String,
+    pub artifact: String,
 }
 
 /// What the webview is told about a presentation: the spec to check, then
@@ -91,6 +113,8 @@ struct Parked {
     conversation_id: String,
     presentation: Presentation,
     sender: oneshot::Sender<PresentOutcome>,
+    /// An answer is recording it: only that answer's guard may resolve it.
+    committing: bool,
 }
 
 #[derive(Default)]
@@ -140,7 +164,7 @@ impl PresentationBoard {
             let mut pending = self.inner.pending.lock().unwrap();
             let ids: Vec<String> = pending
                 .iter()
-                .filter(|(_, p)| p.conversation_id == conversation_id)
+                .filter(|(_, p)| p.conversation_id == conversation_id && !p.committing)
                 .map(|(id, _)| id.clone())
                 .collect();
             ids.iter().filter_map(|id| pending.remove(id)).collect()
@@ -199,6 +223,7 @@ impl PresentationBoard {
                         conversation_id: conversation_id.to_string(),
                         presentation,
                         sender: tx,
+                        committing: false,
                     },
                 );
                 Ok(rx)
@@ -214,10 +239,18 @@ impl PresentationBoard {
                 Ok(Ok(outcome)) => outcome,
                 Ok(Err(_)) => PresentOutcome::refused(vec!["conversation ended".to_string()]),
                 Err(_) => {
-                    // Out of time. Withdraw the entry; if it is already gone,
-                    // an answer or a close took it and its outcome is in flight
-                    // on the channel — that outcome wins, not the bound.
-                    let withdrawn = self.inner.pending.lock().unwrap().remove(&presented_id);
+                    // Out of time. Withdraw the entry only while it is still
+                    // parked. Gone, an answer or a close took it and its
+                    // outcome is in flight on the channel; committing, an
+                    // answer is recording it and its guard will resolve it —
+                    // either way that outcome wins, not the bound.
+                    let withdrawn = {
+                        let mut pending = self.inner.pending.lock().unwrap();
+                        match pending.get(&presented_id) {
+                            Some(p) if !p.committing => pending.remove(&presented_id),
+                            _ => None,
+                        }
+                    };
                     match withdrawn {
                         Some(_) => {
                             PresentOutcome::refused(vec!["the desktop did not answer".to_string()])
@@ -237,29 +270,43 @@ impl PresentationBoard {
         outcome
     }
 
-    /// The parked presentation's facts, for the answer's commit — read, not
-    /// taken: it stays parked, and so answerable by a close or the bound,
-    /// while the commit runs.
-    pub fn presentation(
+    /// Marks a parked presentation committing and hands its facts to the
+    /// answer that will record it. From here a close, a released surface and
+    /// the bound leave it alone; the returned guard is the only thing that
+    /// resolves it. An entry already ended, or already committing under
+    /// another answer, is an error the caller relays.
+    pub fn begin_commit(
         &self,
         conversation_id: &str,
         presented_id: &str,
-    ) -> Result<Presentation, String> {
-        let pending = self.inner.pending.lock().unwrap();
+    ) -> Result<Committing, String> {
+        let mut pending = self.inner.pending.lock().unwrap();
         let parked = pending
-            .get(presented_id)
+            .get_mut(presented_id)
             .ok_or_else(|| format!("unknown presentation {presented_id}"))?;
         if parked.conversation_id != conversation_id {
             return Err(format!(
                 "presentation {presented_id} does not belong to {conversation_id}"
             ));
         }
-        Ok(parked.presentation.clone())
+        if parked.committing {
+            return Err(format!(
+                "presentation {presented_id} is already being recorded"
+            ));
+        }
+        parked.committing = true;
+        Ok(Committing {
+            board: self.clone(),
+            presented_id: presented_id.to_string(),
+            presentation: parked.presentation.clone(),
+            finished: false,
+        })
     }
 
     /// Delivers the webview's outcome to the parked presentation it names.
     /// An entry already ended (closed, timed out) is an error the caller
-    /// relays; its resolution was already emitted.
+    /// relays; its resolution was already emitted. A committing entry is its
+    /// answer's to resolve, never another's.
     pub fn resolve(
         &self,
         conversation_id: &str,
@@ -267,17 +314,32 @@ impl PresentationBoard {
         outcome: PresentOutcome,
     ) -> Result<(), String> {
         let mut pending = self.inner.pending.lock().unwrap();
-        let parked = pending
-            .remove(presented_id)
-            .ok_or_else(|| format!("unknown presentation {presented_id}"))?;
-        if parked.conversation_id != conversation_id {
-            pending.insert(presented_id.to_string(), parked);
-            return Err(format!(
-                "presentation {presented_id} does not belong to {conversation_id}"
-            ));
+        match pending.get(presented_id) {
+            None => return Err(format!("unknown presentation {presented_id}")),
+            Some(p) if p.conversation_id != conversation_id => {
+                return Err(format!(
+                    "presentation {presented_id} does not belong to {conversation_id}"
+                ))
+            }
+            Some(p) if p.committing => {
+                return Err(format!(
+                    "presentation {presented_id} is already being recorded"
+                ))
+            }
+            Some(_) => {}
         }
-        let _ = parked.sender.send(outcome);
+        if let Some(parked) = pending.remove(presented_id) {
+            let _ = parked.sender.send(outcome);
+        }
         Ok(())
+    }
+
+    /// Takes a committing entry and delivers its outcome — the guard's door.
+    fn deliver(&self, presented_id: &str, outcome: PresentOutcome) {
+        let parked = self.inner.pending.lock().unwrap().remove(presented_id);
+        if let Some(parked) = parked {
+            let _ = parked.sender.send(outcome);
+        }
     }
 
     /// A guard that closes the conversation's presenting when dropped — so
@@ -288,6 +350,43 @@ impl PresentationBoard {
         BoardCloser {
             board: self.clone(),
             conversation_id: conversation_id.to_string(),
+        }
+    }
+}
+
+/// An answer's hold on a committing presentation. [`Committing::finish`]
+/// delivers the answer's outcome; dropped unfinished — the answer cancelled
+/// or panicked mid-record — it delivers a refusal, so the parked call never
+/// waits on a record nobody is making.
+pub struct Committing {
+    board: PresentationBoard,
+    presented_id: String,
+    presentation: Presentation,
+    finished: bool,
+}
+
+impl Committing {
+    /// The facts the board holds — the agent's own spec, never a copy the
+    /// webview handed back.
+    pub fn presentation(&self) -> &Presentation {
+        &self.presentation
+    }
+
+    pub fn finish(mut self, outcome: PresentOutcome) {
+        self.finished = true;
+        self.board.deliver(&self.presented_id, outcome);
+    }
+}
+
+impl Drop for Committing {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.board.deliver(
+                &self.presented_id,
+                PresentOutcome::refused(vec![
+                    "the view's temper record was abandoned before it finished".to_string(),
+                ]),
+            );
         }
     }
 }
@@ -323,6 +422,30 @@ mod tests {
         }
     }
 
+    fn rendered() -> PresentOutcome {
+        PresentOutcome::Rendered {
+            tab: PresentedTab {
+                resource: "00000000-0000-0000-0000-00000000000a".to_string(),
+                artifact: "00000000-0000-0000-0000-00000000000b".to_string(),
+            },
+        }
+    }
+
+    /// Parks one presentation on `c1` with the given bound; returns the
+    /// parked call, its notices, and its id.
+    async fn park(
+        board: &PresentationBoard,
+        bound: Duration,
+    ) -> (tokio::task::JoinHandle<PresentOutcome>, Notices, String) {
+        let (sink, notices) = recording_sink();
+        let call = {
+            let board = board.clone();
+            tokio::spawn(async move { board.present("c1", a_presentation(), &sink, bound).await })
+        };
+        let id = wait_presented(&notices).await;
+        (call, notices, id)
+    }
+
     fn resolutions(notices: &Notices) -> Vec<PresentOutcome> {
         notices
             .lock()
@@ -353,7 +476,7 @@ mod tests {
     fn reasons_of(outcome: &PresentOutcome) -> Vec<String> {
         match outcome {
             PresentOutcome::Refused { reasons, .. } => reasons.clone(),
-            PresentOutcome::Rendered => panic!("expected a refusal, got rendered"),
+            PresentOutcome::Rendered { .. } => panic!("expected a refusal, got rendered"),
         }
     }
 
@@ -388,19 +511,20 @@ mod tests {
             })
         };
         let id = wait_presented(&notices).await;
-        let read = board.presentation("c1", &id).expect("parked and readable");
+        let committing = board
+            .begin_commit("c1", &id)
+            .expect("parked and committable");
         assert_eq!(
-            read.spec,
+            committing.presentation().spec,
             a_presentation().spec,
             "the agent's spec, verbatim"
         );
-        board
-            .resolve("c1", &id, PresentOutcome::Rendered)
-            .expect("the answer lands");
-        assert_eq!(parked.await.unwrap(), PresentOutcome::Rendered);
-        assert_eq!(resolutions(&notices), vec![PresentOutcome::Rendered]);
+        committing.finish(rendered());
+        assert_eq!(parked.await.unwrap(), rendered());
+        assert_eq!(resolutions(&notices), vec![rendered()]);
         // A second answer finds nothing: the first one ended it.
-        assert!(board.resolve("c1", &id, PresentOutcome::Rendered).is_err());
+        assert!(board.resolve("c1", &id, rendered()).is_err());
+        assert!(board.begin_commit("c1", &id).is_err());
         assert_eq!(resolutions(&notices).len(), 1);
     }
 
@@ -419,10 +543,10 @@ mod tests {
             })
         };
         let id = wait_presented(&notices).await;
-        assert!(board.resolve("c2", &id, PresentOutcome::Rendered).is_err());
-        assert!(board.presentation("c2", &id).is_err());
-        board.resolve("c1", &id, PresentOutcome::Rendered).unwrap();
-        assert_eq!(parked.await.unwrap(), PresentOutcome::Rendered);
+        assert!(board.resolve("c2", &id, rendered()).is_err());
+        assert!(board.begin_commit("c2", &id).is_err());
+        board.resolve("c1", &id, rendered()).unwrap();
+        assert_eq!(parked.await.unwrap(), rendered());
     }
 
     #[tokio::test]
@@ -442,7 +566,7 @@ mod tests {
         let id = wait_presented(&notices).await;
         board.close("c1");
         // A close racing an answer: the answer finds nothing to resolve.
-        assert!(board.resolve("c1", &id, PresentOutcome::Rendered).is_err());
+        assert!(board.resolve("c1", &id, rendered()).is_err());
         let outcome = parked.await.unwrap();
         assert_eq!(reasons_of(&outcome), vec!["conversation ended"]);
         assert_eq!(resolutions(&notices), vec![outcome]);
@@ -484,7 +608,7 @@ mod tests {
         assert_eq!(resolutions(&notices), vec![outcome]);
         // The timed-out entry is withdrawn: a late answer finds nothing.
         let id = wait_presented(&notices).await;
-        assert!(board.resolve("c1", &id, PresentOutcome::Rendered).is_err());
+        assert!(board.resolve("c1", &id, rendered()).is_err());
     }
 
     #[tokio::test]
@@ -557,11 +681,65 @@ mod tests {
         other.await.unwrap();
     }
 
+    /// The ruling's witness: a record that outlasts the bound is not refused
+    /// by it — the bound waits for a committing entry, and the agent is told
+    /// what the record's answer says.
+    #[tokio::test]
+    async fn a_commit_that_outlasts_the_bound_is_resolved_by_its_answer() {
+        let board = PresentationBoard::default();
+        board.set_surface("c1", true);
+        let (call, notices, id) = park(&board, Duration::from_millis(20)).await;
+        let committing = board.begin_commit("c1", &id).unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(!call.is_finished(), "the bound left the committing entry");
+        committing.finish(rendered());
+        assert_eq!(call.await.unwrap(), rendered());
+        assert_eq!(resolutions(&notices), vec![rendered()]);
+    }
+
+    /// A close and a released surface mid-commit refuse nothing: the entry
+    /// is its answer's, and a refused answer cannot take it either.
+    #[tokio::test]
+    async fn a_close_during_a_commit_leaves_the_entry_to_its_answer() {
+        let board = PresentationBoard::default();
+        board.set_surface("c1", true);
+        let (call, notices, id) = park(&board, ANSWER_BOUND).await;
+        let committing = board.begin_commit("c1", &id).unwrap();
+        board.set_surface("c1", false);
+        board.close("c1");
+        assert!(board
+            .resolve("c1", &id, PresentOutcome::refused(vec!["x".to_string()]))
+            .is_err());
+        assert!(
+            board.begin_commit("c1", &id).is_err(),
+            "one commit per view"
+        );
+        committing.finish(rendered());
+        assert_eq!(call.await.unwrap(), rendered());
+        assert_eq!(resolutions(&notices).len(), 1);
+    }
+
+    /// An answer dropped mid-record still resolves its view, refused.
+    #[tokio::test]
+    async fn a_dropped_commit_refuses_rather_than_strands() {
+        let board = PresentationBoard::default();
+        board.set_surface("c1", true);
+        let (call, _notices, id) = park(&board, Duration::from_millis(20)).await;
+        drop(board.begin_commit("c1", &id).unwrap());
+        assert_eq!(
+            reasons_of(&call.await.unwrap()),
+            vec!["the view's temper record was abandoned before it finished"]
+        );
+    }
+
     #[test]
     fn the_outcome_serializes_as_the_tool_result_shape() {
         assert_eq!(
-            serde_json::to_value(PresentOutcome::Rendered).unwrap(),
-            json!({ "ok": "rendered" })
+            serde_json::to_value(rendered()).unwrap(),
+            json!({ "ok": "rendered", "tab": {
+                "resource": "00000000-0000-0000-0000-00000000000a",
+                "artifact": "00000000-0000-0000-0000-00000000000b"
+            } })
         );
         let refused = PresentOutcome::refused(vec!["a reason".to_string()]);
         assert_eq!(

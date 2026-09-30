@@ -2,6 +2,11 @@
   "catalog": "temper",
   "version": "1.0.0",
   "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
+  "limits": {
+    "maxElements": 256,
+    "maxDepth": 8,
+    "maxNameLength": 64
+  },
   "components": {
     "RegionState": {
       "description": "The state of a read that is not present: arriving, empty, gave-up, or failed. The sentence is composed from `label` (the region's noun, e.g. \"history\"); do not word it yourself. Use when content is not available; render the content itself when it is.",
@@ -53,7 +58,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^([a-z0-9-]*-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "pattern": "^([a-z0-9-]{0,120}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "description": "A resource UUID, or its decorated slug-<uuid> ref."
           },
           "titleHint": { "type": "string", "maxLength": 200, "description": "Shown only while the reference resolves." },

@@ -83,6 +83,9 @@ pub fn present_view_input_schema() -> Value {
             })
         })
         .collect();
+    // An element's name, and root that names one, are bounded like every
+    // other string an agent sends: the catalog's limits say how long.
+    let max_name = catalog["limits"]["maxNameLength"].clone();
     json!({
         "type": "object",
         "additionalProperties": false,
@@ -94,9 +97,10 @@ pub fn present_view_input_schema() -> Value {
                 "additionalProperties": false,
                 "required": ["root", "elements"],
                 "properties": {
-                    "root": { "type": "string" },
+                    "root": { "type": "string", "maxLength": max_name },
                     "elements": {
                         "type": "object",
+                        "propertyNames": { "maxLength": max_name },
                         "additionalProperties": {
                             "oneOf": element_branches
                         }

@@ -27,9 +27,15 @@ use crate::temper::TemperState;
 /// The hub resource's doc type and title: the family conventions every
 /// later family inherits. Found in the person's context; created on first
 /// write. A creation race leaves several; every one of them is read, the
-/// newest receives the write.
+/// newest receives the write. A family whose records accumulate rather than
+/// stay current homes on a sibling hub of its own title, so this one stays
+/// small and current.
 pub const HUB_DOC_TYPE: &str = "hub";
 pub const HUB_TITLE: &str = "Desktop hub";
+
+const HUB_CONTENT: &str = "App-lifecycle records for this person's devices. Small, current, \
+                           cross-device; each family is a declared shape. The ledger holds \
+                           the work; this hub holds only what is current.";
 
 /// The first family: what this person recently worked on, feeding home's
 /// "Return to …". One `current` artifact, capped, one entry per resource.
@@ -131,10 +137,14 @@ fn current_list_params() -> ArtifactListParams {
     }
 }
 
-/// The hub resources in the person's context: the one this device created,
-/// plus any race-made duplicate — a read that dropped a duplicate would drop
-/// the entries it holds. Empty means no hub exists yet.
-async fn find_hub_resources(client: &TemperClient, context_id: Uuid) -> Result<Vec<Uuid>, String> {
+/// The hub resources of one title in the person's context: the one this
+/// device created, plus any race-made duplicate — a read that dropped a
+/// duplicate would drop the entries it holds. Empty means no hub exists yet.
+pub(crate) async fn find_hub_resources(
+    client: &TemperClient,
+    context_id: Uuid,
+    title: &str,
+) -> Result<Vec<Uuid>, String> {
     let params = ResourceListParams {
         context_ref: Some(context_id.to_string()),
         doc_type_name: Some(HUB_DOC_TYPE.to_string()),
@@ -148,20 +158,25 @@ async fn find_hub_resources(client: &TemperClient, context_id: Uuid) -> Result<V
     Ok(page
         .rows
         .iter()
-        .filter(|r| r.title == HUB_TITLE)
+        .filter(|r| r.title == title)
         .map(|r| r.id.0)
         .collect())
 }
 
-async fn ensure_hub_resource(client: &TemperClient, context_id: Uuid) -> Result<Uuid, String> {
-    let mut hubs = find_hub_resources(client, context_id).await?;
+pub(crate) async fn ensure_hub_resource(
+    client: &TemperClient,
+    context_id: Uuid,
+    title: &str,
+    content: &str,
+) -> Result<Uuid, String> {
+    let mut hubs = find_hub_resources(client, context_id, title).await?;
     if let Some(newest) = hubs.pop() {
         return Ok(newest);
     }
     let created = client
         .ingest()
         .create(&IngestPayload {
-            title: HUB_TITLE.to_string(),
+            title: title.to_string(),
             origin_uri: String::new(),
             context_ref: context_id.to_string(),
             home_cogmap_id: None,
@@ -169,10 +184,7 @@ async fn ensure_hub_resource(client: &TemperClient, context_id: Uuid) -> Result<
             goal: None,
             content_hash: None,
             idempotency_key: Some(Uuid::new_v4()),
-            content: "App-lifecycle records for this person's devices. Small, current, \
-                      cross-device; each family is a declared shape. The ledger holds \
-                      the work; this hub holds only what is current."
-                .to_string(),
+            content: content.to_string(),
             metadata: None,
             managed_meta: None,
             open_meta: None,
@@ -193,7 +205,7 @@ async fn read_currents(
     context_id: Uuid,
 ) -> Result<Vec<Vec<RecentWorkEntry>>, String> {
     let mut batches = Vec::new();
-    for resource_id in find_hub_resources(client, context_id).await? {
+    for resource_id in find_hub_resources(client, context_id, HUB_TITLE).await? {
         let listed = client
             .data_artifacts()
             .list(resource_id, &current_list_params())
@@ -217,24 +229,30 @@ async fn read_currents(
     Ok(batches)
 }
 
-/// Declares the family's shape in the hub's context, only when `list_shapes`
+/// Declares a family's shape in the hub's context, only when `list_shapes`
 /// shows it absent — a second declaration would fork the family's lineage.
 /// The namespace is named explicitly: a shape has no resource to default it
-/// from, so the family is declared under the person's profile.
-async fn ensure_shape(
+/// from, so the family is declared under the person's profile — and only a
+/// shape in that namespace counts as present, so someone else's shape of the
+/// same name never stands in for the person's enforcing one.
+pub(crate) async fn ensure_shape(
     client: &TemperClient,
     context_id: Uuid,
     profile_id: Uuid,
+    kind: &str,
+    schema: serde_json::Value,
 ) -> Result<(), String> {
     let shapes = client
         .data_artifacts()
         .list_shapes(context_id)
         .await
         .map_err(|e| e.to_string())?;
-    if shapes
-        .iter()
-        .any(|s| !s.is_folded && s.artifact_kind == RECENT_WORK_KIND)
-    {
+    if shapes.iter().any(|s| {
+        !s.is_folded
+            && s.artifact_kind == kind
+            && s.kind_owner_table == "kb_profiles"
+            && s.kind_owner_id == profile_id
+    }) {
         return Ok(());
     }
     client
@@ -242,9 +260,9 @@ async fn ensure_shape(
         .declare_shape(
             context_id,
             &ShapeDeclareRequest {
-                kind: RECENT_WORK_KIND.to_string(),
+                kind: kind.to_string(),
                 kind_owner: Some(KindOwnerInput::Profile(profile_id)),
-                schema: recent_work_schema(),
+                schema,
                 enforcement: EnforcementMode::Enforcing,
                 act: Default::default(),
             },
@@ -266,11 +284,18 @@ pub async fn commit_recent_work(
 ) -> Result<RecentWorkView, String> {
     let context_id = persons_context_id(client, context_name).await?;
     let profile_id = client.profile().get().await.map_err(|e| e.to_string())?.id;
-    ensure_shape(client, context_id, profile_id).await?;
+    ensure_shape(
+        client,
+        context_id,
+        profile_id,
+        RECENT_WORK_KIND,
+        recent_work_schema(),
+    )
+    .await?;
     let currents = read_currents(client, context_id).await?;
-    let hubs = find_hub_resources(client, context_id).await?;
+    let hubs = find_hub_resources(client, context_id, HUB_TITLE).await?;
     let superseded = artifact_ids(client, &hubs).await?;
-    let hub = ensure_hub_resource(client, context_id).await?;
+    let hub = ensure_hub_resource(client, context_id, HUB_TITLE, HUB_CONTENT).await?;
     let merged = merge_recent_work(&currents, &fresh);
     let content = serde_json::json!({ "version": 1, "entries": merged });
     let response = client
@@ -515,7 +540,7 @@ mod tests {
         let context_id = crate::person_context::persons_context_id(client, context_name)
             .await
             .expect("the person's context should resolve");
-        for stale in find_hub_resources(client, context_id)
+        for stale in find_hub_resources(client, context_id, HUB_TITLE)
             .await
             .expect("existing hubs should list")
         {
@@ -555,7 +580,7 @@ mod tests {
         );
 
         // The shape is enforcing: junk is refused, not recorded.
-        let hubs = find_hub_resources(client, context_id)
+        let hubs = find_hub_resources(client, context_id, HUB_TITLE)
             .await
             .expect("the hub should be findable");
         assert!(!hubs.is_empty(), "the hub should exist by now");

@@ -1069,6 +1069,7 @@ dependencies = [
  "axum",
  "chrono",
  "http",
+ "jsonschema",
  "regex",
  "reqwest 0.12.28",
  "rmcp",

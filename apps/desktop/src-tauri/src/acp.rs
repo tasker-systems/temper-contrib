@@ -2191,7 +2191,12 @@ whole. Change nothing outside it, and write nothing else inside it.";
                             &presented_id,
                             rendered,
                             reasons,
-                            |_| async { Ok(()) },
+                            |_, _| async {
+                                Ok(crate::present_board::PresentedTab {
+                                    resource: "witness".to_string(),
+                                    artifact: "witness".to_string(),
+                                })
+                            },
                         )
                         .await;
                     });
@@ -2254,7 +2259,9 @@ whole. Change nothing outside it, and write nothing else inside it.";
             })
             .collect();
         assert!(
-            resolved.contains(&PresentOutcome::Rendered),
+            resolved
+                .iter()
+                .any(|o| matches!(o, PresentOutcome::Rendered { .. })),
             "a conforming view renders: {resolved:?}"
         );
         for outcome in &resolved {

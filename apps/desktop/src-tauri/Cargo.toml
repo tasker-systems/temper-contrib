@@ -39,6 +39,10 @@ http = "1"
 # The probe's tool-args derive: the projected catalog schema is hand-written,
 # but `Parameters` demands the derive exist on the args type.
 schemars = "1"
+# The core's own check of a presented spec before it is recorded, against the
+# same projected catalog schema the server advertises. Already in the graph
+# through temperkb-workflow.
+jsonschema = "0.45"
 # The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
 # WKWebView driver. Behind a feature: the witness builds with `--features webdriver`, so
 # development and release builds never compile an endpoint.
