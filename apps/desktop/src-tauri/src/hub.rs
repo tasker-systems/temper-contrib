@@ -232,7 +232,9 @@ async fn read_currents(
 /// Declares a family's shape in the hub's context, only when `list_shapes`
 /// shows it absent — a second declaration would fork the family's lineage.
 /// The namespace is named explicitly: a shape has no resource to default it
-/// from, so the family is declared under the person's profile.
+/// from, so the family is declared under the person's profile — and only a
+/// shape in that namespace counts as present, so someone else's shape of the
+/// same name never stands in for the person's enforcing one.
 pub(crate) async fn ensure_shape(
     client: &TemperClient,
     context_id: Uuid,
@@ -245,10 +247,12 @@ pub(crate) async fn ensure_shape(
         .list_shapes(context_id)
         .await
         .map_err(|e| e.to_string())?;
-    if shapes
-        .iter()
-        .any(|s| !s.is_folded && s.artifact_kind == kind)
-    {
+    if shapes.iter().any(|s| {
+        !s.is_folded
+            && s.artifact_kind == kind
+            && s.kind_owner_table == "kb_profiles"
+            && s.kind_owner_id == profile_id
+    }) {
         return Ok(());
     }
     client

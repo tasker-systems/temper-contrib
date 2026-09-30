@@ -177,9 +177,12 @@ where
         .await
         {
             Ok(Ok(tab)) => PresentOutcome::Rendered { tab },
-            Ok(Err(e)) => PresentOutcome::refused(vec![format!(
-                "the view was checked but its temper record failed — {e}"
-            )]),
+            // The agent is told that the record failed, never temper's own
+            // error text: it can carry the API host and the ids of the
+            // person's context and hub.
+            Ok(Err(_)) => PresentOutcome::refused(vec![
+                "the view was checked but could not be recorded in temper".to_string(),
+            ]),
             Err(_) => PresentOutcome::refused(vec![format!(
                 "the view was checked but its temper record did not finish within {commit_bound:?}"
             )]),
@@ -236,23 +239,29 @@ pub struct PresentedView {
 }
 
 /// The read projection: an artifact is a presented view only when it is of
-/// this family, pinned and live, and its content is the closed record.
-fn presented_view_from(artifact: ArtifactView) -> Result<PresentedView, String> {
-    if artifact.artifact_kind != PRESENTED_VIEW_KIND {
-        return Err(format!(
-            "artifact {} is a {}, not a presented view",
-            artifact.artifact_id, artifact.artifact_kind
-        ));
+/// this family under the person's own namespace, pinned and live, its
+/// content the closed record, and its spec one the core's check passes — a
+/// record anyone else wrote, or one written around the shape, is not one.
+/// Every refusal is the same sentence: the read never says what an artifact
+/// it refused is.
+fn presented_view_from(artifact: ArtifactView, profile_id: Uuid) -> Result<PresentedView, String> {
+    let refused = || format!("artifact {} is not a presented view", artifact.artifact_id);
+    if artifact.artifact_kind != PRESENTED_VIEW_KIND
+        || artifact.kind_owner_table != "kb_profiles"
+        || artifact.kind_owner_id != profile_id
+        || artifact.intent != "pinned"
+        || artifact.is_folded
+    {
+        return Err(refused());
     }
-    if artifact.intent != "pinned" || artifact.is_folded {
-        return Err(format!(
-            "artifact {} is not a live pinned record",
-            artifact.artifact_id
-        ));
+    let record: PresentedRecord = artifact
+        .content
+        .clone()
+        .and_then(|c| serde_json::from_value(c).ok())
+        .ok_or_else(refused)?;
+    if check_spec(&record.spec).is_err() {
+        return Err(refused());
     }
-    let record: PresentedRecord =
-        serde_json::from_value(artifact.content.unwrap_or(serde_json::Value::Null))
-            .map_err(|e| format!("the presented view's record did not conform: {e}"))?;
     Ok(PresentedView {
         resource: artifact.resource_id.to_string(),
         artifact: artifact.artifact_id.to_string(),
@@ -271,7 +280,8 @@ pub async fn read_presented(
         .get(resource, artifact)
         .await
         .map_err(|e| e.to_string())?;
-    presented_view_from(view)
+    let profile_id = client.profile().get().await.map_err(|e| e.to_string())?.id;
+    presented_view_from(view, profile_id)
 }
 
 /// The webview's answer to a presented view: `rendered` when checkSpec
@@ -456,7 +466,7 @@ mod tests {
         .expect("the refusal lands");
         assert_eq!(
             reasons_of(call.await.unwrap()),
-            vec!["the view was checked but its temper record failed — temper unreachable"]
+            vec!["the view was checked but could not be recorded in temper"]
         );
     }
 
@@ -640,7 +650,7 @@ mod tests {
             "artifact_id": "00000000-0000-0000-0000-00000000000b",
             "resource_id": "00000000-0000-0000-0000-00000000000a",
             "kind_owner_table": "kb_profiles",
-            "kind_owner_id": "00000000-0000-0000-0000-00000000000c",
+            "kind_owner_id": OWNER,
             "artifact_kind": kind,
             "intent": intent,
             "precedence": 0.0,
@@ -654,9 +664,17 @@ mod tests {
         .unwrap()
     }
 
-    /// The read projection admits only a live pinned record of this family.
+    const OWNER: &str = "00000000-0000-0000-0000-00000000000c";
+
+    fn owner() -> Uuid {
+        Uuid::parse_str(OWNER).unwrap()
+    }
+
+    /// The read projection admits only a live pinned record of this family,
+    /// in the person's own namespace, whose spec the core's check passes —
+    /// and refuses everything else with one sentence that names nothing.
     #[test]
-    fn the_read_projection_admits_only_a_pinned_presented_view() {
+    fn the_read_projection_admits_only_the_person_s_checked_presented_view() {
         let record = serde_json::to_value(record_of(
             "c1",
             &Presentation {
@@ -666,20 +684,55 @@ mod tests {
             "t",
         ))
         .unwrap();
-        let view = presented_view_from(artifact(PRESENTED_VIEW_KIND, "pinned", record.clone()))
-            .expect("a presented view reads");
+        let view = presented_view_from(
+            artifact(PRESENTED_VIEW_KIND, "pinned", record.clone()),
+            owner(),
+        )
+        .expect("a presented view reads");
         assert_eq!(view.resource, "00000000-0000-0000-0000-00000000000a");
         assert_eq!(view.artifact, "00000000-0000-0000-0000-00000000000b");
         assert_eq!(view.record.spec, conforming());
-        assert!(
-            presented_view_from(artifact("desktop-recent-work", "pinned", record.clone())).is_err()
+
+        let refusal = "artifact 00000000-0000-0000-0000-00000000000b is not a presented view";
+        let refused = |a: ArtifactView, by: Uuid| presented_view_from(a, by).unwrap_err();
+        let other_kind = refused(
+            artifact("desktop-recent-work", "pinned", record.clone()),
+            owner(),
         );
-        assert!(
-            presented_view_from(artifact(PRESENTED_VIEW_KIND, "current", record.clone())).is_err()
+        assert_eq!(
+            other_kind, refusal,
+            "the refusal never names the artifact's kind"
         );
-        let mut stray = record;
-        stray["extra"] = json!(1);
-        assert!(presented_view_from(artifact(PRESENTED_VIEW_KIND, "pinned", stray)).is_err());
+        assert_eq!(
+            refused(
+                artifact(PRESENTED_VIEW_KIND, "current", record.clone()),
+                owner()
+            ),
+            refusal
+        );
+        assert_eq!(
+            refused(
+                artifact(PRESENTED_VIEW_KIND, "pinned", record.clone()),
+                Uuid::nil()
+            ),
+            refusal,
+            "another namespace's artifact of the same name is not the person's record"
+        );
+        let mut stray = record.clone();
+        stray["extra"] = json!("a value the refusal must not echo");
+        assert_eq!(
+            refused(artifact(PRESENTED_VIEW_KIND, "pinned", stray), owner()),
+            refusal
+        );
+        let mut unchecked = record;
+        unchecked["spec"] = json!({ "root": "a", "elements": { "a": {
+            "type": "RegionState", "props": { "state": "failed", "label": "history" }, "children": ["a"]
+        } } });
+        assert_eq!(
+            refused(artifact(PRESENTED_VIEW_KIND, "pinned", unchecked), owner()),
+            refusal,
+            "a record written around the shape, with a spec the core refuses, does not read"
+        );
     }
 
     /// Live witness for the record, against the real API: one presentation

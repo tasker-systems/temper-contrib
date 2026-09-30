@@ -19,6 +19,10 @@ use crate::present_server::present_view_input_schema;
 pub const MAX_ELEMENTS: usize = 256;
 pub const MAX_DEPTH: usize = 8;
 
+/// The largest integer the webview's check admits (zod's `int`, bounded by
+/// JavaScript's safe integers): a count past it is refused there, so here.
+const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+
 const RESERVED_KEYS: [&str; 3] = ["__proto__", "constructor", "prototype"];
 
 fn validator() -> &'static jsonschema::Validator {
@@ -121,7 +125,10 @@ fn tree_errors(spec: &Value) -> Vec<String> {
 }
 
 /// A BoundedList never shows more rows than it stands for, nor a different
-/// number of rows than it has.
+/// number of rows than it has. Counts are read as numbers, not only as
+/// `u64`: JSON Schema admits `5.0` and an integer past `u64` as integers, and
+/// the webview reads both — a count this check skipped would pass a spec the
+/// webview refuses.
 fn bounded_list_errors(spec: &Value) -> Vec<String> {
     let Some(elements) = spec.get("elements").and_then(Value::as_object) else {
         return Vec::new();
@@ -132,10 +139,17 @@ fn bounded_list_errors(spec: &Value) -> Vec<String> {
             continue;
         }
         let props = el.get("props");
-        let int = |name: &str| props.and_then(|p| p.get(name)).and_then(Value::as_u64);
-        let (Some(total), Some(shown)) = (int("total"), int("shown")) else {
+        let count = |name: &str| props.and_then(|p| p.get(name)).and_then(Value::as_f64);
+        let (Some(total), Some(shown)) = (count("total"), count("shown")) else {
             continue;
         };
+        for (name, value) in [("total", total), ("shown", shown)] {
+            if value > MAX_SAFE_INTEGER {
+                errors.push(format!(
+                    "elements/{key}/props/{name}: larger than {MAX_SAFE_INTEGER}"
+                ));
+            }
+        }
         if shown > total {
             errors.push(format!("elements/{key}: shows {shown} of {total}"));
         }
@@ -143,7 +157,7 @@ fn bounded_list_errors(spec: &Value) -> Vec<String> {
         let rows = el
             .get("children")
             .and_then(Value::as_array)
-            .map_or(0, Vec::len) as u64;
+            .map_or(0, Vec::len) as f64;
         if present && rows != shown {
             errors.push(format!(
                 "elements/{key}: says it shows {shown} but has {rows} rows"
@@ -268,6 +282,29 @@ mod tests {
             any_contains(&errors, "says it shows 2 but has 0 rows"),
             "{errors:?}"
         );
+    }
+
+    /// Counts JSON Schema admits as integers but `as_u64` does not read are
+    /// still checked, as the webview checks them.
+    #[test]
+    fn a_bounded_list_s_counts_are_checked_whatever_their_json_form() {
+        let list = |total: Value, shown: Value| {
+            json!({ "root": "l", "elements": { "l": {
+                "type": "BoundedList",
+                "props": { "total": total, "shown": shown, "scope": "s", "label": "l", "state": "present" },
+                "children": []
+            } } })
+        };
+        let floats = errors_of(list(json!(1.0), json!(5.0)));
+        assert!(any_contains(&floats, "shows 5 of 1"), "{floats:?}");
+        assert!(any_contains(&floats, "but has 0 rows"), "{floats:?}");
+        let huge: Value = serde_json::from_str("100000000000000000000").unwrap();
+        let errors = errors_of(list(json!(1), huge));
+        assert!(
+            any_contains(&errors, "props/shown: larger than"),
+            "{errors:?}"
+        );
+        assert_eq!(check_spec(&list(json!(3.0), json!(0.0))), Ok(()));
     }
 
     #[test]

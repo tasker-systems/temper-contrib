@@ -15,8 +15,11 @@
 //! ([`PresentationBoard::begin_commit`]). A close, a released surface and
 //! the bound refuse only what is still parked; a committing entry is the
 //! answer's to resolve, and its [`Committing`] guard resolves it exactly
-//! once even if the answer is dropped. A record therefore lands only when
-//! its agent is told rendered.
+//! once even if the answer is dropped. So at the board a record is never
+//! reported refused: no close, release or bound can refuse a view whose
+//! record is landing. Two ends lie beyond the board — a commit abandoned at
+//! its own bound after its request reached temper, and an agent that stops
+//! listening mid-commit, whose view is recorded while it is told nothing.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
