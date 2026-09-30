@@ -1,0 +1,695 @@
+{
+	"description": "Specs with the verdict both gates owe them: the webview's checkSpec (catalog.test.ts) and the core's check (spec_check.rs) each run every case. A case both gates must agree on belongs here.",
+	"cases": [
+		{
+			"name": "a single region state",
+			"ok": true,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a bounded list with its rows",
+			"ok": true,
+			"spec": {
+				"root": "list",
+				"elements": {
+					"list": {
+						"type": "BoundedList",
+						"props": {
+							"total": 41,
+							"shown": 2,
+							"scope": "in this context",
+							"label": "sources",
+							"state": "present"
+						},
+						"children": [
+							"r0",
+							"r1"
+						]
+					},
+					"r0": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					},
+					"r1": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a list not present shows no rows",
+			"ok": true,
+			"spec": {
+				"root": "list",
+				"elements": {
+					"list": {
+						"type": "BoundedList",
+						"props": {
+							"total": 41,
+							"shown": 3,
+							"scope": "in this context",
+							"label": "sources",
+							"state": "arriving"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a reference by decorated slug",
+			"ok": true,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "a-short-slug-01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "eight levels deep",
+			"ok": true,
+			"spec": {
+				"root": "e1",
+				"elements": {
+					"e1": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e2"
+						]
+					},
+					"e2": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e3"
+						]
+					},
+					"e3": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e4"
+						]
+					},
+					"e4": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e5"
+						]
+					},
+					"e5": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e6"
+						]
+					},
+					"e6": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e7"
+						]
+					},
+					"e7": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e8"
+						]
+					},
+					"e8": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a name at the length bound",
+			"ok": true,
+			"spec": {
+				"root": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+				"elements": {
+					"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a colour prop",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history",
+							"colour": "red"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a component outside the catalog",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "Markdown",
+						"props": {},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "an element without children",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "a handler on an element",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [],
+						"on": {
+							"press": {
+								"action": "x"
+							}
+						}
+					}
+				}
+			}
+		},
+		{
+			"name": "top-level state",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"state": {},
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a state binding for a prop",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "RegionState",
+						"props": {
+							"state": {
+								"$state": "/s"
+							},
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a cycle",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"a"
+						]
+					}
+				}
+			}
+		},
+		{
+			"name": "a child placed twice",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"b",
+							"b"
+						]
+					},
+					"b": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "nine levels deep",
+			"ok": false,
+			"spec": {
+				"root": "e0",
+				"elements": {
+					"e0": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e1"
+						]
+					},
+					"e1": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e2"
+						]
+					},
+					"e2": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e3"
+						]
+					},
+					"e3": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e4"
+						]
+					},
+					"e4": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e5"
+						]
+					},
+					"e5": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e6"
+						]
+					},
+					"e6": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e7"
+						]
+					},
+					"e7": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"e8"
+						]
+					},
+					"e8": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "an unreachable element",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					},
+					"loose": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a child that does not exist",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": [
+							"ghost"
+						]
+					}
+				}
+			}
+		},
+		{
+			"name": "a root that is not an element",
+			"ok": false,
+			"spec": {
+				"root": "nowhere",
+				"elements": {
+					"a": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a reserved element name",
+			"ok": false,
+			"spec": {
+				"root": "constructor",
+				"elements": {
+					"constructor": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a list showing more than it stands for",
+			"ok": false,
+			"spec": {
+				"root": "list",
+				"elements": {
+					"list": {
+						"type": "BoundedList",
+						"props": {
+							"total": 1,
+							"shown": 2,
+							"scope": "in this context",
+							"label": "sources",
+							"state": "present"
+						},
+						"children": [
+							"r0",
+							"r1"
+						]
+					},
+					"r0": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					},
+					"r1": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a list miscounting its rows",
+			"ok": false,
+			"spec": {
+				"root": "list",
+				"elements": {
+					"list": {
+						"type": "BoundedList",
+						"props": {
+							"total": 41,
+							"shown": 3,
+							"scope": "in this context",
+							"label": "sources",
+							"state": "present"
+						},
+						"children": [
+							"r0"
+						]
+					},
+					"r0": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "float counts that miscount",
+			"ok": false,
+			"spec": {
+				"root": "l",
+				"elements": {
+					"l": {
+						"type": "BoundedList",
+						"props": {
+							"total": 1.0,
+							"shown": 5.0,
+							"scope": "s",
+							"label": "l",
+							"state": "present"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a count past the safe integers",
+			"ok": false,
+			"spec": {
+				"root": "l",
+				"elements": {
+					"l": {
+						"type": "BoundedList",
+						"props": {
+							"total": 1,
+							"shown": 100000000000000000000,
+							"scope": "s",
+							"label": "l",
+							"state": "arriving"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a name past the length bound",
+			"ok": false,
+			"spec": {
+				"root": "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn",
+				"elements": {
+					"nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn": {
+						"type": "RegionState",
+						"props": {
+							"state": "failed",
+							"label": "history"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a reference slug past its bound",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss-01a0d873-59c9-72f0-a31f-23f0da5d8789"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a reference that is not an id",
+			"ok": false,
+			"spec": {
+				"root": "r",
+				"elements": {
+					"r": {
+						"type": "ResourceRef",
+						"props": {
+							"id": "not-an-id"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a spec that is not an object",
+			"ok": false,
+			"spec": "a view"
+		},
+		{
+			"name": "a spec without elements",
+			"ok": false,
+			"spec": {
+				"root": "r"
+			}
+		}
+	]
+}

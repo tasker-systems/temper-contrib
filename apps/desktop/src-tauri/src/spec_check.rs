@@ -12,12 +12,34 @@ use std::sync::OnceLock;
 
 use serde_json::{json, Value};
 
-use crate::present_server::present_view_input_schema;
+use crate::present_server::{present_view_input_schema, CATALOG_JSON};
 
-/// The bounds `checkSpec` holds (`MAX_ELEMENTS`, `MAX_DEPTH` in
-/// `src/lib/catalog/catalog.ts`): a view is a bounded glance.
-pub const MAX_ELEMENTS: usize = 256;
-pub const MAX_DEPTH: usize = 8;
+/// The bounds a view is held to, read from the catalog file `checkSpec`
+/// reads them from: a view is a bounded glance. (Name length is in the
+/// projected schema.)
+#[derive(Clone, Copy)]
+struct Limits {
+    max_elements: usize,
+    max_depth: usize,
+}
+
+fn limits() -> &'static Limits {
+    static LIMITS: OnceLock<Limits> = OnceLock::new();
+    LIMITS.get_or_init(|| {
+        let catalog: Value =
+            serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
+        let bound = |name: &str| {
+            catalog["limits"][name]
+                .as_u64()
+                .unwrap_or_else(|| panic!("the catalog declares limits.{name}"))
+                as usize
+        };
+        Limits {
+            max_elements: bound("maxElements"),
+            max_depth: bound("maxDepth"),
+        }
+    })
+}
 
 /// The largest integer the webview's check admits (zod's `int`, bounded by
 /// JavaScript's safe integers): a count past it is refused there, so here.
@@ -66,9 +88,13 @@ fn tree_errors(spec: &Value) -> Vec<String> {
     let Some(elements) = spec.get("elements").and_then(Value::as_object) else {
         return Vec::new();
     };
-    if elements.len() > MAX_ELEMENTS {
+    let Limits {
+        max_elements,
+        max_depth,
+    } = *limits();
+    if elements.len() > max_elements {
         return vec![format!(
-            "elements: {} elements, more than {MAX_ELEMENTS}",
+            "elements: {} elements, more than {max_elements}",
             elements.len()
         )];
     }
@@ -90,8 +116,8 @@ fn tree_errors(spec: &Value) -> Vec<String> {
     let mut reached: HashSet<&str> = HashSet::from([root]);
     let mut stack: Vec<(&str, usize)> = vec![(root, 1)];
     while let Some((key, depth)) = stack.pop() {
-        if depth > MAX_DEPTH {
-            errors.push(format!("elements/{key}: nested deeper than {MAX_DEPTH}"));
+        if depth > max_depth {
+            errors.push(format!("elements/{key}: nested deeper than {max_depth}"));
             continue;
         }
         let children = elements[key]
@@ -228,9 +254,13 @@ mod tests {
     #[test]
     fn nesting_past_the_depth_bound_is_refused() {
         let mut elements = serde_json::Map::new();
-        for i in 0..=MAX_DEPTH {
+        for i in 0..=limits().max_depth {
             let child = format!("e{}", i + 1);
-            let children: Vec<&str> = if i < MAX_DEPTH { vec![&child] } else { vec![] };
+            let children: Vec<&str> = if i < limits().max_depth {
+                vec![&child]
+            } else {
+                vec![]
+            };
             elements.insert(format!("e{i}"), region(&children));
         }
         let errors = errors_of(json!({ "root": "e0", "elements": elements }));
@@ -239,7 +269,7 @@ mod tests {
 
     #[test]
     fn more_elements_than_the_bound_are_refused() {
-        let elements: serde_json::Map<String, Value> = (0..=MAX_ELEMENTS)
+        let elements: serde_json::Map<String, Value> = (0..=limits().max_elements)
             .map(|i| (format!("e{i}"), region(&[])))
             .collect();
         let errors = errors_of(json!({ "root": "e0", "elements": elements }));
@@ -311,5 +341,30 @@ mod tests {
     fn a_non_object_spec_is_refused() {
         assert!(check_spec(&json!("a view")).is_err());
         assert!(check_spec(&json!({ "root": "r" })).is_err());
+    }
+
+    /// The corpus the webview's `checkSpec` runs too (`catalog.test.ts`):
+    /// the two gates are written twice, so each case pins a verdict both
+    /// must give.
+    #[test]
+    fn the_shared_corpus_gets_the_verdicts_the_webview_gives() {
+        let corpus: Value =
+            serde_json::from_str(include_str!("../../src/lib/catalog/spec-fixtures.json"))
+                .expect("the corpus parses");
+        let cases = corpus["cases"].as_array().expect("the corpus has cases");
+        assert!(!cases.is_empty());
+        let wrong: Vec<String> = cases
+            .iter()
+            .filter(|c| check_spec(&c["spec"]).is_ok() != c["ok"].as_bool().unwrap())
+            .map(|c| {
+                format!(
+                    "{} (expected ok={}, got {:?})",
+                    c["name"],
+                    c["ok"],
+                    check_spec(&c["spec"])
+                )
+            })
+            .collect();
+        assert!(wrong.is_empty(), "verdicts that differ: {wrong:#?}");
     }
 }

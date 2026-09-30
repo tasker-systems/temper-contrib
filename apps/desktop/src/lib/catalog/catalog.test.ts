@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { checkSpec, MAX_DEPTH, MAX_ELEMENTS, temperCatalog } from './catalog';
+import fixtures from './spec-fixtures.json';
 
 const REF = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
 
@@ -204,4 +205,14 @@ describe('the temper catalog', () => {
 		expect(prompt).toContain('BoundedList');
 		expect(prompt).not.toContain('ReachIndicator');
 	});
+});
+
+// The corpus the core's own check (`src-tauri/src/spec_check.rs`) runs too: the two gates are
+// written twice, so each case pins a verdict both must give.
+describe('the shared spec corpus', () => {
+	for (const c of fixtures.cases)
+		it(`${c.ok ? 'passes' : 'refuses'} ${c.name}`, () => {
+			const r = checkSpec(c.spec);
+			expect(r.ok, JSON.stringify(r)).toBe(c.ok);
+		});
 });

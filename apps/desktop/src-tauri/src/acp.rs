@@ -2191,7 +2191,6 @@ whole. Change nothing outside it, and write nothing else inside it.";
                             &presented_id,
                             rendered,
                             reasons,
-                            crate::presentation::COMMIT_BOUND,
                             |_, _| async {
                                 Ok(crate::present_board::PresentedTab {
                                     resource: "witness".to_string(),

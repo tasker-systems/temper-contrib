@@ -42,11 +42,14 @@ const PRESENTED_HUB_CONTENT: &str = "Views agents presented in this person's des
                                      it, the catalog it passed and when. A closed view's tab \
                                      is rebuilt from its record here.";
 
-/// How long a record may take. The presentation's own bound does not run
-/// while it commits, so this is what keeps a turn from waiting on temper;
-/// running out of it is a refusal, and the abandoned commit's result is
-/// never reported rendered.
-pub const COMMIT_BOUND: Duration = Duration::from_secs(15);
+/// How long the lookups before a record may take — the context, the
+/// profile, the shape, the hub. The presentation's own bound does not run
+/// while it commits, so this keeps a turn from waiting on a slow temper;
+/// running out of it is a refusal with nothing written. The commit itself is
+/// not under it: once sent, it runs to its answer, bounded by temper's own
+/// request ceiling and the client's timeout above it — abandoning a commit
+/// in flight is what would record a view whose agent was told refused.
+pub const PREPARE_BOUND: Duration = Duration::from_secs(15);
 
 /// A presented view's record, as committed and as read back. Closed both
 /// ways: the shape refuses a stray field on commit, and a read refuses one
@@ -132,7 +135,7 @@ fn record_request(record: &PresentedRecord) -> Result<ArtifactCommitRequest, Str
 /// Resolves one parked presentation with the webview's answer. A rendered
 /// answer marks the presentation committing — from then on a close or the
 /// bound cannot refuse it — re-checks the agent's own spec in the core,
-/// then records it through `commit`, bounded by `commit_bound`. Only a
+/// then records it through `commit`, which carries its own bounds. Only a
 /// record that landed is told rendered; every other end is a named refusal
 /// with nothing recorded.
 pub async fn answer<C, F>(
@@ -141,7 +144,6 @@ pub async fn answer<C, F>(
     presented_id: &str,
     rendered: bool,
     reasons: Vec<String>,
-    commit_bound: Duration,
     commit: C,
 ) -> Result<(), String>
 where
@@ -170,38 +172,46 @@ where
             .chain(core_reasons)
             .collect(),
         ),
-        Ok(()) => match tokio::time::timeout(
-            commit_bound,
-            commit(conversation_id.to_string(), presentation),
-        )
-        .await
-        {
-            Ok(Ok(tab)) => PresentOutcome::Rendered { tab },
+        Ok(()) => match commit(conversation_id.to_string(), presentation).await {
+            Ok(tab) => PresentOutcome::Rendered { tab },
             // The agent is told that the record failed, never temper's own
             // error text: it can carry the API host and the ids of the
             // person's context and hub.
-            Ok(Err(_)) => PresentOutcome::refused(vec![
+            Err(_) => PresentOutcome::refused(vec![
                 "the view was checked but could not be recorded in temper".to_string(),
             ]),
-            Err(_) => PresentOutcome::refused(vec![format!(
-                "the view was checked but its temper record did not finish within {commit_bound:?}"
-            )]),
         },
     };
     committing.finish(outcome);
     Ok(())
 }
 
-/// Records one rendered presentation on the named hub in the person's
-/// configured context: the shape declared when absent, the hub found or
-/// created, one pinned commit.
-async fn record_on(
+/// Runs `prepare` within `bound`, then `commit` on what it prepared with no
+/// bound of its own: a slow preparation is abandoned with nothing written,
+/// and a commit once begun is never abandoned by us.
+async fn prepare_then_commit<T, U, P, C, F>(
+    bound: Duration,
+    prepare: P,
+    commit: C,
+) -> Result<U, String>
+where
+    P: Future<Output = Result<T, String>>,
+    C: FnOnce(T) -> F,
+    F: Future<Output = Result<U, String>>,
+{
+    let prepared = tokio::time::timeout(bound, prepare)
+        .await
+        .map_err(|_| format!("temper did not answer within {bound:?}"))??;
+    commit(prepared).await
+}
+
+/// The lookups a record needs: the person's context, the shape declared
+/// when absent, the hub found or created. Answers the hub.
+async fn prepare_hub(
     client: &TemperClient,
     context_name: &str,
     hub_title: &str,
-    conversation_id: &str,
-    presentation: &Presentation,
-) -> Result<PresentedTab, String> {
+) -> Result<Uuid, String> {
     let context_id = persons_context_id(client, context_name).await?;
     let profile_id = client.profile().get().await.map_err(|e| e.to_string())?.id;
     ensure_shape(
@@ -212,21 +222,40 @@ async fn record_on(
         presented_view_schema(),
     )
     .await?;
-    let hub = ensure_hub_resource(client, context_id, hub_title, PRESENTED_HUB_CONTENT).await?;
-    let record = record_of(
-        conversation_id,
-        presentation,
-        &chrono::Utc::now().to_rfc3339(),
-    );
-    let response = client
-        .data_artifacts()
-        .commit(hub, &record_request(&record)?)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(PresentedTab {
-        resource: hub.to_string(),
-        artifact: response.artifact_id.to_string(),
-    })
+    ensure_hub_resource(client, context_id, hub_title, PRESENTED_HUB_CONTENT).await
+}
+
+/// Records one rendered presentation on the named hub in the person's
+/// configured context: the lookups within [`PREPARE_BOUND`], then one pinned
+/// commit run to its answer.
+async fn record_on(
+    client: &TemperClient,
+    context_name: &str,
+    hub_title: &str,
+    conversation_id: &str,
+    presentation: &Presentation,
+) -> Result<PresentedTab, String> {
+    prepare_then_commit(
+        PREPARE_BOUND,
+        prepare_hub(client, context_name, hub_title),
+        |hub| async move {
+            let record = record_of(
+                conversation_id,
+                presentation,
+                &chrono::Utc::now().to_rfc3339(),
+            );
+            let response = client
+                .data_artifacts()
+                .commit(hub, &record_request(&record)?)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(PresentedTab {
+                resource: hub.to_string(),
+                artifact: response.artifact_id.to_string(),
+            })
+        },
+    )
+    .await
 }
 
 /// A recorded view as the tab reads it: the record, and where it lives.
@@ -305,7 +334,6 @@ pub async fn present_answer(
         &presented_id,
         rendered,
         reasons,
-        COMMIT_BOUND,
         |conversation_id, presentation| async move {
             let client = client.ok_or_else(|| "temper is not connected".to_string())?;
             record_on(
@@ -424,18 +452,10 @@ mod tests {
         let (board, call, id) = parked().await;
         let committed: Arc<Mutex<Option<(String, serde_json::Value)>>> = Arc::default();
         let seen = committed.clone();
-        answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
-            COMMIT_BOUND,
-            |c, p| async move {
-                *seen.lock().unwrap() = Some((c, p.spec));
-                Ok(a_tab())
-            },
-        )
+        answer(&board, "c1", &id, true, vec![], |c, p| async move {
+            *seen.lock().unwrap() = Some((c, p.spec));
+            Ok(a_tab())
+        })
         .await
         .expect("the answer lands");
         assert_eq!(
@@ -453,15 +473,9 @@ mod tests {
     #[tokio::test]
     async fn a_failed_record_turns_the_render_into_a_named_refusal() {
         let (board, call, id) = parked().await;
-        answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
-            COMMIT_BOUND,
-            |_, _| async { Err("temper unreachable".to_string()) },
-        )
+        answer(&board, "c1", &id, true, vec![], |_, _| async {
+            Err("temper unreachable".to_string())
+        })
         .await
         .expect("the refusal lands");
         assert_eq!(
@@ -474,15 +488,9 @@ mod tests {
     async fn a_refusal_carries_checkspec_s_reasons_and_records_nothing() {
         let (board, call, id) = parked().await;
         let reasons = vec!["elements/a/props: Unrecognized key: \"colour\"".to_string()];
-        answer(
-            &board,
-            "c1",
-            &id,
-            false,
-            reasons.clone(),
-            COMMIT_BOUND,
-            |_, _| async { panic!("a refused view is never recorded") },
-        )
+        answer(&board, "c1", &id, false, reasons.clone(), |_, _| async {
+            panic!("a refused view is never recorded")
+        })
         .await
         .expect("the refusal lands");
         assert_eq!(reasons_of(call.await.unwrap()), reasons);
@@ -496,15 +504,9 @@ mod tests {
             "type": "RegionState", "props": { "state": "failed", "label": "history" }, "children": ["a"]
         } } });
         let (board, call, id) = parked_with(cycle, ANSWER_BOUND).await;
-        answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
-            COMMIT_BOUND,
-            |_, _| async { panic!("a spec the core refuses is never recorded") },
-        )
+        answer(&board, "c1", &id, true, vec![], |_, _| async {
+            panic!("a spec the core refuses is never recorded")
+        })
         .await
         .expect("the refusal lands");
         let reasons = reasons_of(call.await.unwrap());
@@ -524,18 +526,10 @@ mod tests {
     #[tokio::test]
     async fn a_record_slower_than_the_bound_is_still_told_rendered() {
         let (board, call, id) = parked_with(conforming(), Duration::from_millis(20)).await;
-        answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
-            COMMIT_BOUND,
-            |_, _| async {
-                tokio::time::sleep(Duration::from_millis(80)).await;
-                Ok(a_tab())
-            },
-        )
+        answer(&board, "c1", &id, true, vec![], |_, _| async {
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            Ok(a_tab())
+        })
         .await
         .expect("the answer lands");
         assert_eq!(
@@ -544,37 +538,43 @@ mod tests {
         );
     }
 
-    /// A record that outlasts its own bound is abandoned — its commit future
-    /// is dropped before it lands — and the view is refused, naming why.
+    /// A slow preparation is abandoned within its bound, and the commit it
+    /// would have fed never starts: nothing is written.
     #[tokio::test]
-    async fn a_record_past_its_own_bound_is_refused_and_never_lands() {
-        let (board, call, id) = parked().await;
-        let landed = Arc::new(Mutex::new(false));
-        let mark = landed.clone();
-        answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
+    async fn a_slow_preparation_is_refused_before_anything_is_committed() {
+        let committed = Arc::new(Mutex::new(false));
+        let mark = committed.clone();
+        let result = prepare_then_commit(
             Duration::from_millis(20),
-            |_, _| async move {
+            async {
                 tokio::time::sleep(Duration::from_millis(200)).await;
+                Ok(())
+            },
+            |()| async move {
                 *mark.lock().unwrap() = true;
-                Ok(a_tab())
+                Ok(())
             },
         )
-        .await
-        .expect("the refusal lands");
-        assert_eq!(
-            reasons_of(call.await.unwrap()),
-            vec!["the view was checked but its temper record did not finish within 20ms"]
-        );
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        assert!(
-            !*landed.lock().unwrap(),
-            "the abandoned commit never ran on"
-        );
+        .await;
+        assert_eq!(result, Err("temper did not answer within 20ms".to_string()));
+        assert!(!*committed.lock().unwrap(), "no commit began");
+    }
+
+    /// A commit once begun is never abandoned by the bound: a commit slower
+    /// than the bound still answers — its record and its agent's answer
+    /// agree.
+    #[tokio::test]
+    async fn a_commit_slower_than_the_bound_still_answers() {
+        let result = prepare_then_commit(
+            Duration::from_millis(20),
+            async { Ok("hub") },
+            |hub| async move {
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                Ok(format!("{hub}: committed"))
+            },
+        )
+        .await;
+        assert_eq!(result, Ok("hub: committed".to_string()));
     }
 
     #[tokio::test]
@@ -582,15 +582,9 @@ mod tests {
         let (board, call, id) = parked().await;
         board.close("c1");
         call.await.unwrap();
-        assert!(answer(
-            &board,
-            "c1",
-            &id,
-            true,
-            vec![],
-            COMMIT_BOUND,
-            |_, _| async { panic!("an ended presentation is never recorded") }
-        )
+        assert!(answer(&board, "c1", &id, true, vec![], |_, _| async {
+            panic!("an ended presentation is never recorded")
+        })
         .await
         .is_err());
     }
