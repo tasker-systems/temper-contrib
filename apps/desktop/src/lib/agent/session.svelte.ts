@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { untrack } from 'svelte';
+import { checkSpec } from '$lib/catalog/catalog';
 import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 import {
 	type AcpUpdate,
@@ -9,13 +10,16 @@ import {
 	applyConfigUpdate,
 	applyModeUpdate,
 	applyNotice,
+	applyPresentNotice,
 	applyUpdate,
 	type ChatMessage,
 	type DeclaredConfigOption,
 	type DeclaredOption,
 	type DeclaredSelection,
 	declaredSelection,
-	EMPTY_SELECTION
+	EMPTY_SELECTION,
+	type PresentedNotice,
+	type PresentNotice
 } from './reducers';
 
 /** What is in view in the person's room, as the agent is shown it: a reference, never the body. */
@@ -81,6 +85,9 @@ class AgentSession {
 	conversation = $state<ConversationInfo | null>(null);
 	messages = $state<ChatMessage[]>([]);
 	asks = $state<AskedNotice[]>([]);
+	/** Views the agent presented that the desktop has not yet answered — parked on the webview,
+	 *  never on the person, and cleared by their resolution. */
+	presentations = $state<PresentedNotice[]>([]);
 	selection = $state<DeclaredSelection>(EMPTY_SELECTION);
 	draft = $state<string>('');
 	prompting = $state<boolean>(false);
@@ -113,6 +120,7 @@ class AgentSession {
 	 *  surface it decorates, and closing the conversation ends the conversation itself. */
 	private unlisten: (() => void) | null = null;
 	private unlistenAsk: (() => void) | null = null;
+	private unlistenPresent: (() => void) | null = null;
 	private unlistenRoster: (() => void) | null = null;
 	private initialised = false;
 
@@ -232,6 +240,18 @@ class AgentSession {
 		}).then((u) => {
 			this.unlistenAsk = u;
 		});
+		// A presented view is checked here, by the store, the moment it arrives: `checkSpec` is the
+		// one gate, and its errors are the refusal's reasons. The answer goes straight back — a
+		// refusal mounts nothing, and nothing here waits on the person.
+		listen<PresentNotice>('acp-present', (event) => {
+			const current = untrack(() => this.conversation);
+			const notice = event.payload;
+			if (!current || notice.conversationId !== current.conversationId) return;
+			applyPresentNotice(this.messages, this.presentations, notice);
+			if (notice.kind === 'presented') this.answerPresentation(notice);
+		}).then((u) => {
+			this.unlistenPresent = u;
+		});
 		// The settings room rewrites the roster (a hand save, a removal, a preset
 		// selection): the core says so, and the picker re-reads. The listener lives here,
 		// with the store, so every surface that renders the roster follows.
@@ -295,6 +315,7 @@ class AgentSession {
 			this.conversation = info;
 			this.messages = [];
 			this.asks = [];
+			this.presentations = [];
 			this.lastReferenceUri = null;
 			this.scope = options.scope ?? null;
 			this.scopeShared = false;
@@ -388,6 +409,28 @@ class AgentSession {
 		return this.handoff?.turn ?? null;
 	}
 
+	private async answerPresentation(notice: PresentedNotice): Promise<void> {
+		// The spec is the agent's, untrusted: a check that throws is still an answer — a refusal
+		// naming the error — never a silence the agent waits out.
+		let check: ReturnType<typeof checkSpec>;
+		try {
+			check = checkSpec(notice.spec);
+		} catch (e) {
+			check = { ok: false, errors: [`the spec could not be checked — ${String(e)}`] };
+		}
+		try {
+			await invoke('present_answer', {
+				conversationId: notice.conversationId,
+				presentedId: notice.presentedId,
+				rendered: check.ok,
+				reasons: check.ok ? [] : check.errors
+			});
+		} catch {
+			// The presentation already ended (closed, or out of time); its resolution event
+			// carries the outcome.
+		}
+	}
+
 	async answer(ask: AskedNotice, option: DeclaredOption): Promise<void> {
 		if (!this.conversation) return;
 		try {
@@ -449,6 +492,7 @@ class AgentSession {
 		this.scopeShared = false;
 		this.messages = [];
 		this.asks = [];
+		this.presentations = [];
 		this.selection = EMPTY_SELECTION;
 		try {
 			await invoke('acp_close', { conversationId: id });

@@ -8,9 +8,11 @@ mod person_context;
 // The harness-fidelity probe is a test fixture, not an app surface: the only
 // caller is the witness. The real presentation server (Chunk 1's module)
 // replaces it, so the probe is compiled out of every non-test build.
+mod present_board;
 #[cfg(test)]
 mod present_probe;
 mod present_server;
+mod presentation;
 mod roster;
 mod settings;
 mod temper;
@@ -92,7 +94,8 @@ pub fn run() {
             acp::acp_set_config_option,
             acp::acp_close,
             acp::acp_ask_surface,
-            acp::acp_answer_permission
+            acp::acp_answer_permission,
+            presentation::present_answer
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

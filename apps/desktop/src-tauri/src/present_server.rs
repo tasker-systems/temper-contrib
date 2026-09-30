@@ -5,12 +5,11 @@
 //! bound to loopback on an ephemeral port, gated by a per-conversation
 //! secret so only the agent process that conversation started can call it.
 //!
-//! Chunk 1's shape: the server exists and authenticates; the tool's body
-//! returns the refused stub until the parked-presentation board (chunk 3)
-//! gives it a webview to answer from. Nothing here is reachable from the
-//! webview — this module runs in the Rust core, and the app's CSP forbids
-//! any `connect-src` addition; the webview reaches answers through Tauri
-//! commands and events only.
+//! A tool call parks on the conversation's [`PresentationBoard`] until the
+//! webview has checked the spec and answered, and returns that answer.
+//! Nothing here is reachable from the webview — this module runs in the Rust
+//! core, and the app's CSP forbids any `connect-src` addition; the webview
+//! reaches answers through Tauri commands and events only.
 
 use std::sync::Arc;
 
@@ -20,8 +19,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Router;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams, ServerCapabilities,
-    ServerConfig,
+    CacheScope, CallToolResult, ContentBlock, ListToolsResult, PaginatedRequestParams,
+    ServerCapabilities, ServerConfig,
 };
 use rmcp::service::{RequestContext, RoleServer};
 use rmcp::transport::streamable_http_server::{
@@ -31,6 +30,10 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+use crate::present_board::{
+    PresentOutcome, PresentSink, Presentation, PresentationBoard, ANSWER_BOUND,
+};
 
 /// The catalog file the webview validates against — included, never copied,
 /// so the server cannot describe a catalog the app would refuse.
@@ -48,6 +51,9 @@ pub fn catalog_version() -> String {
 
 /// The tool's `inputSchema`: the closed spec shape with each catalog
 /// component's props in `$defs`, referenced through a `oneOf` in `elements`.
+/// `$defs` sits at the schema's root: a `#/$defs/…` pointer resolves from the
+/// document root, so defs nested anywhere else leave every ref dangling —
+/// which a strict harness answers by dropping the tool.
 /// Pure and unit-tested; the projection is the only place catalog names are
 /// read, so a renamed component surfaces here first.
 pub fn present_view_input_schema() -> Value {
@@ -59,13 +65,16 @@ pub fn present_view_input_schema() -> Value {
         .iter()
         .map(|(name, c)| (name.clone(), c["props"].clone()))
         .collect();
+    // `children` is required: the gate (`checkSpec`, via json-render's
+    // element shape) refuses an element without it, so a schema that left it
+    // optional would invite a spec the desktop must refuse.
     let element_branches: Vec<Value> = components
         .keys()
         .map(|name| {
             json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["type", "props"],
+                "required": ["type", "props", "children"],
                 "properties": {
                     "type": { "const": name },
                     "props": { "$ref": format!("#/$defs/{name}") },
@@ -77,12 +86,12 @@ pub fn present_view_input_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
+        "$defs": defs,
         "required": ["spec"],
         "properties": {
             "spec": {
                 "type": "object",
                 "additionalProperties": false,
-                "$defs": defs,
                 "required": ["root", "elements"],
                 "properties": {
                     "root": { "type": "string" },
@@ -107,41 +116,62 @@ pub struct PresentViewArgs {
     pub spec: Value,
 }
 
+/// What one conversation's server presents into: the board its views park
+/// on, the conversation they belong to, the agent presenting (its own init
+/// answer's name), and where the webview is told.
+#[derive(Clone)]
+pub struct PresentContext {
+    pub board: PresentationBoard,
+    pub conversation_id: String,
+    pub agent: String,
+    pub sink: PresentSink,
+}
+
 /// The service one conversation's MCP server runs. Fresh per request in
-/// stateless mode; the router is not stored as a field (the `#[tool_handler]`
-/// macro defaults the two tool methods to `Self::tool_router()`), and the
-/// tool body is the chunk-3 stub.
-pub struct PresentServer;
+/// stateless mode, each carrying the conversation's context; the router is
+/// not stored as a field (the `#[tool_handler]` macro defaults the two tool
+/// methods to `Self::tool_router()`).
+pub struct PresentServer {
+    context: PresentContext,
+}
 
 #[tool_router]
 impl PresentServer {
-    pub fn new() -> Self {
-        Self
+    pub fn new(context: PresentContext) -> Self {
+        Self { context }
     }
 
     #[tool(
         description = "Present a temper view (a json-render spec) to the person in a temper-desktop conversation. The spec is checked by the person's desktop against the temper catalog (temper@1.0.0, closed JSON Schema). A rendered answer means the spec passed the check and was mounted as its own tab — never that the person has read it; a reply about the view arrives as the conversation's next message, never in this tool's result. A refused answer names the catalog version and every reason the spec failed."
     )]
-    fn temper_present_view(
+    async fn temper_present_view(
         &self,
-        _args: Parameters<PresentViewArgs>,
+        Parameters(args): Parameters<PresentViewArgs>,
     ) -> Result<CallToolResult, ErrorData> {
-        refused_not_wired()
+        let context = &self.context;
+        let outcome = context
+            .board
+            .present(
+                &context.conversation_id,
+                Presentation {
+                    agent: context.agent.clone(),
+                    spec: args.spec,
+                },
+                &context.sink,
+                ANSWER_BOUND,
+            )
+            .await;
+        Ok(tool_result(&outcome))
     }
 }
 
-/// The chunk-3 stub: no parked-presentation board exists yet, so no spec can
-/// reach a webview. The end is recorded as refused with a named reason —
-/// never a hang, never a partial render.
-fn refused_not_wired() -> Result<CallToolResult, ErrorData> {
-    let result = json!({
-        "ok": "refused",
-        "catalogVersion": catalog_version(),
-        "reasons": ["not yet wired into a conversation"]
-    });
-    Ok(CallToolResult::success(vec![ContentBlock::text(
-        serde_json::to_string(&result).unwrap_or_else(|e| format!("present result failed: {e}")),
-    )]))
+/// The outcome as the agent reads it: one closed json object in a text
+/// block. A refusal is a successful call carrying `refused` — the tool
+/// worked; the view did not pass.
+fn tool_result(outcome: &PresentOutcome) -> CallToolResult {
+    CallToolResult::success(vec![ContentBlock::text(
+        serde_json::to_string(outcome).unwrap_or_else(|e| format!("present result failed: {e}")),
+    )])
 }
 
 #[tool_handler]
@@ -171,7 +201,14 @@ impl ServerHandler for PresentServer {
                 );
             }
         }
-        Ok(ListToolsResult::with_all_items(tools))
+        // `ttlMs` and `cacheScope` are required on a list result from MCP
+        // 2026-07-28 on: Claude Code refuses a tools/list without them and
+        // never offers the tool. The same values `server/discover` answers
+        // with — no caching (the server lives one conversation), and private
+        // (it answers one secret-holding agent).
+        Ok(ListToolsResult::with_all_items(tools)
+            .with_ttl_ms(0)
+            .with_cache_scope(CacheScope::Private))
     }
 }
 
@@ -206,7 +243,7 @@ impl RunningServer {
     /// same assembly temper-mcp runs, minus the deployment-specific pieces.
     /// rmcp's loopback host allowlist stays on: rebinding protection is the
     /// right default for a loopback-only server.
-    pub async fn start() -> Result<Self, String> {
+    pub async fn start(context: PresentContext) -> Result<Self, String> {
         let secret = new_secret();
         let serve_secret = secret.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
@@ -250,7 +287,7 @@ impl RunningServer {
                     }
                 };
                 let mcp_service = StreamableHttpService::new(
-                    || Ok(PresentServer::new()),
+                    move || Ok(PresentServer::new(context.clone())),
                     Arc::new(LocalSessionManager::default()),
                     StreamableHttpServerConfig::default()
                         .with_legacy_session_mode(false)
@@ -373,6 +410,19 @@ async fn wait_shutdown(mut shutdown_rx: tokio::sync::watch::Receiver<bool>) {
     let _ = shutdown_rx.wait_for(|stopped| *stopped).await;
 }
 
+/// A context whose board has no surface and whose sink records nothing:
+/// every call through it is refused "no surface to render into" — the bind
+/// and auth witnesses need a server, not a webview.
+#[cfg(test)]
+pub fn surfaceless_context() -> PresentContext {
+    PresentContext {
+        board: PresentationBoard::default(),
+        conversation_id: "test-conversation".to_string(),
+        agent: "test-agent".to_string(),
+        sink: Arc::new(|_| {}),
+    }
+}
+
 /// The wire entry one conversation's agent receives in its `session/new`:
 /// the ACP `http` shape with the secret in its header, exactly as the
 /// schema's own serialization test composes it.
@@ -402,10 +452,10 @@ async fn the_server_rides_session_new_as_the_acp_http_shape() {
 #[cfg(test)]
 #[tokio::test(flavor = "multi_thread")]
 async fn two_conversations_carry_distinct_secrets() {
-    let a = RunningServer::start()
+    let a = RunningServer::start(surfaceless_context())
         .await
         .expect("the first server binds");
-    let b = RunningServer::start()
+    let b = RunningServer::start(surfaceless_context())
         .await
         .expect("the second server binds");
     assert_ne!(a.url, b.url, "each bind takes its own ephemeral port");
@@ -456,7 +506,7 @@ mod tests {
     fn the_schema_projects_every_component_closed() {
         let schema = present_view_input_schema();
         let spec = &schema["properties"]["spec"];
-        let defs = spec["$defs"].as_object().expect("$defs is an object");
+        let defs = schema["$defs"].as_object().expect("$defs is an object");
         let catalog: Value = serde_json::from_str(CATALOG_JSON).unwrap();
         let components = catalog["components"].as_object().unwrap();
         assert_eq!(
@@ -478,6 +528,11 @@ mod tests {
             .as_array()
             .expect("elements is a oneOf over the components");
         assert_eq!(one_of.len(), components.len());
+        // Every branch requires what the gate requires — an element without
+        // `children` is refused by checkSpec, so the wire must not admit it.
+        for branch in one_of {
+            assert_eq!(branch["required"], json!(["type", "props", "children"]));
+        }
     }
 
     /// A prop the catalog does not declare is refused by the wire schema
@@ -488,7 +543,7 @@ mod tests {
         // this asserts the schema's shape carries the closure, which is what
         // a compliant harness's model would be held to.
         let schema = present_view_input_schema();
-        for (_, def) in schema["properties"]["spec"]["$defs"].as_object().unwrap() {
+        for (_, def) in schema["$defs"].as_object().unwrap() {
             assert_eq!(
                 def.get("additionalProperties").and_then(Value::as_bool),
                 Some(false)
@@ -498,6 +553,36 @@ mod tests {
             schema.get("additionalProperties").and_then(Value::as_bool),
             Some(false)
         );
+    }
+
+    /// Every `$ref` resolves from the document root, as JSON Schema resolves
+    /// it. A dangling ref is a schema a strict harness cannot use: Claude
+    /// Code listed the tool and never offered it to its model.
+    #[test]
+    fn every_ref_resolves_from_the_schema_root() {
+        fn refs(value: &Value, found: &mut Vec<String>) {
+            match value {
+                Value::Object(map) => {
+                    if let Some(Value::String(r)) = map.get("$ref") {
+                        found.push(r.clone());
+                    }
+                    map.values().for_each(|v| refs(v, found));
+                }
+                Value::Array(items) => items.iter().for_each(|v| refs(v, found)),
+                _ => {}
+            }
+        }
+        let schema = present_view_input_schema();
+        let mut found = Vec::new();
+        refs(&schema, &mut found);
+        assert!(!found.is_empty(), "the element branches reference the defs");
+        for r in found {
+            let pointer = r.strip_prefix('#').expect("a local ref");
+            assert!(
+                schema.pointer(pointer).is_some(),
+                "{r} resolves from the root"
+            );
+        }
     }
 
     /// The secret: matched exactly, never by prefix, never by absence.
@@ -532,7 +617,7 @@ mod tests {
     /// run with the lib suite.
     #[tokio::test(flavor = "multi_thread")]
     async fn the_server_binds_loopback_and_serves_the_catalog_schema() {
-        let server = RunningServer::start()
+        let server = RunningServer::start(surfaceless_context())
             .await
             .expect("the presentation server binds");
         // Ephemeral: a real port, unconfigured.
@@ -601,15 +686,19 @@ mod tests {
                 .await
                 .expect("tools/list reached the server");
         let tools: Value = tools.json().await.expect("tools/list answered json");
+        // A 2026-07-28 client refuses a list result without these two.
+        assert_eq!(tools["result"]["ttlMs"], json!(0), "got: {tools}");
+        assert_eq!(tools["result"]["cacheScope"], json!("private"));
         let tool = &tools["result"]["tools"][0];
         assert_eq!(tool["name"], "temper_present_view");
         assert!(
-            tool["inputSchema"]["properties"]["spec"]["$defs"].is_object(),
+            tool["inputSchema"]["$defs"].is_object(),
             "the wire schema carries the catalog projection, got: {}",
             tool["inputSchema"]
         );
 
-        // The tool call itself: the chunk's stub speaks the refused end.
+        // The tool call itself: with no room to render into, the board
+        // refuses at once — a named reason, never a hang.
         let call = post(
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"temper_present_view","arguments":{"spec":{"root":"x","elements":{}}}}}"#.to_string(),
         )
@@ -619,16 +708,10 @@ mod tests {
         assert_eq!(call.status(), reqwest::StatusCode::OK);
         let call: Value = call.json().await.expect("tools/call answered json");
         let text = call["result"]["content"][0]["text"].as_str().unwrap_or("");
-        let result: Value = serde_json::from_str(text).expect("the stub result parses");
+        let result: Value = serde_json::from_str(text).expect("the tool result parses");
         assert_eq!(result["ok"], "refused");
         assert_eq!(result["catalogVersion"], catalog_version());
-        assert!(
-            result["reasons"]
-                .as_array()
-                .map(|r| !r.is_empty())
-                .unwrap_or(false),
-            "the refusal names its reason"
-        );
+        assert_eq!(result["reasons"], json!(["no surface to render into"]));
 
         server.stop().await;
     }

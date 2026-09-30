@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkSpec, temperCatalog } from './catalog';
+import { checkSpec, MAX_DEPTH, MAX_ELEMENTS, temperCatalog } from './catalog';
 
 const REF = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
 
@@ -102,6 +102,93 @@ describe('the temper catalog', () => {
 		expect(text).toMatch(/type/);
 		expect(text).toMatch(/total/);
 		expect(text).toMatch(/color/);
+	});
+
+	it('refuses children that are not an array, answering rather than throwing', () => {
+		for (const children of [5, {}, 'r']) {
+			const r = checkSpec({
+				root: 'r',
+				elements: { r: { type: 'RegionState', props: { state: 'failed', label: 'x' }, children } }
+			});
+			expect(r.ok).toBe(false);
+			if (!r.ok) expect(r.errors.some((e) => e.includes('children'))).toBe(true);
+		}
+	});
+
+	// The spec is an agent's untrusted input: the shape is closed, lookups are own-key, and the
+	// elements form one bounded tree. Each case below is an attack a looser gate admitted.
+	const region = (children: unknown[] = []) => ({
+		type: 'RegionState',
+		props: { state: 'failed', label: 'x' },
+		children
+	});
+	const refusedFor = (spec: unknown, fragment: string) => {
+		const r = checkSpec(spec);
+		expect(r.ok, JSON.stringify(r)).toBe(false);
+		if (!r.ok) expect(r.errors.join('\n')).toContain(fragment);
+	};
+
+	it('refuses a cycle, and a child placed twice, rather than render without end', () => {
+		const selfList = list(good);
+		(selfList.elements.list as { children: string[] }).children = ['list'];
+		refusedFor(selfList, 'already placed');
+		// The fan-out that multiplies a render: two parents naming the same two children.
+		refusedFor(
+			{
+				root: 'a',
+				elements: { a: region(['b', 'c']), b: region(['d']), c: region(['d']), d: region() }
+			},
+			'"d" is already placed'
+		);
+	});
+
+	it('refuses an element that root does not reach', () => {
+		refusedFor({ root: 'a', elements: { a: region(), stray: region() } }, 'not reachable');
+	});
+
+	it('refuses a view past its bounds', () => {
+		const many = Object.fromEntries(
+			Array.from({ length: MAX_ELEMENTS + 1 }, (_, i) => [`e${i}`, region()])
+		);
+		refusedFor({ root: 'e0', elements: many }, `more than ${MAX_ELEMENTS}`);
+		const chain = Object.fromEntries(
+			Array.from({ length: MAX_DEPTH + 1 }, (_, i) => [
+				`e${i}`,
+				region(i < MAX_DEPTH ? [`e${i + 1}`] : [])
+			])
+		);
+		refusedFor({ root: 'e0', elements: chain }, `deeper than ${MAX_DEPTH}`);
+	});
+
+	it('refuses bindings, handlers and state anywhere in the shape', () => {
+		for (const [field, value] of [
+			['on', { press: { action: 'setState' } }],
+			['visible', { $state: '/secret' }],
+			['watch', { '/x': { action: 'setState' } }],
+			['repeat', { statePath: '/rows' }],
+			['zzz', 1]
+		] as const)
+			refusedFor({ root: 'r', elements: { r: { ...region(), [field]: value } } }, `"${field}"`);
+		refusedFor({ root: 'r', elements: { r: region() }, state: { secret: 1 } }, '"state"');
+	});
+
+	it('is satisfied by nothing inherited from Object.prototype, and never throws on it', () => {
+		refusedFor(
+			{ root: 'r', elements: { r: region(['toString']) } },
+			'"toString" that does not exist'
+		);
+		refusedFor({ root: 'constructor', elements: { r: region() } }, 'root: "constructor"');
+		refusedFor(
+			JSON.parse(
+				'{"root":"r","elements":{"r":{"type":"RegionState","props":{"state":"failed","label":"x"},"children":["__proto__"]},"__proto__":{"type":"RegionState","props":{"state":"failed","label":"x"},"children":[]}}}'
+			),
+			'reserved name'
+		);
+		for (const type of ['constructor', 'toString', '__proto__'])
+			expect(() =>
+				checkSpec({ root: 'r', elements: { r: { type, props: {}, children: [] } } })
+			).not.toThrow();
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
 	});
 
 	it('refuses a reference that is not a resource id', () => {

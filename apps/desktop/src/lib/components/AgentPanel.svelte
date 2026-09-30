@@ -154,6 +154,18 @@
 				</div>
 			</section>
 		{/each}
+		{#each session.presentations as presented (presented.presentedId)}
+			<section
+				class="presenting"
+				aria-label="View presented"
+				aria-busy="true"
+				data-presented={presented.presentedId}
+			>
+				<p class="t-strip">
+					{presented.agent} presented a view <span aria-hidden="true">·</span> checking it
+				</p>
+			</section>
+		{/each}
 		<form
 			class="composer"
 			onsubmit={(event) => {
@@ -342,6 +354,15 @@
 		border: 1px solid var(--tp-accent-line);
 		border-radius: var(--tp-radius-chip);
 		background: var(--tp-surface);
+	}
+	.presenting {
+		width: 100%;
+		padding: 0.6rem 0.8rem;
+		border: 1px dashed var(--tp-rule-strong);
+		border-radius: var(--tp-radius-chip);
+	}
+	.presenting p {
+		margin: 0;
 	}
 	.ask-what {
 		margin: 0;

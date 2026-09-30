@@ -4,7 +4,9 @@
  * `z.fromJSONSchema`, which keeps `required` and `additionalProperties: false`.
  */
 import { defineCatalog, type Spec } from '@json-render/core';
-import { schema } from '@json-render/svelte';
+// The schema subpath, not the package root: the root re-exports Svelte components, and the gate
+// must load headless too (the running-app witness runs it under bun).
+import { schema } from '@json-render/svelte/schema';
 import { z } from 'zod';
 import source from './temper.catalog.json';
 
@@ -36,6 +38,84 @@ export const CATALOG_VERSION = `temper@${(source as { version: string }).version
 
 export type SpecCheck = { ok: true; spec: Spec } | { ok: false; errors: string[] };
 
+/** The most elements, and the deepest nesting, a temper@1 view may carry. A view is a bounded
+ *  glance, not a document: a spec past either bound is refused, never rendered slowly. */
+export const MAX_ELEMENTS = 256;
+export const MAX_DEPTH = 8;
+
+const SPEC_KEYS = new Set(['root', 'elements']);
+const ELEMENT_KEYS = new Set(['type', 'props', 'children']);
+const RESERVED_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+	typeof v === 'object' && v !== null && !Array.isArray(v);
+const has = (o: object, key: string): boolean => Object.hasOwn(o, key);
+
+/**
+ * What the shape must be before any component is consulted. A spec is an agent's untrusted
+ * input, so the shape is closed to exactly what temper@1 renders — `root` and `elements`; per
+ * element `type`, `props`, `children` — which refuses bindings, handlers, visibility and state at
+ * the door (`on`, `visible`, `watch`, `repeat`, a top-level `state`: json-render acts on each).
+ * Every lookup is an own-key lookup, so nothing is satisfied by `Object.prototype`. And the
+ * elements form one tree from `root`: each element reached exactly once, none unreachable, no
+ * cycle, within the bounds — a cycle or a shared child multiplies a render without limit.
+ */
+function shapeErrors(spec: unknown): string[] {
+	if (!isRecord(spec)) return ['<root>: a spec is an object'];
+	const errors: string[] = [];
+	for (const key of Object.keys(spec))
+		if (!SPEC_KEYS.has(key)) errors.push(`<root>: "${key}" is not part of a temper@1 spec`);
+	const elements = spec.elements;
+	if (!isRecord(elements)) return [...errors, 'elements: a spec names its elements'];
+	const keys = Object.keys(elements);
+	if (keys.length > MAX_ELEMENTS)
+		return [...errors, `elements: ${keys.length} elements, more than ${MAX_ELEMENTS}`];
+	for (const key of keys) {
+		if (RESERVED_KEYS.has(key)) errors.push(`elements/${key}: a reserved name`);
+		const el = elements[key];
+		if (!isRecord(el)) {
+			errors.push(`elements/${key}: an element is an object`);
+			continue;
+		}
+		for (const field of Object.keys(el))
+			if (!ELEMENT_KEYS.has(field))
+				errors.push(`elements/${key}: "${field}" is not part of a temper@1 element`);
+		if (el.children !== undefined && !Array.isArray(el.children))
+			errors.push(`elements/${key}/children: a list of element names`);
+	}
+	const root = spec.root;
+	if (typeof root !== 'string' || !has(elements, root)) {
+		errors.push(`root: "${String(root)}" is not an element`);
+		return errors;
+	}
+	// One tree from root: walked once, each element reached at most once.
+	const reached = new Set<string>([root]);
+	const walk = (key: string, depth: number): void => {
+		if (depth > MAX_DEPTH) {
+			errors.push(`elements/${key}: nested deeper than ${MAX_DEPTH}`);
+			return;
+		}
+		const el = elements[key];
+		const children = isRecord(el) && Array.isArray(el.children) ? el.children : [];
+		for (const child of children) {
+			if (typeof child !== 'string' || !has(elements, child)) {
+				errors.push(`elements/${key}: names a child "${String(child)}" that does not exist`);
+				continue;
+			}
+			if (reached.has(child)) {
+				errors.push(`elements/${key}: "${child}" is already placed — a view is a tree`);
+				continue;
+			}
+			reached.add(child);
+			walk(child, depth + 1);
+		}
+	};
+	walk(root, 1);
+	for (const key of keys)
+		if (!reached.has(key)) errors.push(`elements/${key}: not reachable from root`);
+	return errors;
+}
+
 /**
  * Validates a spec against the catalog. This is the gate — `temperCatalog.validate` alone is not:
  * json-render validates the spec's structure and component names, but with more than one
@@ -46,12 +126,12 @@ export type SpecCheck = { ok: true; spec: Spec } | { ok: false; errors: string[]
  * Props are literal in temper@1: a `{ "$state": … }` binding does not satisfy a component's
  * schema and is refused. Admitting dynamic props is a catalog-version decision, not a default.
  *
- * Then what JSON Schema cannot say: every child an element names exists (a missing child hides
- * its branch silently), and a BoundedList never shows more rows than it stands for, nor a
- * different number of rows than it has.
+ * The shape is closed and must be one bounded tree (`shapeErrors`); then what JSON Schema cannot
+ * say: a BoundedList never shows more rows than it stands for, nor a different number of rows
+ * than it has.
  */
 export function checkSpec(spec: unknown): SpecCheck {
-	const errors: string[] = [];
+	const errors = shapeErrors(spec);
 	const result = temperCatalog.validate(spec);
 	if (!result.success) {
 		const issues = result.error?.issues ?? [];
@@ -62,15 +142,12 @@ export function checkSpec(spec: unknown): SpecCheck {
 		);
 	}
 	// Keep going where the shape allows it, so a refusal lists every reason, not the first.
-	const shaped = spec as Partial<Spec> | null;
-	const elements =
-		shaped && typeof shaped.elements === 'object' && shaped.elements ? shaped.elements : null;
-	if (!elements) return { ok: false, errors: errors.length ? errors : ['spec has no elements'] };
+	const elements = isRecord(spec) && isRecord(spec.elements) ? spec.elements : null;
+	if (!elements) return { ok: false, errors: [...new Set(errors)] };
 
 	for (const [key, el] of Object.entries(elements)) {
-		const component = propsSchemas[el?.type];
-		if (!component) continue; // an unknown type is already refused above
-		const props = component.safeParse(el.props);
+		if (!isRecord(el) || typeof el.type !== 'string' || !has(propsSchemas, el.type)) continue;
+		const props = propsSchemas[el.type].safeParse(el.props);
 		if (!props.success) {
 			for (const i of props.error.issues)
 				errors.push(
@@ -78,19 +155,15 @@ export function checkSpec(spec: unknown): SpecCheck {
 				);
 			continue;
 		}
-		for (const child of el.children ?? [])
-			if (!(child in elements))
-				errors.push(`elements/${key}: names a child "${child}" that does not exist`);
 		if (el.type === 'BoundedList') {
-			const p = el.props as { total: number; shown: number; state: string };
+			const p = props.data as { total: number; shown: number; state: string };
+			const rows = Array.isArray(el.children) ? el.children.length : 0;
 			if (p.shown > p.total) errors.push(`elements/${key}: shows ${p.shown} of ${p.total}`);
-			if (p.state === 'present' && (el.children ?? []).length !== p.shown)
-				errors.push(
-					`elements/${key}: says it shows ${p.shown} but has ${(el.children ?? []).length} rows`
-				);
+			if (p.state === 'present' && rows !== p.shown)
+				errors.push(`elements/${key}: says it shows ${p.shown} but has ${rows} rows`);
 		}
 	}
-	if (typeof shaped?.root === 'string' && !(shaped.root in elements))
-		errors.push(`root: "${shaped.root}" is not an element`);
-	return errors.length ? { ok: false, errors } : { ok: true, spec: spec as Spec };
+	return errors.length
+		? { ok: false, errors: [...new Set(errors)] }
+		: { ok: true, spec: spec as Spec };
 }
