@@ -288,6 +288,64 @@ describe('the shell', () => {
 		expect(calls.some((c) => c.cmd === 'acp_ask_surface' && c.args?.present === false)).toBe(false);
 	});
 
+	it('a rendered presentation lands its tab in the strip, unfocused, and opens its room on the line', async () => {
+		const { container } = render(Shell);
+		await startedConversationWithParkedAsk();
+		await vi.waitFor(() => expect(handlers['acp-present']).toBeDefined());
+		const activeBefore = tabs.activeId;
+
+		const presented = {
+			kind: 'presented',
+			conversationId: 'c1',
+			presentedId: 'presented-0',
+			agent: 'opencode',
+			spec: {
+				root: 'r',
+				elements: {
+					r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
+				}
+			}
+		} as const;
+		handlers['acp-present']({ payload: presented });
+		await vi.waitFor(() =>
+			expect(
+				calls.some((c) => c.cmd === 'present_answer' && c.args?.presentedId === 'presented-0')
+			).toBe(true)
+		);
+		handlers['acp-present']({
+			payload: {
+				kind: 'resolved',
+				conversationId: 'c1',
+				presentedId: 'presented-0',
+				outcome: {
+					ok: 'rendered',
+					tab: {
+						resource: '01a0f000-0000-7000-8000-00000000000a',
+						artifact: '01a0f000-0000-7000-8000-00000000000b'
+					}
+				}
+			}
+		});
+
+		// The tab is in the strip; the active tab is where it was.
+		await vi.waitFor(() => expect(tabs.tabs.length).toBe(2));
+		expect(tabs.activeId).toBe(activeBefore);
+		const link = await vi.waitFor(() => {
+			const b = [...container.querySelectorAll('.tab-link')].find((b) =>
+				b.textContent?.includes('presented a view')
+			);
+			expect(b).toBeDefined();
+			return b as HTMLButtonElement;
+		});
+		await fireEvent.click(link);
+		await vi.waitFor(() => expect(tabs.activeId).not.toBe(activeBefore));
+		expect(tabs.current(tabs.active).subject).toMatchObject({
+			kind: 'presentation',
+			resource: '01a0f000-0000-7000-8000-00000000000a'
+		});
+		expect(tabs.current(tabs.active).lens).toBe('core/presentation');
+	});
+
 	it('a background tab keeps its reads when it is shown again', async () => {
 		const { container } = render(Shell);
 		tabs.open({ kind: 'resource', id: A }, { where: 'new' });

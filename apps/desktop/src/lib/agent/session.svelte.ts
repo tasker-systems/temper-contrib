@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { untrack } from 'svelte';
 import { checkSpec } from '$lib/catalog/catalog';
+import { type Subject, subjectKey } from '$lib/shell/subjects';
 import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 import {
 	type AcpUpdate,
@@ -122,6 +123,8 @@ class AgentSession {
 	private unlistenAsk: (() => void) | null = null;
 	private unlistenPresent: (() => void) | null = null;
 	private unlistenRoster: (() => void) | null = null;
+	/** The rendered presentations whose tab this session already opened. */
+	private presentedOpened = new Set<string>();
 	private initialised = false;
 
 	init(): void {
@@ -249,6 +252,7 @@ class AgentSession {
 			if (!current || notice.conversationId !== current.conversationId) return;
 			applyPresentNotice(this.messages, this.presentations, notice);
 			if (notice.kind === 'presented') this.answerPresentation(notice);
+			this.openPresentedTabs();
 		}).then((u) => {
 			this.unlistenPresent = u;
 		});
@@ -428,6 +432,35 @@ class AgentSession {
 		} catch {
 			// The presentation already ended (closed, or out of time); its resolution event
 			// carries the outcome.
+		}
+	}
+
+	/**
+	 * Every rendered presentation not yet shown gets its tab, opened unfocused: in the strip,
+	 * never focused — the person's tab and trail are untouched. The record lands before the agent
+	 * is told (chunk 5), so the subject is the record's own address. A tab already showing the
+	 * presentation, or set aside holding it, is reused — the open happens once per record.
+	 */
+	private openPresentedTabs(): void {
+		for (const message of this.messages) {
+			const tab = message.tab;
+			if (!tab) continue;
+			const key = `${tab.resource}:${tab.artifact}`;
+			if (this.presentedOpened.has(key)) continue;
+			this.presentedOpened.add(key);
+			const subject: Subject = {
+				kind: 'presentation',
+				resource: tab.resource,
+				artifact: tab.artifact
+			};
+			const keyOf = subjectKey(subject);
+			const showing = (s: Subject) => subjectKey(s) === keyOf;
+			if (
+				tabs.tabs.some((t) => showing(t.steps[t.cursor].subject)) ||
+				tabs.setAside.some((t) => showing(t.steps[t.cursor].subject))
+			)
+				continue;
+			tabs.open(subject, { where: 'new', lens: 'core/presentation', focus: false });
 		}
 	}
 

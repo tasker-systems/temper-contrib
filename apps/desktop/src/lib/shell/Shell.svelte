@@ -24,7 +24,7 @@
 	import RoomStrip from './RoomStrip.svelte';
 	import TabHost from './TabHost.svelte';
 	import TabStrip from './TabStrip.svelte';
-	import { subjectFromAddress, subjectKey, type Subject } from './subjects';
+	import { subjectFromAddress } from './subjects';
 	import { stepTitle, tabs } from './tabs.svelte';
 	import WaysIn from './WaysIn.svelte';
 
@@ -69,29 +69,6 @@
 		return () => {
 			invoke('acp_ask_surface', { conversationId: id, present: false }).catch(() => {});
 		};
-	});
-
-	// A rendered presentation's tab opens in the background at its resolution — in the strip,
-	// never focused; the person's tab and trail are untouched. The record lands before the agent
-	// is told (chunk 5), so the subject here is the record's own address. A tab already showing
-	// the presentation (or set aside holding it) is reused, opened only once.
-	const presentedOpened = new Set<string>();
-	$effect(() => {
-		const last = agentSession.messages[agentSession.messages.length - 1];
-		const tab = last?.tab;
-		if (!tab) return;
-		const key = `${tab.resource}:${tab.artifact}`;
-		if (presentedOpened.has(key)) return;
-		presentedOpened.add(key);
-		const subject: Subject = {
-			kind: 'presentation',
-			resource: tab.resource,
-			artifact: tab.artifact
-		};
-		const showing = (t: { steps: { subject: Subject }[]; cursor: number }) =>
-			subjectKey(t.steps[t.cursor].subject) === subjectKey(subject);
-		if (tabs.tabs.some(showing) || tabs.setAside.some(showing)) return;
-		tabs.open(subject, { where: 'new', lens: 'core/presentation', focus: false });
 	});
 
 	// The window-close draft guard: the core prevented a close over a dirty draft and says so.
