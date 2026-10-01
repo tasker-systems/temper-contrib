@@ -71,6 +71,9 @@ const LIST_ITEMS_MAX: usize = 12;
 const HEADER_MAX: usize = 40;
 const SCOPE_MAX: usize = 80;
 const LABEL_MAX: usize = 60;
+/// How many of a page's fields are weighed for its columns, most often present
+/// first; the rest are counted as not shown without being read.
+const FIELD_CANDIDATES_MAX: usize = 32;
 
 /// The listing's sortable columns, and the field temper orders each by.
 fn sort_field(key: &str) -> Option<ResourceSortField> {
@@ -406,7 +409,7 @@ pub fn table_props(
     ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     let room = COLUMNS_MAX.saturating_sub(columns.len());
     let mut fields: Vec<(&str, String, Kind)> = Vec::new();
-    for (name, _) in &ranked {
+    for (name, _) in ranked.iter().take(FIELD_CANDIDATES_MAX) {
         if fields.len() == room {
             break;
         }
@@ -516,12 +519,12 @@ pub fn table_props(
     serde_json::to_value(props).expect("table props serialize")
 }
 
-/// The lens's spec with its bound element filled from the answer, checked.
-pub fn fill(spec: &Value, binding: &Binding, props: Value) -> Result<Value, String> {
-    let mut spec = spec.clone();
+/// Whether the binding names a Table in the spec — asked before any read, so
+/// a binding that cannot be filled costs nothing.
+fn bound_table(spec: &Value, binding: &Binding) -> Result<(), String> {
     let element = spec
-        .get_mut("elements")
-        .and_then(|e| e.get_mut(&binding.element))
+        .get("elements")
+        .and_then(|e| e.get(&binding.element))
         .ok_or_else(|| format!("the lens's spec has no element {}", binding.element))?;
     if element.get("type").and_then(Value::as_str) != Some("Table") {
         return Err(format!(
@@ -529,7 +532,14 @@ pub fn fill(spec: &Value, binding: &Binding, props: Value) -> Result<Value, Stri
             binding.read, binding.element
         ));
     }
-    element["props"] = props;
+    Ok(())
+}
+
+/// The lens's spec with its bound element filled from the answer, checked.
+pub fn fill(spec: &Value, binding: &Binding, props: Value) -> Result<Value, String> {
+    bound_table(spec, binding)?;
+    let mut spec = spec.clone();
+    spec["elements"][&binding.element]["props"] = props;
     check_spec(&spec)
         .map_err(|errors| format!("the filled view was refused: {}", errors.join("; ")))?;
     Ok(spec)
@@ -580,6 +590,7 @@ pub async fn lens_resolve(
     if binding.read != "resource-list" {
         return Err(format!("no read named {} can be bound", binding.read));
     }
+    bound_table(&spec, &binding)?;
     let mut params = listing_params(&subject, &view)?;
     let client = state
         .client()
@@ -798,6 +809,21 @@ mod tests {
         assert_eq!(last_page_offset(&answer(vec![], 0, 50, 50)), Some(0));
         assert_eq!(last_page_offset(&answer(vec![], 0, 0, 50)), None);
         assert_eq!(last_page_offset(&answer(tasks(1), 51, 50, 50)), None);
+    }
+
+    #[test]
+    fn only_the_most_present_fields_are_weighed_and_the_rest_are_counted() {
+        let meta: serde_json::Map<String, Value> = (0..200)
+            .map(|i| (format!("k{i:03}"), json!({ "nested": i })))
+            .collect();
+        let rows = vec![row(1, "task", Value::Object(meta), json!({}))];
+        let props = table_props(
+            &answer(rows, 1, 0, 50),
+            &context_subject(),
+            &ViewState::default(),
+        );
+        assert_eq!(props["fieldsNotShown"], 200);
+        fill(&spec(), &binding(), props).expect("passes");
     }
 
     #[test]
