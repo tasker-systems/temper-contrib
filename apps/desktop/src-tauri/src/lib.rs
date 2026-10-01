@@ -1,4 +1,5 @@
 mod acp;
+mod adapters;
 mod document;
 mod document_panel;
 mod document_save;

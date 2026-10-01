@@ -364,11 +364,18 @@ pub async fn acp_start(
 ) -> Result<ConversationInfo, String> {
     // A configured agent's launch facts reach here as one launch spec from
     // the device store: a plain command string (`opencode acp`) parses by
-    // shell words, and a JSON object (`{"command":…, "args":…, "env":…}`)
-    // carries its args and env verbatim — the same forms the ACP crate
-    // accepts, so the store holds exactly what it can launch.
-    let agent = AcpAgent::from_str(command.trim())
-        .map_err(|e| format!("the launch command does not parse as an ACP agent: {e}"))?;
+    // shell words, a JSON object (`{"command":…, "args":…, "env":…}`) carries
+    // its args and env verbatim — the same forms the ACP crate accepts, so the
+    // store holds exactly what it can launch. A roster row carrying the
+    // `{{adapter:key}}` marker names a bundled adapter instead: adapters.rs
+    // renders it to the interpreter + entry + harness env at spawn time.
+    let agent = if crate::adapters::is_bundled_row(&command) {
+        let config = crate::adapters::render_launch(command.trim())?;
+        AcpAgent::new(config)
+    } else {
+        AcpAgent::from_str(command.trim())
+            .map_err(|e| format!("the launch command does not parse as an ACP agent: {e}"))?
+    };
     let cwd = expand_cwd(&cwd)?;
 
     let conversation_id = format!(
@@ -902,13 +909,21 @@ mod tests {
     }
 
     /// Builds an `AcpAgent` from a bundled preset in `agents-roster.toml`.
-    /// The launch command in the roster defines the supported adapter package
-    /// and semver range, so updating supported versions is a TOML-only change.
+    /// Bundled-adapter rows render through adapters.rs, so a witness spawns
+    /// exactly what the app spawns — interpreter, entry file, harness env and
+    /// all; the adapter version is bun.lock's, never the TOML's.
     fn roster_witness_agent(key: &str) -> AcpAgent {
         let entry = crate::roster::roster_entry(key)
             .unwrap_or_else(|| panic!("roster preset for `{key}` present in agents-roster.toml"));
-        AcpAgent::from_str(&entry.command)
-            .unwrap_or_else(|e| panic!("launch command for `{key}` parses: {e}"))
+        if crate::adapters::is_bundled_row(&entry.command) {
+            AcpAgent::new(
+                crate::adapters::render_launch(&entry.command)
+                    .unwrap_or_else(|e| panic!("bundled adapter for `{key}` renders: {e}")),
+            )
+        } else {
+            AcpAgent::from_str(&entry.command)
+                .unwrap_or_else(|e| panic!("launch command for `{key}` parses: {e}"))
+        }
     }
 
     fn claude_code_witness_agent() -> AcpAgent {
@@ -1776,12 +1791,33 @@ whole. Change nothing outside it, and write nothing else inside it.";
         }
     }
 
-    /// Witness for the second agent: the npm adapter
-    /// [`CLAUDE_AGENT_ACP`], pinned, answers initialize and one prompt
+    /// Pins the adapter interpreter for the duration of a witness body.
+    /// Restores the prior value on drop, so a pinned twin never leaks the pin
+    /// into the parallel default-interpreter run.
+    struct InterpreterPin(Option<String>);
+    impl InterpreterPin {
+        fn set(value: &str) -> Self {
+            let prior = std::env::var("TEMPER_ACP_INTERPRETER").ok();
+            std::env::set_var("TEMPER_ACP_INTERPRETER", value);
+            InterpreterPin(prior)
+        }
+    }
+    impl Drop for InterpreterPin {
+        fn drop(&mut self) {
+            match &self.0 {
+                Some(v) => std::env::set_var("TEMPER_ACP_INTERPRETER", v),
+                None => std::env::remove_var("TEMPER_ACP_INTERPRETER"),
+            }
+        }
+    }
+
+    /// Witness for the second agent: the bundled adapter
+    /// (`@agentclientprotocol/claude-agent-acp`, versioned by bun.lock),
+    /// launched under node by default, answers initialize and one prompt
     /// through the same conversation path. Requires `claude` auth on this
     /// machine. Run locally: `cargo test -p desktop --lib -- --ignored`
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires npx and local claude auth"]
+    #[ignore = "requires the claude CLI and local claude auth"]
     async fn claude_code_answers_a_prompt() {
         let (commands, recorded, info) = start_test_conversation(
             claude_code_witness_agent(),
@@ -1801,12 +1837,42 @@ whole. Change nothing outside it, and write nothing else inside it.";
         );
     }
 
-    /// Witness for Google Antigravity CLI: the npm adapter `agy-acp`, which wraps
-    /// `agy` on $PATH, answers initialize and one prompt through the same conversation
-    /// path. Requires `agy` CLI on this machine. Run locally:
+    /// The interpreter-parity twin: the same prompt through the same bundled
+    /// adapter, pinned to bun. A difference between this witness and its
+    /// node-default sibling is an adapter-interpreter incompatibility, named
+    /// — never a silent win because one interpreter happened to be picked.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires bun, the claude CLI and local claude auth"]
+    async fn claude_code_answers_a_prompt_under_bun() {
+        let _pin = InterpreterPin::set("bun");
+        let (commands, recorded, info) = start_test_conversation(
+            claude_code_witness_agent(),
+            AskBoard::default(),
+            silent_ask_sink(),
+        )
+        .await;
+        assert!(!info.session_id.is_empty(), "agent should create a session");
+
+        let stop_reason = prompt(&commands, "Reply with exactly: OK").await;
+        assert_eq!(stop_reason, "end_turn", "the turn should end normally");
+
+        let chunks = streamed_chunks(&recorded);
+        assert!(
+            chunks.concat().to_uppercase().contains("OK"),
+            "under bun the agent's streamed answer should reply OK, got: {chunks:?}"
+        );
+    }
+
+    /// Witness for Google Antigravity CLI: the bundled `agy-acp` adapter,
+    /// which wraps the person's own `agy` (AGY_BIN at launch), answers
+    /// initialize and one prompt through the same conversation path. This
+    /// adapter drives agy over a PTY (node-pty), so it runs under node only:
+    /// bun's node-pty delivers no data (verified 2026-10-01), and the pin
+    /// test in adapters.rs is what proves node stays this launch's default.
+    /// Requires `agy` CLI on this machine. Run locally:
     /// `cargo test -p desktop --lib -- --ignored agy_answers_a_prompt`
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires npx and agy on PATH"]
+    #[ignore = "requires the agy CLI on PATH"]
     async fn agy_answers_a_prompt() {
         let (commands, recorded, info) =
             start_test_conversation(agy_witness_agent(), AskBoard::default(), silent_ask_sink())
@@ -1830,7 +1896,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
     /// Requires `claude` auth on this machine.
     /// Run locally: `cargo test -p desktop --lib -- --ignored`
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires npx and local claude auth"]
+    #[ignore = "requires the claude CLI and local claude auth"]
     async fn claude_code_permission_ask_round_trips_and_the_agent_proceeds() {
         let board = AskBoard::default();
         board.set_surface("test-conversation", true);
@@ -1942,7 +2008,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
     /// arrives anyway. Requires `claude` auth on this machine.
     /// Run locally: `cargo test -p desktop --lib -- --ignored`
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires npx and local claude auth"]
+    #[ignore = "requires the claude CLI and local claude auth"]
     async fn claude_code_preapproved_tools_never_ask() {
         let config_dir = std::env::temp_dir().join("temper-desktop-acp-preapproved-config");
         std::fs::create_dir_all(&config_dir).expect("claude config directory");
@@ -1964,9 +2030,8 @@ whole. Change nothing outside it, and write nothing else inside it.";
         let claude_command = crate::roster::roster_entry("claude")
             .expect("claude preset in agents-roster.toml")
             .command;
-        let config = AcpAgent::from_str(&claude_command)
-            .expect("claude preset launch command parses")
-            .into_config()
+        let config = crate::adapters::render_launch(&claude_command)
+            .expect("claude's bundled adapter renders")
             .env("CLAUDE_CONFIG_DIR", config_dir.to_string_lossy().as_ref());
         let agent = AcpAgent::new(config);
         let board = AskBoard::default();
@@ -2183,7 +2248,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
     /// Run locally: `cargo test --lib -- --ignored
     /// claude_code_presents_a_rendered_and_a_refused_view`
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "requires npx, bun, and local claude auth"]
+    #[ignore = "requires bun, the claude CLI and local claude auth"]
     async fn claude_code_presents_a_rendered_and_a_refused_view() {
         presents_a_rendered_and_a_refused_view(claude_code_witness_agent(), None).await;
     }
@@ -2341,32 +2406,38 @@ whole. Change nothing outside it, and write nothing else inside it.";
         } else {
             eprintln!("skip arm: opencode not on PATH");
         }
-        if which_probe("claude-agent-acp") {
-            harnesses.push(("claude-agent-acp", "claude-agent-acp 0.84.0"));
+        // The wrapped harnesses are probed by the CLI their bundled adapter
+        // wraps; the adapter itself ships with the app.
+        if which_probe("claude") {
+            harnesses.push((
+                "{{adapter:claude}}",
+                "claude CLI + bundled claude-agent-acp",
+            ));
         } else {
-            eprintln!("skip arm: claude-agent-acp not on PATH");
+            eprintln!("skip arm: claude not on PATH");
         }
-        // codex-acp is installed but unauthenticated here (its authStatus is
-        // "none" even after a handshake), so its arm is skipped with this
+        // codex's arm stays auth-gated: its authStatus is "none" even after a
+        // handshake without an OpenAI key, so the arm is skipped with this
         // reason rather than run to a guaranteed not-ready failure.
-        if std::env::var("OPENAI_API_KEY").is_ok() && which_probe("codex-acp") {
-            harnesses.push(("codex-acp", "codex-acp 2.0.0"));
+        if std::env::var("OPENAI_API_KEY").is_ok() && which_probe("codex") {
+            harnesses.push(("{{adapter:codex}}", "codex CLI + bundled codex-acp"));
         } else {
-            eprintln!("skip arm: codex-acp installed but not authenticated on this machine");
+            eprintln!("skip arm: codex not installed or not authenticated on this machine");
         }
         harnesses
     }
 
     /// Builds the agent an arm runs: `opencode-witness` is the clean-config
-    /// witness agent; anything else parses as its own launch string. Every
-    /// arm carries the debug callback, so a turn that ends other than
+    /// witness agent; a `{{adapter:key}}` row renders through adapters.rs the
+    /// way the app renders it; anything else parses as its own launch string.
+    /// Every arm carries the debug callback, so a turn that ends other than
     /// normally has the agent's stderr to read — an unreadable turn with no
     /// stderr is itself the finding.
     fn arm_agent(spec: &str) -> AcpAgent {
         let agent = if spec == "opencode-witness" {
             opencode_witness_agent()
         } else {
-            AcpAgent::from_str(spec).expect("the launch string parses")
+            AcpAgent::new(crate::adapters::render_launch(spec).expect("the launch string renders"))
         };
         agent.with_debug(|line, direction| {
             eprintln!("agent {:?}: {}", direction, line);

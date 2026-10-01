@@ -11,12 +11,15 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"tauri": "tauri",
+		"build:adapters": "scripts/build-adapters.sh",
 		"test": "vitest run",
 		"guard:colours": "node scripts/check-no-literal-colours.mjs",
 		"lint": "biome ci .",
 		"lint:fix": "biome check --write ."
 	},
 	"dependencies": {
+		"@agentclientprotocol/claude-agent-acp": "^0.84.0",
+		"@agentclientprotocol/codex-acp": "^2.1.0",
 		"@codemirror/commands": "^6.11.1",
 		"@codemirror/lang-markdown": "^6",
 		"@codemirror/language": "^6.12.4",
@@ -29,6 +32,7 @@
 		"@json-render/svelte": "^0.21.0",
 		"@tauri-apps/api": "^2",
 		"@tauri-apps/plugin-opener": "^2.6.0",
+		"agy-acp": "^0.5.2",
 		"bits-ui": "^2.19.3",
 		"d3-force": "^3.0.0",
 		"dompurify": "^3.4.16",

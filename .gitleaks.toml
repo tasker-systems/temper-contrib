@@ -16,7 +16,8 @@ description = "Build output, vendored dependencies and lockfiles — never sourc
 paths = [
   # Build output and vendored dependencies. `gitleaks dir` does not honour .gitignore, so without
   # these a local scan grinds through target/ and node_modules/ and flags compiled metadata.
-  '''(^|/)(target|node_modules|build|\.svelte-kit|\.venv|gen/schemas)/''',
+  # acp-adapter-staging is the desktop's vendored adapter tree (build-adapters.sh output, gitignored).
+  '''(^|/)(target|node_modules|build|\.svelte-kit|\.venv|gen/schemas|acp-adapter-staging)/''',
   # Lockfiles carry integrity hashes and checksums that the generic rules read as keys.
   '''(^|/)(package-lock\.json|Cargo\.lock|uv\.lock)$''',
 ]
