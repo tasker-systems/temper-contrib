@@ -10,7 +10,7 @@
  */
 import { refId } from '$lib/document';
 
-export type Place = 'home' | 'settings' | 'setup';
+export type Place = 'home' | 'settings' | 'setup' | 'catalog';
 
 export type Subject =
 	| { kind: 'resource'; id: string }
@@ -19,7 +19,7 @@ export type Subject =
 	| { kind: 'presentation'; resource: string; artifact: string }
 	| { kind: 'place'; place: Place };
 
-const PLACES: readonly Place[] = ['home', 'settings', 'setup'];
+const PLACES: readonly Place[] = ['home', 'settings', 'setup', 'catalog'];
 
 /** One stable key per subject: two subjects are the same subject exactly when their keys match. */
 export function subjectKey(subject: Subject): string {

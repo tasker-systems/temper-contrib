@@ -106,6 +106,12 @@
 				label: 'Open app setup',
 				from: 'core',
 				run: () => tabs.focusOrOpen({ kind: 'place', place: 'setup' })
+			},
+			{
+				id: 'catalog',
+				label: 'Open the view catalog',
+				from: 'core',
+				run: () => tabs.focusOrOpen({ kind: 'place', place: 'catalog' })
 			}
 		];
 

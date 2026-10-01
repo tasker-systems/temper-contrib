@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkSpec, MAX_DEPTH, MAX_ELEMENTS, temperCatalog } from './catalog';
 import fixtures from './spec-fixtures.json';
+import { specimens } from './specimens';
 
 const REF = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
 
@@ -22,11 +23,23 @@ const good = {
 };
 
 describe('the temper catalog', () => {
-	it('names exactly the foundation components', () => {
+	it('names exactly the foundation and first-wave components', () => {
 		expect(temperCatalog.componentNames.sort()).toEqual([
+			'Accordion',
 			'BoundedList',
+			'Chart',
+			'Grid',
+			'Heading',
 			'RegionState',
-			'ResourceRef'
+			'ResourceRef',
+			'Section',
+			'Stack',
+			'Stat',
+			'Table',
+			'Tabs',
+			'Tag',
+			'Text',
+			'Timeline'
 		]);
 	});
 
@@ -215,4 +228,12 @@ describe('the shared spec corpus', () => {
 			const r = checkSpec(c.spec);
 			expect(r.ok, JSON.stringify(r)).toBe(c.ok);
 		});
+});
+
+describe('the catalog lens specimens', () => {
+	it('has one for every component, and each passes the gate', () => {
+		expect(specimens.map((s) => s.name).sort()).toEqual([...temperCatalog.componentNames].sort());
+		for (const s of specimens)
+			expect(checkSpec(s.spec), s.name).toEqual({ ok: true, spec: s.spec });
+	});
 });

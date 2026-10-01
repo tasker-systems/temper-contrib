@@ -14,9 +14,31 @@ type Source = {
 	limits: { maxElements: number; maxDepth: number; maxNameLength: number };
 	components: Record<
 		string,
-		{ description: string; slots: string[]; example?: unknown; props: Record<string, unknown> }
+		{
+			description: string;
+			slots: string[];
+			example?: unknown;
+			props: Record<string, unknown>;
+			checks?: Check[];
+		}
 	>;
 };
+
+/**
+ * What a component's props must satisfy beyond JSON Schema, declared beside them in the catalog
+ * file so the core's check reads the same declaration. A path walks the props (`*` steps into
+ * every item of a list); `$children` is the element's children.
+ * - `count`: the items at the path are never more than the `within` prop says the view stands
+ *   for; with `equals`, the prop that says how many are shown agrees with how many there are.
+ * - `unique`: no value at the path repeats.
+ * - `keys`: every key of every object at the path is one of the values at `in`.
+ * - `children`: the element's children are only these types, between `min` and `max` of them.
+ */
+export type Check =
+	| { count: string; within: string; equals?: string }
+	| { unique: string }
+	| { keys: string; in: string }
+	| { children: string[]; min: number; max: number };
 
 // fromJSONSchema accepts the JSON Schema object; the cast narrows our JSON import's type.
 const propsSchemas: Record<string, z.ZodType> = Object.fromEntries(
@@ -39,7 +61,7 @@ export const CATALOG_VERSION = `temper@${(source as { version: string }).version
 
 export type SpecCheck = { ok: true; spec: Spec } | { ok: false; errors: string[] };
 
-/** The most elements, the deepest nesting, and the longest element name a temper@1 view may
+/** The most elements, the deepest nesting, and the longest element name a view may
  *  carry — read from the catalog file, which the core's own check reads too. A view is a bounded
  *  glance, not a document: a spec past any bound is refused, never rendered slowly. */
 export const MAX_ELEMENTS = (source as Source).limits.maxElements;
@@ -127,6 +149,85 @@ function shapeErrors(spec: unknown): string[] {
 	return errors;
 }
 
+/** The values a check's path names, from an element's props (or its children, for `$children`). */
+function walk(
+	el: Record<string, unknown>,
+	props: Record<string, unknown>,
+	path: string
+): unknown[] {
+	const [head, ...rest] = path.split('/');
+	let at: unknown[] = head === '$children' ? [el.children ?? []] : [props[head]];
+	for (const step of rest)
+		at = at.flatMap((v) =>
+			step === '*' ? (Array.isArray(v) ? v : []) : isRecord(v) && has(v, step) ? [v[step]] : []
+		);
+	return at.filter((v) => v !== undefined);
+}
+
+/** A count prop's value; the schema has already made it a non-negative integer. */
+const countOf = (v: unknown): number | null => (typeof v === 'number' ? v : null);
+
+/**
+ * Every declared check an element fails (`Check`). Run after the props pass their schema, so
+ * each path's values have the types the schema gives them.
+ */
+function declaredErrors(
+	key: string,
+	el: Record<string, unknown>,
+	props: Record<string, unknown>,
+	checks: Check[],
+	elements: Record<string, unknown>
+): string[] {
+	const errors: string[] = [];
+	for (const check of checks) {
+		if ('count' in check) {
+			const items = walk(el, props, check.count).reduce<number>(
+				(n, v) => n + (Array.isArray(v) ? v.length : 0),
+				0
+			);
+			const total = countOf(props[check.within]);
+			if (total === null) continue;
+			if (check.equals === undefined) {
+				if (items > total) errors.push(`elements/${key}: shows ${items} of ${total}`);
+				continue;
+			}
+			const shown = countOf(props[check.equals]);
+			if (shown === null) continue;
+			if (shown > total) errors.push(`elements/${key}: shows ${shown} of ${total}`);
+			if (props.state === 'present' && items !== shown)
+				errors.push(`elements/${key}: says it shows ${shown} but has ${items} rows`);
+		} else if ('unique' in check) {
+			const seen = new Set<unknown>();
+			for (const v of walk(el, props, check.unique)) {
+				if (seen.has(v))
+					errors.push(`elements/${key}/props/${check.unique}: "${String(v)}" appears twice`);
+				seen.add(v);
+			}
+		} else if ('keys' in check) {
+			const allowed = new Set(walk(el, props, check.in));
+			for (const obj of walk(el, props, check.keys)) {
+				if (!isRecord(obj)) continue;
+				for (const k of Object.keys(obj))
+					if (!allowed.has(k))
+						errors.push(`elements/${key}/props/${check.keys}: "${k}" is not one of ${check.in}`);
+			}
+		} else {
+			const children = Array.isArray(el.children) ? el.children : [];
+			if (children.length < check.min || children.length > check.max)
+				errors.push(
+					`elements/${key}: holds ${children.length} children, not ${check.min} to ${check.max}`
+				);
+			for (const child of children) {
+				const node = typeof child === 'string' && has(elements, child) ? elements[child] : null;
+				const type = isRecord(node) && typeof node.type === 'string' ? node.type : undefined;
+				if (type !== undefined && !check.children.includes(type))
+					errors.push(`elements/${key}: holds a ${type}, but only ${check.children.join(', ')}`);
+			}
+		}
+	}
+	return errors;
+}
+
 /**
  * Validates a spec against the catalog. This is the gate — `temperCatalog.validate` alone is not:
  * json-render validates the spec's structure and component names, but with more than one
@@ -138,8 +239,8 @@ function shapeErrors(spec: unknown): string[] {
  * schema and is refused. Admitting dynamic props is a catalog-version decision, not a default.
  *
  * The shape is closed and must be one bounded tree (`shapeErrors`); then what JSON Schema cannot
- * say: a BoundedList never shows more rows than it stands for, nor a different number of rows
- * than it has.
+ * say, as each component declares it (`Check`): a bounded view never carries more than it stands
+ * for, a table's rows are keyed by its columns, Tabs hold only Sections.
  */
 export function checkSpec(spec: unknown): SpecCheck {
 	const errors = shapeErrors(spec);
@@ -166,13 +267,10 @@ export function checkSpec(spec: unknown): SpecCheck {
 				);
 			continue;
 		}
-		if (el.type === 'BoundedList') {
-			const p = props.data as { total: number; shown: number; state: string };
-			const rows = Array.isArray(el.children) ? el.children.length : 0;
-			if (p.shown > p.total) errors.push(`elements/${key}: shows ${p.shown} of ${p.total}`);
-			if (p.state === 'present' && rows !== p.shown)
-				errors.push(`elements/${key}: says it shows ${p.shown} but has ${rows} rows`);
-		}
+		const checks = (source as Source).components[el.type].checks ?? [];
+		errors.push(
+			...declaredErrors(key, el, props.data as Record<string, unknown>, checks, elements)
+		);
 	}
 	return errors.length
 		? { ok: false, errors: [...new Set(errors)] }

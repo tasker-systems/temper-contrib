@@ -182,7 +182,7 @@ cwd = "${DESKTOP}"
 script = '''
 set -e
 bun run tauri build --debug --no-bundle --features webdriver
-uv run -q --with selenium>=4.20,<5 scripts/csp-witness-macos.py
+uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness-macos.py
 '''
 
 [tasks.desktop-return-witness-macos]
@@ -191,7 +191,7 @@ cwd = "${DESKTOP}"
 script = '''
 set -e
 bun run tauri build --debug --no-bundle --features webdriver
-uv run -q --with selenium>=4.20,<5 scripts/return-witness-macos.py
+uv run -q --with 'selenium>=4.20,<5' scripts/return-witness-macos.py
 '''
 
 # =============================================================================

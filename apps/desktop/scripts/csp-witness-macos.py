@@ -17,6 +17,8 @@ What it asserts, with the editor mounted in a document tab:
 3. The editor is styled: CodeMirror's base theme applies inside the shadow root (the spike's
    finding — constructable stylesheets, outside `style-src`), the document text is visible, and
    a one-word edit lands in the bound draft state.
+4. The view catalog renders every component under the policy and paints only from theme roles,
+   in every theme (`catalog_paint.py`).
 
 Needs the binary built with the plugin (`bunx tauri build --debug --no-bundle`) and selenium
 (`uv run --with selenium scripts/csp-witness-macos.py`). Exits non-zero, naming what failed.
@@ -34,6 +36,7 @@ import time
 from pathlib import Path
 from urllib.parse import quote
 
+from catalog_paint import witness_catalog
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
@@ -230,6 +233,24 @@ def main() -> int:
             if shadow["linePadding"] in (None, "", "0px"):
                 failures.append("the editor's base theme did not apply")
 
+            # The view catalog, opened as a tab: every component under the policy, painting
+            # only from theme roles, in every theme.
+            def open_catalog(d) -> None:
+                d.execute_script(
+                    """
+                    const link = document.createElement('a');
+                    link.href = '/catalog';
+                    document.querySelector('.tab-body:not([hidden])').append(link);
+                    link.dispatchEvent(new MouseEvent('click', {
+                      bubbles: true, cancelable: true, button: 0, metaKey: true
+                    }));
+                    link.remove();
+                    """
+                )
+
+            report["catalog"], catalog_failures = witness_catalog(driver, open_catalog)
+            failures.extend(catalog_failures)
+
             # No violation was raised while driving, before the deliberate probes: snapshot the
             # count first, and read only what arrived before the probes.
             before_probes = driver.execute_script("return (window.__csp ?? []).length")
@@ -261,8 +282,9 @@ def main() -> int:
         print("\nmacOS CSP witness FAILED:", *failures, sep="\n  - ", file=sys.stderr)
         return 1
     print(
-        "\nmacOS CSP witness held: the app whole with the editor mounted and styled;"
-        " no violations; the backstop probes refused."
+        "\nmacOS CSP witness held: the app whole with the editor mounted and styled; the view"
+        " catalog painted from theme roles in every theme; no violations; the backstop probes"
+        " refused."
     )
     return 0
 
