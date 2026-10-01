@@ -215,7 +215,7 @@ describe('agents from the ACP roster', () => {
 			key: 'codex',
 			label: 'Codex CLI',
 			binary: 'npx',
-			command: 'npx -y @agentclientprotocol/codex-acp',
+			command: 'npx -y @agentclientprotocol/codex-acp@^2.0.0',
 			status: 'present'
 		}
 	];

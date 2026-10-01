@@ -901,21 +901,22 @@ mod tests {
         dir
     }
 
-    /// Claude Code's ACP adapter, pinned: the witnesses run the adapter the
-    /// app's roster names (`@agentclientprotocol/claude-agent-acp`), at a
-    /// version chosen on purpose, not whatever npx resolves that day.
-    const CLAUDE_AGENT_ACP: &str = "@agentclientprotocol/claude-agent-acp@0.84.0";
-
-    fn claude_code_witness_agent() -> AcpAgent {
-        AcpAgent::new(AcpAgentConfig::new("npx").arg("-y").arg(CLAUDE_AGENT_ACP))
+    /// Builds an `AcpAgent` from a bundled preset in `agents-roster.toml`.
+    /// The launch command in the roster defines the supported adapter package
+    /// and semver range, so updating supported versions is a TOML-only change.
+    fn roster_witness_agent(key: &str) -> AcpAgent {
+        let entry = crate::roster::roster_entry(key)
+            .unwrap_or_else(|| panic!("roster preset for `{key}` present in agents-roster.toml"));
+        AcpAgent::from_str(&entry.command)
+            .unwrap_or_else(|e| panic!("launch command for `{key}` parses: {e}"))
     }
 
-    /// Antigravity CLI's ACP adapter, pinned: the witnesses run `agy-acp` (which
-    /// wraps `agy` on $PATH) at a version chosen on purpose.
-    const AGY_AGENT_ACP: &str = "agy-acp@0.5.2";
+    fn claude_code_witness_agent() -> AcpAgent {
+        roster_witness_agent("claude")
+    }
 
     fn agy_witness_agent() -> AcpAgent {
-        AcpAgent::new(AcpAgentConfig::new("npx").arg("-y").arg(AGY_AGENT_ACP))
+        roster_witness_agent("antigravity")
     }
 
     /// The model the opencode witnesses run. opencode's own default is a
@@ -1960,12 +1961,14 @@ whole. Change nothing outside it, and write nothing else inside it.";
         std::fs::copy(&credentials, config_dir.join(".credentials.json"))
             .expect("claude credentials should be file-based for this witness");
 
-        let agent = AcpAgent::new(
-            AcpAgentConfig::new("npx")
-                .arg("-y")
-                .arg(CLAUDE_AGENT_ACP)
-                .env("CLAUDE_CONFIG_DIR", config_dir.to_string_lossy().as_ref()),
-        );
+        let claude_command = crate::roster::roster_entry("claude")
+            .expect("claude preset in agents-roster.toml")
+            .command;
+        let config = AcpAgent::from_str(&claude_command)
+            .expect("claude preset launch command parses")
+            .into_config()
+            .env("CLAUDE_CONFIG_DIR", config_dir.to_string_lossy().as_ref());
+        let agent = AcpAgent::new(config);
         let board = AskBoard::default();
         // The surface is present on purpose: if pre-approval fails, the ask
         // parks visibly and the prompt times out naming the finding, rather
