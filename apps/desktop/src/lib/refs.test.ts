@@ -20,6 +20,26 @@ describe('createRefResolver', () => {
 		expect([a.state, b.state, c.state]).toEqual(['resolved', 'resolved', 'resolved']);
 	});
 
+	it('answers a primed ref from what another read said, and reads only the rest', async () => {
+		const batch = vi.fn(async (ids: string[]) => ids.map(resolved));
+		const r = createRefResolver(batch);
+		r.prime([
+			{
+				state: 'resolved',
+				id: 'a',
+				title: 'from the listing',
+				docType: 'task',
+				contextRef: null,
+				decoratedRef: 'a'
+			},
+			{ state: 'failed', id: 'b', message: 'not kept' }
+		]);
+		const [a, b] = await Promise.all([r.resolve('a'), r.resolve('b')]);
+		expect(a).toMatchObject({ state: 'resolved', title: 'from the listing' });
+		expect(b.state).toBe('resolved');
+		expect(batch).toHaveBeenCalledWith(['b']);
+	});
+
 	it('caches answers, including unresolved ones', async () => {
 		const batch = vi.fn(async (ids: string[]) =>
 			ids.map(

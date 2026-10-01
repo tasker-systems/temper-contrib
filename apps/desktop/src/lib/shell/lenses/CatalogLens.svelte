@@ -3,13 +3,31 @@
 	 * The view catalog: every component an agent's presented view or a plugin's lens may draw,
 	 * each with what the catalog says of it and a specimen rendered through TemperView — the same
 	 * gate, so what shows here is what a view gets.
+	 *
+	 * A component that declares view actions gets a handler for each, so its controls are drawn as
+	 * a host would draw them; the handler only says which action arrived and with what — the
+	 * catalog has nothing to page or sort.
 	 */
-	import { CATALOG_VERSION } from '$lib/catalog/catalog';
+	import { CATALOG_VERSION, VIEW_ACTIONS } from '$lib/catalog/catalog';
 	import { specimens } from '$lib/catalog/specimens';
 	import TemperView from '$lib/catalog/TemperView.svelte';
+	import type { ViewActionHandlers } from '$lib/catalog/view-actions';
 	import type { LensProps } from '../lenses';
 
 	let { tab }: LensProps = $props();
+
+	let asked = $state<Record<string, string>>({});
+	const echoes = (component: string): ViewActionHandlers =>
+		Object.fromEntries(
+			[...VIEW_ACTIONS.keys()]
+				.filter((name) => name.startsWith(`${component}.`))
+				.map((name) => [
+					name,
+					(params: Record<string, unknown>) => {
+						asked[component] = `${name.slice(component.length + 1)} ${JSON.stringify(params)}`;
+					}
+				])
+		);
 
 	$effect(() => {
 		tab?.setTitle('view catalog');
@@ -30,8 +48,11 @@
 			<h2 class="t-label">{specimen.name}</h2>
 			<p class="description">{specimen.description}</p>
 			<div class="render">
-				<TemperView spec={specimen.spec} />
+				<TemperView spec={specimen.spec} actions={echoes(specimen.name)} />
 			</div>
+			{#if asked[specimen.name]}
+				<p class="t-strip asked" role="status">asked of the host: {asked[specimen.name]}</p>
+			{/if}
 		</section>
 	{/each}
 </div>
@@ -67,5 +88,8 @@
 	}
 	.render {
 		min-width: 0;
+	}
+	.asked {
+		margin: 0.6rem 0 0;
 	}
 </style>

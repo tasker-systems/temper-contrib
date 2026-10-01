@@ -214,27 +214,66 @@
       ]
     },
     "Table": {
-      "description": "Rows under typed columns, with what they omit. `total` is every row the table stands for; `rows` are those shown, each keyed by column. A `category` column tints its values through `tints` (value → cat-N). The omission sentence is composed; do not word it yourself.",
+      "description": "Rows under typed columns, with what they omit. `total` is every row the table stands for; `rows` are those shown, each keyed by column. A `category` column tints its values through `tints` (value → cat-N); a `list` cell is a few short values. `page` says which rows of the total these are and whether more follow; `sort` names the order they are in; `facets` count the whole listing by a field, not only this page. The omission sentence is composed; do not word it yourself.",
       "slots": [],
+      "actions": {
+        "page": {
+          "description": "Show the page that starts at `offset`. A view action the host handles, never a write; without a host handler no pager is drawn.",
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["offset"],
+            "properties": { "offset": { "type": "integer", "minimum": 0 } }
+          }
+        },
+        "sort": {
+          "description": "Order the rows by a sortable column. A view action the host handles, never a write; without a host handler no header is a control.",
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "order"],
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+              "order": { "enum": ["asc", "desc"] }
+            }
+          }
+        }
+      },
       "example": {
         "total": 12,
         "scope": "stories in this context",
         "label": "stories",
         "state": "present",
         "columns": [
-          { "key": "title", "header": "Title", "kind": "text" },
+          { "key": "title", "header": "Title", "kind": "text", "sortable": true },
           {
             "key": "status",
             "header": "Status",
             "kind": "category",
             "tints": { "draft": "cat-2", "complete": "cat-4" }
           },
-          { "key": "words", "header": "Words", "kind": "number" }
+          { "key": "words", "header": "Words", "kind": "number", "sortable": true },
+          { "key": "tags", "header": "Tags", "kind": "list" }
         ],
         "rows": [
-          { "title": "The lighthouse", "status": "draft", "words": 3120 },
-          { "title": "Harbour", "status": "complete", "words": 5400 }
-        ]
+          { "title": "The lighthouse", "status": "draft", "words": 3120, "tags": ["coast", "night"] },
+          { "title": "Harbour", "status": "complete", "words": 5400, "tags": [] }
+        ],
+        "page": { "offset": 0, "size": 2, "more": true },
+        "sort": { "key": "words", "order": "asc" },
+        "facets": [
+          {
+            "key": "status",
+            "label": "Status",
+            "counts": [
+              { "value": "draft", "count": 7 },
+              { "value": "complete", "count": 5 }
+            ],
+            "active": "draft",
+            "unlisted": 1
+          }
+        ],
+        "fieldsNotShown": 2
       },
       "props": {
         "type": "object",
@@ -256,13 +295,14 @@
               "properties": {
                 "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
                 "header": { "type": "string", "minLength": 1, "maxLength": 40 },
-                "kind": { "enum": ["text", "number", "date", "resource", "category"], "description": "How cells render: a resource cell is a resource id, drawn as a link; a category cell is tinted through `tints`." },
+                "kind": { "enum": ["text", "number", "date", "resource", "category", "list"], "description": "How cells render: a resource cell is a resource id, drawn as a link; a category cell is tinted through `tints`; a list cell is a few short values." },
                 "tints": {
                   "type": "object",
                   "maxProperties": 8,
                   "propertyNames": { "maxLength": 40 },
                   "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical role, cat-1…cat-8. Plugins bind their vocabulary to these; never a colour." }
-                }
+                },
+                "sortable": { "type": "boolean", "description": "Whatever answered the rows can order them by this column." }
               }
             }
           },
@@ -273,15 +313,74 @@
               "type": "object",
               "maxProperties": 8,
               "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
-              "additionalProperties": { "type": ["string", "number", "null"], "maxLength": 200 }
+              "additionalProperties": {
+                "type": ["string", "number", "null", "array"],
+                "maxLength": 200,
+                "maxItems": 12,
+                "items": { "type": "string", "maxLength": 60 }
+              }
             }
-          }
+          },
+          "page": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["offset", "size", "more"],
+            "description": "Which rows of the total these are: they start at `offset`, a page holds at most `size`, and `more` says whether rows follow this page, as the answer said.",
+            "properties": {
+              "offset": { "type": "integer", "minimum": 0 },
+              "size": { "type": "integer", "minimum": 1, "maximum": 100 },
+              "more": { "type": "boolean" }
+            }
+          },
+          "sort": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "order"],
+            "description": "The column the rows are ordered by, and which way.",
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+              "order": { "enum": ["asc", "desc"] }
+            }
+          },
+          "facets": {
+            "type": "array",
+            "maxItems": 3,
+            "description": "Counts over the whole listing by one field each, not only the rows shown.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "label", "counts"],
+              "properties": {
+                "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+                "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+                "counts": {
+                  "type": "array",
+                  "maxItems": 24,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["value", "count"],
+                    "properties": {
+                      "value": { "type": "string", "minLength": 1, "maxLength": 60 },
+                      "count": { "type": "integer", "minimum": 0 }
+                    }
+                  }
+                },
+                "active": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The value the listing is narrowed to, when it is." },
+                "unlisted": { "type": "integer", "minimum": 0, "description": "How many values are not listed in `counts`." }
+              }
+            }
+          },
+          "fieldsNotShown": { "type": "integer", "minimum": 0, "description": "Fields the rows carry that are not drawn as columns." }
         }
       },
       "checks": [
         { "count": "rows", "within": "total" },
+        { "page": "page", "rows": "rows", "within": "total" },
         { "unique": "columns/*/key" },
-        { "keys": "rows/*", "in": "columns/*/key" }
+        { "keys": "rows/*", "in": "columns/*/key" },
+        { "values": "sort/key", "in": "columns/*/key" },
+        { "unique": "facets/*/key" }
       ]
     },
     "Chart": {

@@ -71,10 +71,19 @@ describe('resolving a lens', () => {
 		expect(resolveLens(resource, 'task', null, [core, workflows('unbuilt')])?.lens.id).toBe(
 			'core/document'
 		);
-		// ...and a context, which only unbuilt lenses accept, opens on the unbuilt table lens.
+		// ...a context opens on the bound table, not the unbuilt shape lens...
 		const table = resolveLens(context, null, null, [core]);
 		expect(table?.lens.id).toBe('core/table');
-		expect(table?.lens.build.state).toBe('unbuilt');
+		expect(table?.lens.build.state).toBe('bound');
+		// ...and a neighbourhood, which only the unbuilt graph lens accepts, opens on it.
+		const graph = resolveLens(
+			{ kind: 'neighbourhood', id: resource.id as string, depth: 1 },
+			null,
+			null,
+			[core]
+		);
+		expect(graph?.lens.id).toBe('core/graph');
+		expect(graph?.lens.build.state).toBe('unbuilt');
 	});
 });
 
@@ -82,7 +91,6 @@ describe('the lens switcher', () => {
 	it('offers every enabled lens that accepts the subject, built or not', () => {
 		expect(lensesFor(resource, 'task', [core]).map((l) => l.id)).toEqual([
 			'core/document',
-			'core/table',
 			'core/graph'
 		]);
 		expect(lensesFor(context, null, [core]).map((l) => l.id)).toEqual(['core/table', 'core/shape']);

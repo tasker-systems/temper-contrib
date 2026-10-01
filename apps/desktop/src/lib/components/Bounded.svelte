@@ -1,11 +1,12 @@
 <script lang="ts">
 	/**
 	 * The envelope every bounded view shares: it says what it omits. The omission sentence is
-	 * composed here from `total`, `shown` and `scope` so no author words it out of step with the
-	 * numbers. When the view is not present, or present with nothing to stand for, its state
+	 * composed from `total`, `shown`, `scope` and, for a page, `page` (`omission.ts`), so no author
+	 * words it out of step with the numbers. When the view is not present, or present with nothing to stand for, its state
 	 * renders through RegionState and its content does not.
 	 */
 	import type { Snippet } from 'svelte';
+	import { omissionSentence, type Page } from './omission';
 	import RegionState, { type RegionStateName } from './RegionState.svelte';
 
 	let {
@@ -14,6 +15,7 @@
 		scope,
 		label,
 		state,
+		page,
 		more,
 		onmore,
 		children
@@ -23,17 +25,15 @@
 		scope: string;
 		label: string;
 		state: 'present' | RegionStateName;
+		/** When the view is one page of its total: which rows, and whether more follow. */
+		page?: Page | null;
 		more?: { step: number } | null;
 		onmore?: () => void;
 		children?: Snippet;
 	} = $props();
 
 	const omitted = $derived(Math.max(0, total - shown));
-	const sentence = $derived(
-		omitted === 0
-			? `All ${total} ${scope}.`
-			: `${shown} of ${total} ${scope}; ${omitted} not shown.`
-	);
+	const sentence = $derived(omissionSentence(total, shown, scope, page));
 </script>
 
 {#if state === 'present' && total === 0}

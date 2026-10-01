@@ -3,8 +3,8 @@ Content-Security-Policy in tauri.conf.json both ways.
 
 1. The app is whole under the policy: the shell renders styled, with its bundled fonts and IPC
    answering, and no `securitypolicyviolation` is raised while it is driven — a document opened
-   in a tab, a second tab, a switch between them (the room kept, not remounted), a switch to a
-   lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
+   in a tab, a second tab on the bound table lens, a switch between them (the room kept, not
+   remounted), a switch to a lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
    from it), the ways-in panel opened from the menu chip and closed and reopened from the
    panel's own ×, settings and setup opened as tabs, the view catalog in every theme painting
    only from theme roles (`catalog_paint.py`), and home again.
@@ -299,12 +299,18 @@ def main() -> int:
             )
             document_room = driver.execute_script(ACTIVE_ROOM)
 
-            # A second tab, by a modified click on a context: it opens on the table lens, which is
-            # not built yet and says so.
+            # A second tab, by a modified click on a context: it opens on the bound table lens. The
+            # core fills it from temper's listing; without temper credentials the read fails, and
+            # the lens says nothing was read rather than drawing an empty table.
             driver.execute_script(FOLLOW_LINK, CONTEXT, True)
             WebDriverWait(driver, 10).until(tab_count(3))
-            WebDriverWait(driver, 10).until(active_text("isn\u2019t built yet"))
-            step("a second tab, on an unbuilt lens")
+            WebDriverWait(driver, 10).until(
+                lambda d: (
+                    active_text("nothing was read")(d)
+                    or d.find_elements(By.CSS_SELECTOR, ".tab-body:not([hidden]) table")
+                )
+            )
+            step("a second tab, on the table lens")
 
             # Back to the document's tab: the same room node, so it was kept, not remounted.
             document_tab.click()

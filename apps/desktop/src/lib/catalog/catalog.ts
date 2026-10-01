@@ -20,6 +20,7 @@ type Source = {
 			example?: unknown;
 			props: Record<string, unknown>;
 			checks?: Check[];
+			actions?: Record<string, { description: string; params: unknown }>;
 		}
 	>;
 };
@@ -34,6 +35,8 @@ type Source = {
  * - `keys`: every key of every object at the path is one of the values at `in`.
  * - `values`: every value at the path is one of the values at `in` (an edge names a node that
  *   exists).
+ * - `page`: the page prop agrees with the rows and the total — no more rows than a page holds,
+ *   none past the total, and `more` exactly when rows follow this page.
  * - `children`: the element's children are only these types, between `min` and `max` of them.
  */
 export type Check =
@@ -41,6 +44,7 @@ export type Check =
 	| { unique: string }
 	| { keys: string; in: string }
 	| { values: string; in: string }
+	| { page: string; rows: string; within: string }
 	| { children: string[]; min: number; max: number };
 
 // fromJSONSchema accepts the JSON Schema object; the cast narrows our JSON import's type.
@@ -58,7 +62,23 @@ const components = Object.fromEntries(
 	])
 );
 
+// json-render's own actions stay empty: a spec cannot bind one (`on` is refused at the door), so
+// its built-in state writes are unreachable. A component's view actions are declared beside its
+// props and routed to the host instead (`view-actions.ts`).
 export const temperCatalog = defineCatalog(schema, { components, actions: {} });
+
+/**
+ * The view actions each component declares, with the schema their params must satisfy: what a
+ * host may handle (page, sort), never a write. Keyed `Component.action`.
+ */
+export const VIEW_ACTIONS: ReadonlyMap<string, z.ZodType> = new Map(
+	Object.entries((source as Source).components).flatMap(([name, c]) =>
+		Object.entries(c.actions ?? {}).map(([action, a]) => [
+			`${name}.${action}`,
+			z.fromJSONSchema(a.params as Parameters<typeof z.fromJSONSchema>[0])
+		])
+	)
+);
 
 export const CATALOG_VERSION = `temper@${(source as { version: string }).version}`;
 
@@ -214,6 +234,22 @@ function declaredErrors(
 					if (!allowed.has(k))
 						errors.push(`elements/${key}/props/${check.keys}: "${k}" is not one of ${check.in}`);
 			}
+		} else if ('page' in check) {
+			const page = props[check.page];
+			const total = countOf(props[check.within]);
+			const rows = props[check.rows];
+			if (!isRecord(page) || total === null || !Array.isArray(rows)) continue;
+			if (props.state !== 'present') continue;
+			const offset = countOf(page.offset) ?? 0;
+			const size = countOf(page.size) ?? 0;
+			const n = rows.length;
+			if (n > size) errors.push(`elements/${key}: shows ${n} rows on a page of ${size}`);
+			if (offset + n > total)
+				errors.push(`elements/${key}: rows ${offset + 1} to ${offset + n} pass the total ${total}`);
+			if (page.more !== offset + n < total)
+				errors.push(
+					`elements/${key}/props/${check.page}/more: says ${String(page.more)}, but ${offset + n} of ${total} reach this page`
+				);
 		} else if ('values' in check) {
 			const allowed = new Set(walk(el, props, check.in));
 			for (const v of walk(el, props, check.values))

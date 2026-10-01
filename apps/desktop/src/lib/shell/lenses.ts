@@ -3,9 +3,13 @@
  * four things — lenses, left-panel entries, vocabularies and property renderers, agent skills and
  * stances — and nothing else can be contributed, so the frame never becomes pluggable by accident.
  *
- * A lens is built, or named and not built. An unbuilt lens is still a lens a tab can open on: it
- * says what it is and what lands it, never an empty placeholder.
+ * A lens is built, bound, or named and not built. A built lens ships its own component; a bound
+ * lens is data — a catalog spec, and a binding that names which of its elements a read fills — and
+ * the core resolves it (`lens_resolve`), so a lens can be declared without shipping code. An
+ * unbuilt lens is still a lens a tab can open on: it says what it is and what lands it, never an
+ * empty placeholder.
  */
+import type { Spec } from '@json-render/core';
 import type { Component } from 'svelte';
 import type { DocOpened } from '$lib/document';
 import type { ListFilter } from '$lib/temper-views.svelte';
@@ -34,10 +38,18 @@ export interface LensProps {
 	/** The host's open answer, for a resource subject: the one read made on opening. */
 	opened?: DocOpened;
 	tab: TabHandle;
+	/** The lens this is mounted as — what a bound lens reads its spec and binding from. */
+	lens?: LensDecl;
 }
 
+/** Which element of a bound lens's spec a read fills, and which read. */
+export type LensBinding = { element: string; read: 'resource-list' };
+
+type LensModule = Promise<{ default: Component<LensProps> }>;
+
 export type LensBuild =
-	| { state: 'built'; component: () => Promise<{ default: Component<LensProps> }> }
+	| { state: 'built'; component: () => LensModule }
+	| { state: 'bound'; spec: Spec; binding: LensBinding }
 	| { state: 'unbuilt'; landsWith: string };
 
 export interface LensDecl {
@@ -138,7 +150,20 @@ function allLenses(contributions: readonly Contribution[]): LensDecl[] {
 	return contributions.flatMap((c) => c.lenses);
 }
 
-const built = (lens: LensDecl) => lens.build.state === 'built';
+/** Built or bound: a lens that can show its subject now. */
+export const built = (lens: LensDecl) => lens.build.state !== 'unbuilt';
+
+/** The component a lens mounts as: its own, or the one every bound lens shares. */
+export function lensComponent(lens: LensDecl): LensModule | null {
+	switch (lens.build.state) {
+		case 'built':
+			return lens.build.component();
+		case 'bound':
+			return import('./lenses/BoundLens.svelte');
+		case 'unbuilt':
+			return null;
+	}
+}
 
 /**
  * Which lens a subject is seen through, and why:

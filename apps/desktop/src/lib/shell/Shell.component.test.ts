@@ -102,6 +102,36 @@ const hubEntry = (resource: string, leftAt: string, device = 'station') => ({
 	device
 });
 
+/** When set, the next `lens_resolve` fails as an unanswered read would. */
+let failNextResolve = false;
+
+/** What the core answers a bound table with: the lens's spec, its element filled — 5 rows, 2 a page. */
+function boundTable(args?: Record<string, unknown>) {
+	const view = args?.view as { offset: number; sort?: { key: string; order: string } };
+	const spec = structuredClone(args?.spec) as {
+		elements: Record<string, { props: Record<string, unknown> }>;
+	};
+	const binding = args?.binding as { element: string };
+	const rows = [0, 1, 2, 3, 4]
+		.slice(view.offset, view.offset + 2)
+		.map((i) => ({ title: `row ${i}`, updated: '2026-10-01 11:31Z' }));
+	const props = {
+		total: 5,
+		scope: 'resources in +temper-dev/contrib',
+		label: 'resources',
+		state: 'present',
+		columns: [
+			{ key: 'title', header: 'Title', kind: 'text', sortable: true },
+			{ key: 'updated', header: 'Updated', kind: 'date', sortable: true }
+		],
+		rows,
+		page: { offset: view.offset, size: 2, more: view.offset + rows.length < 5 },
+		sort: view.sort ?? { key: 'updated', order: 'desc' }
+	};
+	spec.elements[binding.element].props = props;
+	return { spec, refs: [] };
+}
+
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
@@ -129,6 +159,12 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 				});
 			}
 			return Promise.resolve(opened(args?.id as string));
+		case 'lens_resolve':
+			if (failNextResolve) {
+				failNextResolve = false;
+				return Promise.reject('temper did not answer');
+			}
+			return Promise.resolve(boundTable(args));
 		case 'doc_connections':
 			return Promise.resolve({ state: 'present', data: { total: 0, edges: [] } });
 		case 'temper_resolve_refs':
@@ -206,11 +242,12 @@ const activeBody = (container: HTMLElement) =>
 	container.querySelector(`.tab-body[data-tab="${tabs.activeId}"]`) as HTMLElement;
 
 describe('the shell', () => {
-	// The lenses a tab mounts are imported lazily. Load the document lens and the sanitizer once
+	// The lenses a tab mounts are imported lazily. Load the document and bound lenses and the sanitizer once
 	// here, so the first test to open a document does not pay for a cold import inside its own
 	// wait — under load that alone can outlast it.
 	beforeAll(async () => {
 		await import('./lenses/DocumentLens.svelte');
+		await import('./lenses/BoundLens.svelte');
 		await import('$lib/markdown/sanitize');
 	});
 
@@ -233,6 +270,7 @@ describe('the shell', () => {
 		recentWork = null;
 		shapes = {};
 		contextsList = [CONTRIB];
+		failNextResolve = false;
 		agentSession.lastScope = null;
 		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
@@ -376,16 +414,73 @@ describe('the shell', () => {
 
 	it('a lens that isn’t built yet is named, not guessed', async () => {
 		const { container } = render(Shell);
-		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+		tabs.open({ kind: 'neighbourhood', id: A, depth: 1 }, { where: 'new' });
 		await waitFor(() =>
 			expect(activeBody(container)?.textContent).toContain(
-				'The table lens isn’t built yet — it lands with the table lens port.'
+				'The graph lens isn’t built yet — it lands with the graph lens port.'
 			)
 		);
-		expect(activeBody(container).textContent).toContain('+temper-dev/contrib');
 		expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain(
-			'table'
+			'neighbourhood'
 		);
+	});
+
+	it('a context opens on the bound table, filled by the core, and pages and sorts through it', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+		await waitFor(() =>
+			expect(activeBody(container)?.querySelectorAll('tbody tr')).toHaveLength(2)
+		);
+		const resolves = () => calls.filter((c) => c.cmd === 'lens_resolve');
+		expect(resolves()[0].args).toMatchObject({
+			binding: { element: 'table', read: 'resource-list' },
+			subject: { context: '+temper-dev/contrib' },
+			view: { offset: 0 }
+		});
+		expect(activeBody(container).textContent).toContain(
+			'1–2 of 5 resources in +temper-dev/contrib; 3 after it.'
+		);
+
+		await fireEvent.click(button(activeBody(container), 'Next page'));
+		await waitFor(() => expect(activeBody(container).textContent).toContain('row 2'));
+		expect(resolves().at(-1)?.args?.view).toEqual({ offset: 2, sort: undefined });
+		expect(activeBody(container).textContent).toContain(
+			'3–4 of 5 resources in +temper-dev/contrib; 2 before this page, 1 after it.'
+		);
+
+		// A new order starts from the first page.
+		await fireEvent.click(button(activeBody(container), 'Title'));
+		await waitFor(() =>
+			expect(resolves().at(-1)?.args?.view).toEqual({
+				offset: 0,
+				sort: { key: 'title', order: 'asc' }
+			})
+		);
+		await waitFor(() =>
+			expect(
+				activeBody(container).querySelector('th[aria-sort="ascending"]')?.textContent
+			).toContain('Title')
+		);
+	});
+
+	it('a page turn that fails keeps the table, says so, and can be tried again', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+		await waitFor(() =>
+			expect(activeBody(container)?.querySelectorAll('tbody tr')).toHaveLength(2)
+		);
+		failNextResolve = true;
+		await fireEvent.click(button(activeBody(container), 'Next page'));
+		await waitFor(() =>
+			expect(activeBody(container).querySelector('.failure')?.textContent).toContain(
+				'could not be read: temper did not answer'
+			)
+		);
+		// The page in hand is still drawn, its controls with it.
+		expect(activeBody(container).textContent).toContain('row 0');
+		await fireEvent.click(button(activeBody(container), 'Try again'));
+		await waitFor(() => expect(activeBody(container).textContent).toContain('row 2'));
+		expect(activeBody(container).querySelector('.failure')).toBeNull();
 	});
 
 	it('reach reads in the same place, in the same words, whatever lens is in view', async () => {
