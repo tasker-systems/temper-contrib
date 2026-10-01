@@ -29,6 +29,11 @@ if [[ ! -d "$NM" ]]; then
     exit 1
 fi
 
+if ! command -v node >/dev/null 2>&1; then
+    echo "build-adapters: node is required for the resolution gate" >&2
+    exit 1
+fi
+
 if [[ "$(uname -s)-$(uname -m)" != "Darwin-arm64" ]]; then
     if [[ "${TAURI_BUNDLE:-}" == "1" ]]; then
         echo "build-adapters: shipping bundles are staged on darwin-arm64 only; this machine is $(uname -s)-$(uname -m)" >&2
