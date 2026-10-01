@@ -10,8 +10,18 @@ core in `src-tauri/`.
   credentials. The OAuth login flow is later work.
 - **ACP host** — an Agent Client Protocol client (`agent-client-protocol`)
   that spawns agent subprocesses over stdio and speaks the protocol.
-  Witnessed against `opencode acp`; `claude-agent-acp` is configured the same
-  way.
+  Harnesses that speak ACP natively launch directly (`opencode acp`,
+  `agent acp`, `gemini --acp`). Those that do not launch through a bundled
+  adapter — the JS shim ships with the app (pinned in `package.json`,
+  versioned by `bun.lock`, staged by `scripts/build-adapters.sh` into
+  `acp-adapter-staging/`, which `tauri.conf.json` bundles as resources and
+  `src-tauri/src/adapters.rs` resolves at spawn time) — running the person's
+  own harness CLI: `claude` wraps `claude`, `codex` wraps `codex`,
+  `antigravity` wraps `agy`, each pointed at the probed binary by env var
+  (`CLAUDE_CODE_EXECUTABLE`, `CODEX_PATH`, `AGY_BIN`). Adapters run under
+  node by default; bun is opt-in via `TEMPER_ACP_INTERPRETER=bun` (bun's
+  node-pty delivers no PTY data, so PTY-driving adapters wedge silently
+  under it). No harness binaries or runtimes ship with the app.
 
 ## What the UI holds
 
@@ -96,8 +106,14 @@ core in `src-tauri/`.
 
 ```bash
 bun install
-bun run tauri dev   # builds the Rust core and opens the app window (bun installs; node runs the toolchain)
+bun run build:adapters   # stages the bundled ACP adapters (tauri build runs it first via beforeBuildCommand)
+bun run tauri dev        # builds the Rust core and opens the app window (bun installs; node runs the toolchain)
 ```
+
+Running an agent needs its harness on your machine: `opencode`/`agent`/`gemini`
+run themselves; `claude`, `codex` and `antigravity` need their CLIs (`claude`,
+`codex`, `agy`) on PATH, plus node (or bun for the stdio adapters) to run the
+bundled adapters.
 
 ## Verification
 
@@ -111,6 +127,8 @@ bun run guard:colours       # no literal colours under src/
 bun run build               # static frontend build
 cargo clippy --all-targets -- -D warnings   # in src-tauri/ (cargo fmt, cargo test too)
 cargo test -- --ignored     # witnesses needing credentials or an agent binary:
-                            # temper profile round-trip, ACP initialize handshake,
-                            # ref resolution (TEMPER_WITNESS_REF=<a readable id>)
+                            # temper profile round-trip, live ACP agents
+                            # (claude and agy; claude again under bun via
+                            # TEMPER_ACP_INTERPRETER=bun), ref resolution
+                            # (TEMPER_WITNESS_REF=<a readable id>)
 ```

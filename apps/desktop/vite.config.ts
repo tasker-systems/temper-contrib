@@ -98,7 +98,14 @@ export default defineConfig(async () => ({
 					name: 'component',
 					include: ['src/**/*.component.test.ts'],
 					environment: 'jsdom',
-					setupFiles: ['src/test/component-setup.ts']
+					setupFiles: ['src/test/component-setup.ts'],
+					// The shell suite's beforeAll warms the lazy lens imports so
+					// individual tests never pay a cold transform; on a shared CI
+					// runner under vitest's default 10s hook timeout that warming
+					// itself can outlast the hook. 60s keeps the hook honest (a
+					// wedged import still fails) without turning CI load into a
+					// flake.
+					hookTimeout: 60_000
 				}
 			}
 		]

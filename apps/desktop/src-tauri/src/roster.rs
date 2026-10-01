@@ -224,7 +224,10 @@ mod tests {
         assert_eq!(keys.len(), roster.len(), "entry keys are distinct");
     }
 
-    /// The preset rows the roster names, with the launch each doc states.
+    /// The preset rows the roster names: native-ACP entries launch their
+    /// binary directly; the wrapped harnesses (claude, codex, agy) probe
+    /// their CLI and launch the bundled adapter through the `{{adapter:key}}`
+    /// marker — adapter versions are bun.lock's, never this file's.
     #[test]
     fn the_common_agents_are_preset() {
         let roster = roster();
@@ -238,16 +241,15 @@ mod tests {
         assert_eq!(by_key("cursor").binary, "agent");
         assert_eq!(by_key("cursor").command, "agent acp");
         assert_eq!(by_key("gemini").command, "gemini --acp");
-        assert_eq!(
-            by_key("codex").command,
-            "npx -y @agentclientprotocol/codex-acp@^2.0.0"
-        );
-        assert_eq!(
-            by_key("claude").command,
-            "npx -y @agentclientprotocol/claude-agent-acp@^0.84.0"
-        );
+        assert_eq!(by_key("codex").binary, "codex");
+        assert_eq!(by_key("codex").command, "node {{adapter:codex}}");
+        assert_eq!(by_key("claude").binary, "claude");
+        assert_eq!(by_key("claude").command, "node {{adapter:claude}}");
         assert_eq!(by_key("antigravity").binary, "agy");
-        assert_eq!(by_key("antigravity").command, "npx -y agy-acp@^0.5.2");
+        assert_eq!(
+            by_key("antigravity").command,
+            "node {{adapter:antigravity}}"
+        );
     }
 
     #[test]

@@ -7,12 +7,16 @@
 # launch command by hand.
 #
 # `binary` is the name probed on $PATH. `command` is the launch command the store receives,
-# parsed the way the ACP crate parses command strings. Self-contained adapters probe their runner
-# (`npx`); adapters wrapping an installed CLI probe that CLI's binary directly (`agy`).
+# parsed the way the ACP crate parses command strings. Agents that speak ACP natively probe
+# and launch their binary directly (`opencode`, `agent`, `gemini`).
 #
-# Where an adapter is launched via npx, `command` pins a supported semver range
-# (`package@^x.y.z`) so the desktop and its test witnesses launch a vetted version,
-# and rolling out an updated supported version is a TOML-only change.
+# Harnesses that do not speak ACP natively launch through a bundled adapter: the desktop
+# ships the JS shim (pinned in `apps/desktop/package.json`, staged by
+# `scripts/build-adapters.sh`, resolved by `adapters.rs`). Those rows probe the harness CLI
+# the adapter wraps (`claude`, `codex`, `agy`) — an adapter without its harness launches
+# nothing — and their `command` carries the `{{adapter:<key>}}` marker that `adapters.rs`
+# renders at spawn time into `<node|bun> <bundled entry>` plus the env var pointing the
+# adapter at the probed CLI. Adapter versions are bun.lock's, never this file's.
 
 [[agents]]
 key = "opencode"
@@ -38,21 +42,25 @@ command = "gemini --acp"
 [[agents]]
 key = "codex"
 label = "Codex CLI"
-binary = "npx"
-command = "npx -y @agentclientprotocol/codex-acp@^2.0.0"
-# https://github.com/agentclientprotocol/codex-acp — "Run the published package directly: npx -y @agentclientprotocol/codex-acp"
+binary = "codex"
+command = "node {{adapter:codex}}"
+# https://github.com/agentclientprotocol/codex-acp — the ACP adapter; wraps the person's own
+# `codex` CLI (resolved over CODEX_PATH at launch), versioned with the app via bun.lock
 
 [[agents]]
 key = "claude"
 label = "Claude Agent"
-binary = "npx"
-command = "npx -y @agentclientprotocol/claude-agent-acp@^0.84.0"
-# https://github.com/agentclientprotocol/claude-agent-acp — the ACP adapter for the Claude Agent SDK
+binary = "claude"
+command = "node {{adapter:claude}}"
+# https://github.com/agentclientprotocol/claude-agent-acp — the ACP adapter for the Claude
+# Agent SDK; wraps the person's own `claude` CLI (CLAUDE_CODE_EXECUTABLE at launch)
 
 [[agents]]
 key = "antigravity"
 label = "Antigravity CLI"
 binary = "agy"
-command = "npx -y agy-acp@^0.5.2"
-# https://github.com/shindgew/agy-acp — ACP adapter wrapping the Google Antigravity CLI (agy)
-
+command = "node {{adapter:antigravity}}"
+# https://github.com/shindgew/agy-acp — ACP adapter wrapping the Google Antigravity CLI
+# (agy); AGY_BIN points it at the probed binary at launch. (The adapter also carries an
+# upstream install-on-missing path — unreachable from this row, since the probe above
+# already gates the offer on agy being present.)
