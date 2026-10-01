@@ -3,18 +3,33 @@
 	 * The one way a spec reaches the screen: checked against the `temper` catalog first. A spec
 	 * that fails renders its refusal — what was refused and why — never a partial render, and
 	 * never the raw renderer's silent drop of what it could not draw.
+	 *
+	 * `actions` are the host's handlers for the view actions components declare (`view-actions.ts`):
+	 * the only way a rendered view asks anything of its host.
 	 */
-	import { JsonUIProvider, Renderer, type ActionHandler } from '@json-render/svelte';
+	import { JsonUIProvider, Renderer } from '@json-render/svelte';
+	import { untrack } from 'svelte';
 	import { checkSpec, CATALOG_VERSION } from './catalog';
 	import { temperRegistry } from './registry';
+	import {
+		setViewActions,
+		undeclaredActions,
+		type ViewActionHandlers,
+		viewActions
+	} from './view-actions';
 
-	let { spec, handlers = {} }: { spec: unknown; handlers?: Record<string, ActionHandler> } = $props();
+	let { spec, actions = {} }: { spec: unknown; actions?: ViewActionHandlers } = $props();
+
+	const undeclared = untrack(() => undeclaredActions(actions));
+	if (undeclared.length)
+		throw new Error(`handlers for actions the catalog does not declare: ${undeclared.join(', ')}`);
+	setViewActions(viewActions(() => actions));
 
 	const checked = $derived(checkSpec(spec));
 </script>
 
 {#if checked.ok}
-	<JsonUIProvider {handlers}>
+	<JsonUIProvider>
 		<Renderer spec={checked.spec} registry={temperRegistry} />
 	</JsonUIProvider>
 {:else}

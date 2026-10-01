@@ -1,8 +1,9 @@
 /**
  * Core's contribution: the lenses the desktop ships with. Place lenses (home, settings, setup,
  * catalog) are core's own and a plugin never contributes one; a plugin may pin a section to home.
- * The table, graph, shape and search lenses are named and not built: each lands with its own
- * port, and until then a tab opened on one says so.
+ * The table lens is bound: a Table filled by the core from a resource listing. The graph, shape
+ * and search lenses are named and not built: each lands with its own port, and until then a tab
+ * opened on one says so.
  */
 import type { Contribution } from '../lenses';
 
@@ -93,8 +94,15 @@ export const core: Contribution = {
 			id: 'core/table',
 			name: 'table',
 			plugin: 'core',
-			accepts: { kinds: ['query', 'resource'] },
-			build: { state: 'unbuilt', landsWith: 'the table lens port' }
+			accepts: { kinds: ['query'] },
+			build: {
+				state: 'bound',
+				spec: {
+					root: 'table',
+					elements: { table: { type: 'Table', props: {}, children: [] } }
+				},
+				binding: { element: 'table', read: 'resource-list' }
+			}
 		},
 		{
 			id: 'core/graph',

@@ -12,6 +12,10 @@ What it asserts, per theme:
 3. The chart's series are painted with the categorical roles their spec named.
 4. Both graphs are drawn, side by side on one page, and their nodes are painted with the
    doc-type and categorical roles their specs named.
+5. The table draws everything its props carry beyond rows — sortable headers and the active
+   order, the pager, facet counts and list cells — so the second assertion covers them too. The
+   catalog lens hands it the view-action handlers a host would. Every header and cell stays a
+   table cell: a component's style that reaches one breaks the columns, and only layout shows it.
 """
 
 from __future__ import annotations
@@ -113,6 +117,13 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
       edges: g.querySelectorAll('.edge').length, ids: g.querySelectorAll('[id]').length })),
     nodesPainted: Object.fromEntries(['doctype-goal', 'doctype-task', 'cat-1', 'cat-5'].map((t) =>
       [t, nodeFill(t).length > 0 && nodeFill(t).every((f) => f === role(t))])),
+    tableParts: Object.fromEntries(Object.entries({
+      sortControls: 'th button.sort', activeSort: 'th[aria-sort]', pager: 'nav.pager button',
+      facetCounts: '.facets .count', listCells: 'td.list .tag'
+    }).map(([k, sel]) => [k, page.querySelectorAll(`[data-component="Table"] ${sel}`).length])),
+    // A cell a component style turned into something else leaves the table's layout.
+    cellsNotCells: [...page.querySelectorAll('[data-component="Table"] th, [data-component="Table"] td')]
+      .filter((c) => getComputedStyle(c).display !== 'table-cell').map(label),
     offenders: offenders.slice(0, 40),
     offenderCount: offenders.length
   });
@@ -157,6 +168,13 @@ def witness_catalog(driver, open_catalog) -> tuple[list[dict], list[str]]:
                 failures.append(f"{where}: a graph carries ids another could answer for")
             if not all(r["nodesPainted"].values()):
                 failures.append(f"{where}: nodes not painted with their roles {r['nodesPainted']}")
+            missing = [k for k, n in r["tableParts"].items() if not n]
+            if missing:
+                failures.append(f"{where}: the table drew no {', '.join(missing)}")
+            if r["cellsNotCells"]:
+                failures.append(
+                    f"{where}: table cells out of the table's layout {r['cellsNotCells']}"
+                )
             if r["offenderCount"]:
                 failures.append(
                     f"{where}: {r['offenderCount']} colours not from a --tp-* role:"

@@ -2782,6 +2782,979 @@
 					}
 				}
 			}
+		},
+		{
+			"name": "a table with its page, sort and facets",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table on its last page, with nothing after",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 10,
+								"size": 2,
+								"more": false
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table page that says nothing follows when rows do",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": false
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table page that says rows follow when none do",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 2,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							}
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table carrying more rows than its page holds",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 1,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table page past its total",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 11,
+								"size": 2,
+								"more": false
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table sorted by a column it does not have",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "pages",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table with a facet twice",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								},
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table list cell that is not a list of strings",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "Harbour",
+									"tags": [
+										3
+									]
+								},
+								{
+									"title": "x"
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table list cell longer than a list may be",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "Harbour",
+									"tags": [
+										"0",
+										"1",
+										"2",
+										"3",
+										"4",
+										"5",
+										"6",
+										"7",
+										"8",
+										"9",
+										"10",
+										"11",
+										"12"
+									]
+								},
+								{
+									"title": "x"
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": 7
+										},
+										{
+											"value": "complete",
+											"count": 5
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table facet count that is not a count",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "status",
+									"label": "Status",
+									"counts": [
+										{
+											"value": "draft",
+											"count": -1
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
 		}
 	]
 }

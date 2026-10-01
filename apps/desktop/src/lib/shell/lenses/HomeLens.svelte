@@ -10,7 +10,7 @@
 	 */
 	import { untrack } from 'svelte';
 	import { enabled } from '../contributions';
-	import { homeSections, type LensDecl, type LensProps } from '../lenses';
+	import { homeSections, lensComponent, type LensProps } from '../lenses';
 	import { HOME_TAB, tabs } from '../tabs.svelte';
 
 	let { subject, tab }: LensProps = $props();
@@ -22,12 +22,7 @@
 		if (tabs.activeId === HOME_TAB) untrack(() => (shown += 1));
 	});
 
-	const loaders = new Map(
-		sections
-			.map(({ lens }) => lens)
-			.filter((lens): lens is LensDecl & { build: { state: 'built' } } => lens.build.state === 'built')
-			.map((lens) => [lens.id, lens.build.component()])
-	);
+	const loaders = new Map(sections.map(({ lens }) => [lens.id, lensComponent(lens)]));
 </script>
 
 <div class="home">
@@ -50,7 +45,7 @@
 			{:else}
 				{#await loaders.get(lens.id) then mod}
 					{#if mod}
-						<mod.default {subject} {tab} {shown} />
+						<mod.default {subject} {tab} {shown} {lens} />
 					{/if}
 				{:catch err}
 					<p class="unbuilt">The {lens.name} section failed to load: {String(err)}</p>

@@ -44,11 +44,55 @@ describe('the first-wave components through TemperView', () => {
 
 	it('draws a table under its columns, tints a category, and says what it omits', () => {
 		const { container } = render(TemperView, { spec: one('Table', example('Table')) });
-		const headers = [...container.querySelectorAll('th')].map((th) => th.textContent);
-		expect(headers).toEqual(['Title', 'Status', 'Words']);
+		const headers = [...container.querySelectorAll('th')].map((th) => th.textContent?.trim());
+		expect(headers).toEqual(['Title', 'Status', 'Words ↑', 'Tags']);
 		expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
 		expect(container.querySelector('td [data-tint="cat-4"]')?.textContent).toBe('complete');
-		expect(container.textContent).toContain('2 of 12 stories in this context; 10 not shown.');
+		// A list cell is its values; an empty one reads as none.
+		const tags = [...container.querySelectorAll('td.list .tag')].map((t) => t.textContent);
+		expect(tags).toEqual(['coast', 'night']);
+		expect(container.querySelectorAll('td.list .none')).toHaveLength(1);
+		// One page of twelve: which rows, and what follows, from the page the answer gave.
+		expect(container.textContent).toContain('1–2 of 12 stories in this context; 10 after it.');
+		// The active order is marked on its column; facets count the whole listing.
+		expect(container.querySelector('th[aria-sort="ascending"]')?.textContent).toContain('Words');
+		expect(container.querySelector('.facets')?.textContent).toMatch(/draft\s*7.*complete\s*5/s);
+	});
+
+	it('offers paging and sorting only when the host handles them', () => {
+		const bare = render(TemperView, { spec: one('Table', example('Table')) });
+		expect(bare.container.querySelector('th button')).toBeNull();
+		expect(bare.container.querySelector('nav')).toBeNull();
+	});
+
+	it('routes a page or a sort to the host, with the params the catalog declares', async () => {
+		const page = vi.fn();
+		const sort = vi.fn();
+		const { container, getByRole } = render(TemperView, {
+			spec: one('Table', example('Table')),
+			actions: { 'Table.page': page, 'Table.sort': sort }
+		});
+		// Only sortable columns are controls.
+		const controls = [...container.querySelectorAll('th button')].map((b) => b.textContent?.trim());
+		expect(controls).toEqual(['Title', 'Words ↑']);
+		await fireEvent.click(getByRole('button', { name: /Words/ }));
+		expect(sort).toHaveBeenCalledWith({ key: 'words', order: 'desc' });
+		await fireEvent.click(getByRole('button', { name: 'Title' }));
+		expect(sort).toHaveBeenLastCalledWith({ key: 'title', order: 'asc' });
+		expect((getByRole('button', { name: 'Previous page' }) as HTMLButtonElement).disabled).toBe(
+			true
+		);
+		await fireEvent.click(getByRole('button', { name: 'Next page' }));
+		expect(page).toHaveBeenCalledWith({ offset: 2 });
+	});
+
+	it('refuses a handler for an action the catalog does not declare', () => {
+		expect(() =>
+			render(TemperView, {
+				spec: one('Table', example('Table')),
+				actions: { 'Table.filter': () => {} }
+			})
+		).toThrow(/does not declare: Table.filter/);
 	});
 
 	it('draws a timeline in order, and a table not present as its state', () => {

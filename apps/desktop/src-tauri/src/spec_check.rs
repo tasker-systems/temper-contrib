@@ -284,6 +284,40 @@ fn declared_errors(spec: &Value) -> Vec<String> {
                         ));
                     }
                 }
+            } else if let Some(name) = check.get("page").and_then(Value::as_str) {
+                let field = |f: &str| check.get(f).and_then(Value::as_str).and_then(prop);
+                let (Some(page), Some(total), Some(rows)) = (
+                    prop(name).filter(|p| p.is_object()),
+                    field("within").and_then(Value::as_f64),
+                    field("rows").and_then(Value::as_array),
+                ) else {
+                    continue;
+                };
+                if prop("state").and_then(Value::as_str) != Some("present") {
+                    continue;
+                }
+                let at = |f: &str| page.get(f).and_then(Value::as_f64).unwrap_or(0.0);
+                let (offset, size, n) = (at("offset"), at("size"), rows.len() as f64);
+                if n > size {
+                    errors.push(format!(
+                        "elements/{key}: shows {n} rows on a page of {size}"
+                    ));
+                }
+                if offset + n > total {
+                    errors.push(format!(
+                        "elements/{key}: rows {} to {} pass the total {total}",
+                        offset + 1.0,
+                        offset + n
+                    ));
+                }
+                let more = page.get("more").and_then(Value::as_bool);
+                if more != Some(offset + n < total) {
+                    errors.push(format!(
+                        "elements/{key}/props/{name}/more: says {}, but {} of {total} reach this page",
+                        more.map_or_else(|| "nothing".to_owned(), |m| m.to_string()),
+                        offset + n
+                    ));
+                }
             } else if let Some(path) = check.get("values").and_then(Value::as_str) {
                 let within = check.get("in").and_then(Value::as_str).unwrap_or_default();
                 let allowed: HashSet<String> =

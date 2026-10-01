@@ -11,7 +11,7 @@
 	import RegionState from '$lib/components/RegionState.svelte';
 	import type { DocOpened } from '$lib/document';
 	import { enabled } from './contributions';
-	import { type LensDecl, lensesFor, resolveLens } from './lenses';
+	import { built, type LensDecl, lensComponent, lensesFor, resolveLens } from './lenses';
 	import { type Step, stepTitle, tabs } from './tabs.svelte';
 	import UnbuiltLens from './UnbuiltLens.svelte';
 
@@ -54,10 +54,8 @@
 	});
 
 	const lens = $derived(resolution?.lens ?? null);
-	const loading = $derived(lens?.build.state === 'built' ? lens.build.component() : null);
-	const alternatives = $derived(
-		lensesFor(subject, docType, enabled).filter((l: LensDecl) => l.build.state === 'built')
-	);
+	const loading = $derived(lens ? lensComponent(lens) : null);
+	const alternatives = $derived(lensesFor(subject, docType, enabled).filter(built));
 </script>
 
 {#if arriving}
@@ -77,7 +75,7 @@
 	{#await loading}
 		<div class="page"><RegionState state="arriving" label={`the ${lens.name} lens`} /></div>
 	{:then mod}
-		<mod.default {subject} {opened} tab={handle} />
+		<mod.default {subject} {opened} tab={handle} {lens} />
 	{:catch err}
 		<div class="page">
 			<RegionState state="failed" label={`the ${lens.name} lens`} detail={String(err)} />

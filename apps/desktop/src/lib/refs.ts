@@ -26,6 +26,11 @@ export type ResolveBatch = (ids: string[]) => Promise<Resolution[]>;
 
 export interface RefResolver {
 	resolve(id: string): Promise<Resolution>;
+	/**
+	 * Take resolutions another temper read already answered — a listing says what each row is —
+	 * so a ref to one of them is not read again. Only `resolved` answers are kept.
+	 */
+	prime(answers: Resolution[]): void;
 	/** Where answers come from, said plainly — shown wherever fixtures could be mistaken for temper. */
 	readonly source: 'temper' | 'fixtures';
 }
@@ -61,6 +66,10 @@ export function createRefResolver(
 
 	return {
 		source,
+		prime(answers) {
+			for (const answer of answers)
+				if (answer.state === 'resolved') cache.set(answer.id, Promise.resolve(answer));
+		},
 		resolve(id) {
 			const hit = cache.get(id);
 			if (hit) return hit;
