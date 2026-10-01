@@ -63,9 +63,44 @@ function sectioned(name: string): Specimen['spec'] {
 	return { root: 'root', elements } as Spec;
 }
 
+/**
+ * Two graphs on one page, so the lens always draws more than one: the catalog's example, and a
+ * force layout of a plugin's own vocabulary, tinted by categorical roles, with a node unconnected.
+ */
+function twoGraphs(): Specimen['spec'] {
+	const vocabulary = {
+		total: 6,
+		scope: 'in this story',
+		label: 'characters',
+		state: 'present',
+		layout: 'force',
+		nodes: [
+			{ id: 'mara', label: 'Mara', kind: 'character', tint: 'cat-1' },
+			{ id: 'jun', label: 'Jun', kind: 'character', tint: 'cat-1' },
+			{ id: 'harbour', label: 'The harbour', kind: 'setting', tint: 'cat-5' },
+			{ id: 'storm', label: 'The storm', kind: 'scene', tint: 'cat-3' },
+			{ id: 'letter', label: 'The letter', kind: 'object' },
+			{ id: 'aunt', label: 'An aunt, never named', kind: 'character', tint: 'cat-1' }
+		],
+		edges: [
+			{ source: 'mara', target: 'jun', label: 'sister of', direction: 'none' },
+			{ source: 'mara', target: 'harbour', label: 'lives at' },
+			{ source: 'storm', target: 'harbour', label: 'set at' },
+			{ source: 'jun', target: 'letter', label: 'writes' }
+		]
+	};
+	const elements: Record<string, unknown> = {
+		root: { type: 'Stack', props: { gap: 'loose' }, children: ['first', 'second'] },
+		first: leaf('Graph'),
+		second: leaf('Graph', vocabulary)
+	};
+	return { root: 'root', elements } as Spec;
+}
+
 export const specimens: Specimen[] = Object.entries(components).map(([name, c]) => {
 	if (name === 'Accordion' || name === 'Tabs')
 		return { name, description: c.description, spec: sectioned(name) };
+	if (name === 'Graph') return { name, description: c.description, spec: twoGraphs() };
 	const held = childrenOf(name);
 	const props = example(name);
 	if (name === 'BoundedList') props.shown = Object.keys(held).length;

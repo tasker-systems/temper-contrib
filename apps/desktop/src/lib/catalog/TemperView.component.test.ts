@@ -121,6 +121,101 @@ describe('the first-wave components through TemperView', () => {
 	});
 });
 
+describe('the graph through TemperView', () => {
+	const graph = example('Graph');
+
+	it('draws the connected nodes, lists the one with no edge, and says what it omits', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		// Seven nodes are joined by an edge; the character sketch is joined to nothing.
+		expect(container.querySelectorAll('svg .node')).toHaveLength(7);
+		expect(container.querySelectorAll('svg .edge')).toHaveLength(6);
+		expect(container.querySelector('svg')?.textContent).not.toContain('A character sketch');
+		expect(container.querySelector('.unconnected')?.textContent).toContain('A character sketch');
+		expect(container.querySelector('.unconnected')?.textContent).toContain('character');
+		expect(container.textContent).toContain('8 of 9 around this goal; 1 not shown.');
+	});
+
+	it('paints a node only through its role, and an untinted node neutral', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		const tints = [...container.querySelectorAll('svg .node')].map((n) =>
+			n.getAttribute('data-tint')
+		);
+		expect(tints).toContain('doctype-goal');
+		expect(container.querySelector('.unconnected [data-tint]')?.getAttribute('data-tint')).toBe(
+			'none'
+		);
+		for (const el of container.querySelectorAll('svg *'))
+			for (const attr of ['fill', 'stroke', 'style'])
+				expect(el.hasAttribute(attr), attr).toBe(false);
+	});
+
+	it('names each kind beside its colour in a legend', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		const entries = [...container.querySelectorAll('.legend .entry')].map((e) => [
+			e.querySelector('[data-tint]')?.getAttribute('data-tint'),
+			e.textContent?.trim()
+		]);
+		expect(entries).toContainEqual(['doctype-goal', 'goal']);
+		expect(entries).toContainEqual(['doctype-task', 'task']);
+		// The unconnected character is listed, not drawn, so it is not in the drawing's legend.
+		expect(entries.map(([, k]) => k)).not.toContain('character');
+	});
+
+	it('states a self-join, draws a repeated pair once, and reads each relation its own way', () => {
+		const props = {
+			total: 3,
+			scope: 'here',
+			label: 'family',
+			state: 'present',
+			nodes: [
+				{ id: 'mara', label: 'Mara' },
+				{ id: 'jun', label: 'Jun' },
+				{ id: 'lone', label: 'Lone' }
+			],
+			edges: [
+				{ source: 'mara', target: 'jun', label: 'sister of', direction: 'none' },
+				{ source: 'mara', target: 'jun', label: 'writes to' },
+				{ source: 'lone', target: 'lone', label: 'haunts' }
+			]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.querySelectorAll('svg .edge')).toHaveLength(1);
+		expect(container.querySelectorAll('svg .edge .head')).toHaveLength(1);
+		expect(container.textContent?.replace(/\s+/g, ' ')).toContain(
+			'1 edge joins a node to itself, so it has no line: Lone (haunts)'
+		);
+		const jun = [...container.querySelectorAll('.listed li')].find(
+			(li) => li.querySelector('.name')?.textContent === 'Jun'
+		);
+		expect(jun?.querySelector('.joins')?.textContent).toBe('— sister of: Mara; ← writes to: Mara');
+	});
+
+	it('says nothing about connection when it carries no nodes', () => {
+		const props = { ...graph, nodes: [], edges: [] };
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.textContent).toContain('0 of 9 around this goal; 9 not shown.');
+		expect(container.textContent).not.toContain('connected');
+	});
+
+	it('draws two graphs on one page with no id for one to answer for the other', () => {
+		const spec = {
+			root: 's',
+			elements: {
+				s: { type: 'Stack', props: {}, children: ['a', 'b'] },
+				a: { type: 'Graph', props: graph, children: [] },
+				b: { type: 'Graph', props: { ...graph, layout: 'force' }, children: [] }
+			}
+		};
+		const { container } = render(TemperView, { spec });
+		expect(container.querySelectorAll('svg')).toHaveLength(2);
+		expect(container.querySelectorAll('svg [id], svg marker')).toHaveLength(0);
+		for (const svg of container.querySelectorAll('svg'))
+			expect(svg.querySelectorAll('.edge .head').length).toBeGreaterThan(0);
+	});
+});
+
 describe('the catalog lens', () => {
 	it('renders a specimen of every component, none refused', async () => {
 		const { default: CatalogLens } = await import('$lib/shell/lenses/CatalogLens.svelte');

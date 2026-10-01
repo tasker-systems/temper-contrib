@@ -23,11 +23,12 @@ const good = {
 };
 
 describe('the temper catalog', () => {
-	it('names exactly the foundation and first-wave components', () => {
+	it('names exactly the foundation, first-wave and graph components', () => {
 		expect(temperCatalog.componentNames.sort()).toEqual([
 			'Accordion',
 			'BoundedList',
 			'Chart',
+			'Graph',
 			'Grid',
 			'Heading',
 			'RegionState',

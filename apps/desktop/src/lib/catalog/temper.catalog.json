@@ -1,7 +1,7 @@
 {
   "catalog": "temper",
   "version": "1.0.0",
-  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup — colour enters only as a categorical role (cat-1…cat-8) or a condition. `checks` declares what JSON Schema cannot say (a count within its total, keys among columns, which children a component holds); both gates read them from this file. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
+  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup — colour enters only as a role: a categorical role (cat-1…cat-8), a doc-type role, or a condition. `checks` declares what JSON Schema cannot say (a count within its total, keys among columns, edges naming nodes that exist, which children a component holds); both gates read them from this file. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
   "limits": {
     "maxElements": 256,
     "maxDepth": 8,
@@ -424,6 +424,185 @@
       },
       "checks": [
         { "children": ["Section"], "min": 1, "max": 12 }
+      ]
+    },
+    "Graph": {
+      "description": "Nodes and the edges between them, drawn read-only, with what it omits. `total` is every node the graph stands for; `nodes` are those shown. A node with no edge among those carried is listed beneath the drawing, not drawn. A node's `tint` is a doc-type role, a categorical role (cat-1…cat-8) or a condition, never a colour; a node with none is drawn neutral. `kind` is the word for what a node is (a doc type: \"task\", \"character\") and is shown beside its colour in the graph's legend, so colour never carries identity alone. Edges join nodes by `id`; edges between one pair share a line, and an edge joining a node to itself is stated beneath, not drawn. `ref` makes a node's listing a link to that resource. In a `radial` layout, `core` nodes settle at the centre. The omission sentence is composed; do not word it yourself.",
+      "slots": [],
+      "example": {
+        "total": 9,
+        "scope": "around this goal",
+        "label": "neighbourhood",
+        "state": "present",
+        "layout": "radial",
+        "nodes": [
+          {
+            "id": "goal",
+            "label": "Temper is worked from the desktop",
+            "kind": "goal",
+            "tint": "doctype-goal",
+            "core": true
+          },
+          {
+            "id": "t1",
+            "label": "Catalog: a read-only Graph",
+            "kind": "task",
+            "tint": "doctype-task"
+          },
+          { "id": "t2", "label": "Catalog v2, first wave", "kind": "task", "tint": "doctype-task" },
+          {
+            "id": "s1",
+            "label": "Session: first wave closed",
+            "kind": "session",
+            "tint": "doctype-session"
+          },
+          {
+            "id": "r1",
+            "label": "Grounding: the component catalog",
+            "kind": "research",
+            "tint": "doctype-research"
+          },
+          {
+            "id": "d1",
+            "label": "Port temper-ui's layout",
+            "kind": "decision",
+            "tint": "doctype-decision"
+          },
+          { "id": "c1", "label": "Colour by binding", "kind": "concept", "tint": "doctype-concept" },
+          { "id": "x1", "label": "A character sketch", "kind": "character" }
+        ],
+        "edges": [
+          { "source": "t1", "target": "goal", "label": "advances" },
+          { "source": "t2", "target": "goal", "label": "advances" },
+          { "source": "s1", "target": "t2", "label": "records" },
+          { "source": "r1", "target": "goal", "label": "grounds" },
+          { "source": "d1", "target": "r1", "label": "derived_from", "kind": "derived" },
+          {
+            "source": "c1",
+            "target": "d1",
+            "label": "contradicts",
+            "kind": "contradicts",
+            "direction": "none"
+          }
+        ]
+      },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["total", "scope", "label", "state", "nodes", "edges"],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every node the graph stands for, not only those carried here."
+          },
+          "scope": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "What total counts: \"around this goal\", \"in this context\"."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 60,
+            "description": "The view's noun, used when it is not present and in its accessible name."
+          },
+          "state": { "enum": ["present", "arriving", "empty", "gave-up", "failed"] },
+          "layout": {
+            "enum": ["force", "radial"],
+            "description": "force (the default) lets structure place nodes; radial settles `core` nodes at the centre and rings the rest."
+          },
+          "nodes": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "label"],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$",
+                  "description": "Unique within the graph; edges name nodes by it."
+                },
+                "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "kind": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40,
+                  "description": "What the node is, in a word: a doc type or a plugin's own term. Shown with the node."
+                },
+                "tint": {
+                  "enum": [
+                    "doctype-research",
+                    "doctype-task",
+                    "doctype-session",
+                    "doctype-concept",
+                    "doctype-goal",
+                    "doctype-decision",
+                    "doctype-memory",
+                    "cat-1",
+                    "cat-2",
+                    "cat-3",
+                    "cat-4",
+                    "cat-5",
+                    "cat-6",
+                    "cat-7",
+                    "cat-8",
+                    "notice",
+                    "success",
+                    "danger",
+                    "pending"
+                  ],
+                  "description": "A doc-type role, a categorical role (cat-1…cat-8) or a condition. Never a colour. Omitted, the node is neutral."
+                },
+                "ref": {
+                  "type": "string",
+                  "pattern": "^([a-z0-9-]{0,120}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "description": "A resource id or decorated ref: the node's listing links to it."
+                },
+                "core": {
+                  "type": "boolean",
+                  "description": "Radial layout only: settle this node at the centre."
+                }
+              }
+            }
+          },
+          "edges": {
+            "type": "array",
+            "maxItems": 600,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "target"],
+              "properties": {
+                "source": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$" },
+                "target": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$" },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 40,
+                  "description": "The relation, shown as the edge's tooltip."
+                },
+                "direction": {
+                  "enum": ["forward", "inverse", "none"],
+                  "description": "Which end carries the arrowhead: forward (the default) at target, inverse at source, none for a symmetric relation."
+                },
+                "kind": {
+                  "enum": ["link", "derived", "contradicts"],
+                  "description": "link (the default) is drawn plain; derived dashed; contradicts in the danger role."
+                }
+              }
+            }
+          }
+        }
+      },
+      "checks": [
+        { "count": "nodes", "within": "total" },
+        { "unique": "nodes/*/id" },
+        { "values": "edges/*/source", "in": "nodes/*/id" },
+        { "values": "edges/*/target", "in": "nodes/*/id" }
       ]
     }
   }

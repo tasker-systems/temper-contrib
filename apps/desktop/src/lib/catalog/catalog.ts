@@ -32,12 +32,15 @@ type Source = {
  *   for; with `equals`, the prop that says how many are shown agrees with how many there are.
  * - `unique`: no value at the path repeats.
  * - `keys`: every key of every object at the path is one of the values at `in`.
+ * - `values`: every value at the path is one of the values at `in` (an edge names a node that
+ *   exists).
  * - `children`: the element's children are only these types, between `min` and `max` of them.
  */
 export type Check =
 	| { count: string; within: string; equals?: string }
 	| { unique: string }
 	| { keys: string; in: string }
+	| { values: string; in: string }
 	| { children: string[]; min: number; max: number };
 
 // fromJSONSchema accepts the JSON Schema object; the cast narrows our JSON import's type.
@@ -211,6 +214,13 @@ function declaredErrors(
 					if (!allowed.has(k))
 						errors.push(`elements/${key}/props/${check.keys}: "${k}" is not one of ${check.in}`);
 			}
+		} else if ('values' in check) {
+			const allowed = new Set(walk(el, props, check.in));
+			for (const v of walk(el, props, check.values))
+				if (!allowed.has(v))
+					errors.push(
+						`elements/${key}/props/${check.values}: "${String(v)}" is not one of ${check.in}`
+					);
 		} else {
 			const children = Array.isArray(el.children) ? el.children : [];
 			if (children.length < check.min || children.length > check.max)
@@ -240,7 +250,8 @@ function declaredErrors(
  *
  * The shape is closed and must be one bounded tree (`shapeErrors`); then what JSON Schema cannot
  * say, as each component declares it (`Check`): a bounded view never carries more than it stands
- * for, a table's rows are keyed by its columns, Tabs hold only Sections.
+ * for, a table's rows are keyed by its columns, a graph's edges name its nodes, Tabs hold only
+ * Sections.
  */
 export function checkSpec(spec: unknown): SpecCheck {
 	const errors = shapeErrors(spec);

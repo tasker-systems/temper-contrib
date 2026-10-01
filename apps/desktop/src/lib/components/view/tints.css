@@ -1,0 +1,23 @@
+/* A tint is a role, never a colour. The one mapping from a tint's name to the role it paints
+   with: a component reads --tint (with its own fallback for none) and decides which channel it
+   colours. :where() keeps it at zero specificity, so a component's own rules always win. */
+:where([data-tint='none']) { --tint: initial; }
+:where([data-tint='doctype-research']) { --tint: var(--tp-doctype-research); }
+:where([data-tint='doctype-task']) { --tint: var(--tp-doctype-task); }
+:where([data-tint='doctype-session']) { --tint: var(--tp-doctype-session); }
+:where([data-tint='doctype-concept']) { --tint: var(--tp-doctype-concept); }
+:where([data-tint='doctype-goal']) { --tint: var(--tp-doctype-goal); }
+:where([data-tint='doctype-decision']) { --tint: var(--tp-doctype-decision); }
+:where([data-tint='doctype-memory']) { --tint: var(--tp-doctype-memory); }
+:where([data-tint='cat-1']) { --tint: var(--tp-cat-1); }
+:where([data-tint='cat-2']) { --tint: var(--tp-cat-2); }
+:where([data-tint='cat-3']) { --tint: var(--tp-cat-3); }
+:where([data-tint='cat-4']) { --tint: var(--tp-cat-4); }
+:where([data-tint='cat-5']) { --tint: var(--tp-cat-5); }
+:where([data-tint='cat-6']) { --tint: var(--tp-cat-6); }
+:where([data-tint='cat-7']) { --tint: var(--tp-cat-7); }
+:where([data-tint='cat-8']) { --tint: var(--tp-cat-8); }
+:where([data-tint='notice']) { --tint: var(--tp-notice); }
+:where([data-tint='success']) { --tint: var(--tp-success); }
+:where([data-tint='danger']) { --tint: var(--tp-danger); }
+:where([data-tint='pending']) { --tint: var(--tp-pending); }

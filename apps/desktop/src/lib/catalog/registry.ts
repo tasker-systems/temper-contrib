@@ -3,6 +3,7 @@ import { defineRegistry } from '@json-render/svelte';
 import Accordion from './adapters/Accordion.svelte';
 import BoundedList from './adapters/BoundedList.svelte';
 import Chart from './adapters/Chart.svelte';
+import Graph from './adapters/Graph.svelte';
 import Grid from './adapters/Grid.svelte';
 import Heading from './adapters/Heading.svelte';
 import RegionState from './adapters/RegionState.svelte';
@@ -31,6 +32,7 @@ export const { registry: temperRegistry } = defineRegistry(temperCatalog, {
 		Timeline,
 		Table,
 		Chart,
+		Graph,
 		Section,
 		Accordion,
 		Tabs
