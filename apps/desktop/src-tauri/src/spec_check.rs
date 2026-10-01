@@ -284,6 +284,18 @@ fn declared_errors(spec: &Value) -> Vec<String> {
                         ));
                     }
                 }
+            } else if let Some(path) = check.get("values").and_then(Value::as_str) {
+                let within = check.get("in").and_then(Value::as_str).unwrap_or_default();
+                let allowed: HashSet<String> =
+                    walk(el, within).iter().map(|v| v.to_string()).collect();
+                for v in walk(el, path) {
+                    if !allowed.contains(&v.to_string()) {
+                        let shown = v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+                        errors.push(format!(
+                            "elements/{key}/props/{path}: \"{shown}\" is not one of {within}"
+                        ));
+                    }
+                }
             } else if let Some(types) = check.get("children").and_then(Value::as_array) {
                 let bound = |field: &str| check.get(field).and_then(Value::as_u64).unwrap_or(0);
                 let (min, max) = (bound("min"), bound("max"));

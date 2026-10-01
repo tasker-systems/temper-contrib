@@ -121,6 +121,52 @@ describe('the first-wave components through TemperView', () => {
 	});
 });
 
+describe('the graph through TemperView', () => {
+	const graph = example('Graph');
+
+	it('draws the connected nodes, lists the one with no edge, and says what it omits', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		// Seven nodes are joined by an edge; the character sketch is joined to nothing.
+		expect(container.querySelectorAll('svg .node')).toHaveLength(7);
+		expect(container.querySelectorAll('svg .edge')).toHaveLength(6);
+		expect(container.querySelector('svg')?.textContent).not.toContain('A character sketch');
+		expect(container.querySelector('.unconnected')?.textContent).toContain('A character sketch');
+		expect(container.querySelector('.unconnected')?.textContent).toContain('character');
+		expect(container.textContent).toContain('8 of 9 around this goal; 1 not shown.');
+	});
+
+	it('paints a node only through its role, and an untinted node neutral', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		const tints = [...container.querySelectorAll('svg .node')].map((n) =>
+			n.getAttribute('data-tint')
+		);
+		expect(tints).toContain('doctype-goal');
+		expect(container.querySelector('.unconnected [data-tint]')?.getAttribute('data-tint')).toBe(
+			'none'
+		);
+		for (const el of container.querySelectorAll('svg *'))
+			for (const attr of ['fill', 'stroke', 'style'])
+				expect(el.hasAttribute(attr), attr).toBe(false);
+	});
+
+	it('draws two graphs on one page with no id for one to answer for the other', () => {
+		const spec = {
+			root: 's',
+			elements: {
+				s: { type: 'Stack', props: {}, children: ['a', 'b'] },
+				a: { type: 'Graph', props: graph, children: [] },
+				b: { type: 'Graph', props: { ...graph, layout: 'force' }, children: [] }
+			}
+		};
+		const { container } = render(TemperView, { spec });
+		expect(container.querySelectorAll('svg')).toHaveLength(2);
+		expect(container.querySelectorAll('svg [id], svg marker')).toHaveLength(0);
+		for (const svg of container.querySelectorAll('svg'))
+			expect(svg.querySelectorAll('.edge .head').length).toBeGreaterThan(0);
+	});
+});
+
 describe('the catalog lens', () => {
 	it('renders a specimen of every component, none refused', async () => {
 		const { default: CatalogLens } = await import('$lib/shell/lenses/CatalogLens.svelte');

@@ -10,6 +10,8 @@ What it asserts, per theme:
    the computed value of a `--tp-*` role in that theme. A library palette, a colour mixed from a
    role, or a literal all fail it, named by element and property.
 3. The chart's series are painted with the categorical roles their spec named.
+4. Both graphs are drawn, side by side on one page, and their nodes are painted with the
+   doc-type and categorical roles their specs named.
 """
 
 from __future__ import annotations
@@ -30,7 +32,8 @@ const done = arguments[arguments.length - 1];
 const theme = arguments[0];
 document.documentElement.dataset.theme = theme;
 // Two frames: the theme's rules apply, then LayerChart's effects settle.
-requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
+// An error thrown in the callback would never call done, and read as a timeout: name it instead.
+requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
   const page = document.querySelector('.tab-body:not([hidden]) .page');
   if (!page) return done({ error: 'no catalog page in the active tab' });
 
@@ -94,7 +97,11 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
         component: el.closest('[data-component]')?.getAttribute('data-component') ?? null });
     }
   }
-  const cat = (n) => Object.keys(roles).find((v) => roles[v].includes(`--tp-cat-${n}`));
+  const role = (name) => Object.keys(roles).find((v) => roles[v].includes(`--tp-${name}`));
+  const cat = (n) => role(`cat-${n}`);
+  const graphs = [...page.querySelectorAll('[data-component="Graph"] svg')];
+  const nodeFill = (tint) => [...page.querySelectorAll(`[data-component="Graph"] svg .node[data-tint="${tint}"] .mark`)]
+    .map((m) => getComputedStyle(m).fill);
   done({
     theme,
     components: [...page.querySelectorAll('[data-component]')].map((s) => s.dataset.component),
@@ -102,10 +109,14 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => {
     chartMarks: page.querySelectorAll('[data-component="Chart"] svg path, [data-component="Chart"] svg rect').length,
     roleColours: Object.keys(roles).length,
     seriesPainted: { 'cat-1': painted.has(cat(1)), 'cat-3': painted.has(cat(3)) },
+    graphs: graphs.map((g) => ({ nodes: g.querySelectorAll('.node').length,
+      edges: g.querySelectorAll('.edge').length, ids: g.querySelectorAll('[id]').length })),
+    nodesPainted: Object.fromEntries(['doctype-goal', 'doctype-task', 'cat-1', 'cat-5'].map((t) =>
+      [t, nodeFill(t).length > 0 && nodeFill(t).every((f) => f === role(t))])),
     offenders: offenders.slice(0, 40),
     offenderCount: offenders.length
   });
-}, 300)));
+} catch (e) { done({ error: `the paint probe threw: ${e}` }); } }, 300)));
 """
 
 
@@ -140,6 +151,12 @@ def witness_catalog(driver, open_catalog) -> tuple[list[dict], list[str]]:
                 failures.append(
                     f"{where}: series not painted with their roles {r['seriesPainted']}"
                 )
+            if len(r["graphs"]) != 2 or not all(g["nodes"] and g["edges"] for g in r["graphs"]):
+                failures.append(f"{where}: the two graphs were not both drawn {r['graphs']}")
+            if any(g["ids"] for g in r["graphs"]):
+                failures.append(f"{where}: a graph carries ids another could answer for")
+            if not all(r["nodesPainted"].values()):
+                failures.append(f"{where}: nodes not painted with their roles {r['nodesPainted']}")
             if r["offenderCount"]:
                 failures.append(
                     f"{where}: {r['offenderCount']} colours not from a --tp-* role:"

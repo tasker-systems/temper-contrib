@@ -1764,6 +1764,1024 @@
 					}
 				}
 			}
+		},
+		{
+			"name": "a graph of nodes and edges",
+			"ok": true,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph of only unconnected nodes",
+			"ok": true,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 8,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": []
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph edge from a node that does not exist",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "nowhere",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph edge to a node that does not exist",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "nowhere",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph with a node id twice",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "goal",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph carrying more nodes than it stands for",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 3,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph node tinted with a colour",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "#f5d277",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph node tinted with no role",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "cat-9",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph node with a prop not in the catalog",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true,
+									"color": "doctype-goal"
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph edge with a stroke",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 9,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"layout": "radial",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal",
+									"core": true
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "t2",
+									"label": "Catalog v2, first wave",
+									"kind": "task",
+									"tint": "doctype-task"
+								},
+								{
+									"id": "s1",
+									"label": "Session: first wave closed",
+									"kind": "session",
+									"tint": "doctype-session"
+								},
+								{
+									"id": "r1",
+									"label": "Grounding: the component catalog",
+									"kind": "research",
+									"tint": "doctype-research"
+								},
+								{
+									"id": "d1",
+									"label": "Port temper-ui's layout",
+									"kind": "decision",
+									"tint": "doctype-decision"
+								},
+								{
+									"id": "c1",
+									"label": "Colour by binding",
+									"kind": "concept",
+									"tint": "doctype-concept"
+								},
+								{
+									"id": "x1",
+									"label": "A character sketch",
+									"kind": "character"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances",
+									"stroke": "red"
+								},
+								{
+									"source": "t2",
+									"target": "goal",
+									"label": "advances"
+								},
+								{
+									"source": "s1",
+									"target": "t2",
+									"label": "records"
+								},
+								{
+									"source": "r1",
+									"target": "goal",
+									"label": "grounds"
+								},
+								{
+									"source": "d1",
+									"target": "r1",
+									"label": "derived_from",
+									"kind": "derived"
+								},
+								{
+									"source": "c1",
+									"target": "d1",
+									"label": "contradicts",
+									"kind": "contradicts",
+									"direction": "none"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
 		}
 	]
 }
