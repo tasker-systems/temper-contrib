@@ -3755,6 +3755,96 @@
 					}
 				}
 			}
+		},
+		{
+			"name": "a table facet that lists one value twice",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text",
+									"sortable": true
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number",
+									"sortable": true
+								},
+								{
+									"key": "tags",
+									"header": "Tags",
+									"kind": "list"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120,
+									"tags": [
+										"coast",
+										"night"
+									]
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400,
+									"tags": []
+								}
+							],
+							"page": {
+								"offset": 0,
+								"size": 2,
+								"more": true
+							},
+							"sort": {
+								"key": "words",
+								"order": "asc"
+							},
+							"facets": [
+								{
+									"key": "stage",
+									"label": "Stage",
+									"counts": [
+										{
+											"value": "x",
+											"count": 1
+										},
+										{
+											"value": "x",
+											"count": 2
+										}
+									]
+								}
+							],
+							"fieldsNotShown": 2
+						},
+						"children": []
+					}
+				}
+			}
 		}
 	]
 }

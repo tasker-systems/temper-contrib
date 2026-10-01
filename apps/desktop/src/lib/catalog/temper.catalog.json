@@ -268,9 +268,12 @@
             "counts": [
               { "value": "draft", "count": 7 },
               { "value": "complete", "count": 5 }
-            ]
+            ],
+            "active": "draft",
+            "unlisted": 1
           }
-        ]
+        ],
+        "fieldsNotShown": 2
       },
       "props": {
         "type": "object",

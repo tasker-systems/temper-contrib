@@ -122,7 +122,7 @@ pub fn listing_params(
     })
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 enum Kind {
     Text,
@@ -230,12 +230,12 @@ fn scalar_text(v: &Value) -> Option<String> {
 
 /// How an `open_meta` field can be drawn, judged over every row that has it:
 /// numbers, words, or a few short values. A field holding anything else
-/// (an object, a list of objects) is not a column.
+/// (an object, a list of objects) is not a column. A blank value says
+/// nothing, so it does not decide the kind either.
 fn field_kind<'a>(values: impl Iterator<Item = &'a Value>) -> Option<Kind> {
     let (mut list, mut number, mut text) = (false, false, false);
-    for v in values {
+    for v in values.filter(|v| !blank(v)) {
         match v {
-            Value::Null => {}
             Value::Number(_) => number = true,
             Value::String(_) | Value::Bool(_) => text = true,
             Value::Array(items) if items.iter().all(|i| scalar_text(i).is_some()) => list = true,
@@ -275,6 +275,8 @@ fn field_cell(kind: &Kind, v: &Value) -> Option<Cell> {
     }
 }
 
+/// One field's counts over the listing, most first (ties by value). A blank
+/// value is not one a reader could pick out, so it is counted as unlisted.
 fn facet(
     key: &'static str,
     label: &'static str,
@@ -284,9 +286,12 @@ fn facet(
     if counts.is_empty() {
         return None;
     }
-    let mut all: Vec<(&String, &i64)> = counts.iter().collect();
+    let mut all: Vec<(&String, &i64)> = counts
+        .iter()
+        .filter(|(v, _)| !v.trim().is_empty())
+        .collect();
     all.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-    let unlisted = all.len().saturating_sub(FACET_VALUES_MAX);
+    let unlisted = counts.len() - all.len().min(FACET_VALUES_MAX);
     Some(Facet {
         key,
         label,
@@ -298,7 +303,7 @@ fn facet(
                 count: *count,
             })
             .collect(),
-        active,
+        active: active.map(|a| clip(&a, LIST_ITEM_MAX)),
         unlisted,
     })
 }
@@ -334,8 +339,11 @@ pub fn table_props(
     view: &ViewState,
 ) -> Value {
     let rows = &answer.rows;
-    let one_context = given(&subject.context).is_some();
-    let one_type = given(&subject.doc_type).is_some();
+    let sort = view.sort.clone().unwrap_or_else(default_sort);
+    // The column the rows are ordered by is always drawn, so the order is always said.
+    let sorted_by = |key: &str| sort.key == key;
+    let one_context = given(&subject.context).is_some() && !sorted_by("context");
+    let one_type = given(&subject.doc_type).is_some() && !sorted_by("type");
 
     let mut columns = vec![Column {
         key: "title".into(),
@@ -359,7 +367,7 @@ pub fn table_props(
             sortable: true,
         });
     }
-    let has_stage = rows.iter().any(|r| r.managed_meta.stage.is_some());
+    let has_stage = sorted_by("stage") || rows.iter().any(|r| r.managed_meta.stage.is_some());
     let has_status = rows.iter().any(|r| r.managed_meta.status.is_some());
     if has_stage {
         columns.push(Column {
@@ -402,7 +410,7 @@ pub fn table_props(
         if fields.len() == room {
             break;
         }
-        if name.chars().count() > HEADER_MAX {
+        if name.trim().is_empty() || name.chars().count() > HEADER_MAX {
             continue;
         }
         let values = rows.iter().filter_map(|r| r.open_meta.as_ref()?.get(*name));
@@ -415,11 +423,7 @@ pub fn table_props(
         columns.push(Column {
             key: key.clone(),
             header: (*name).to_string(),
-            kind: match kind {
-                Kind::List => Kind::List,
-                Kind::Number => Kind::Number,
-                _ => Kind::Text,
-            },
+            kind: kind.clone(),
             sortable: false,
         });
     }
@@ -472,7 +476,6 @@ pub fn table_props(
         })
         .collect();
 
-    let sort = view.sort.clone().unwrap_or_else(default_sort);
     let sort = columns.iter().any(|c| c.key == sort.key).then_some(sort);
     let size = answer
         .limit
@@ -549,6 +552,14 @@ pub fn row_resolutions(answer: &ResourceListResponse) -> Vec<RefResolution> {
         .collect()
 }
 
+/// Where the last page starts, when an answer's page starts past its end —
+/// the listing shrank between the reader's last page and this one.
+pub fn last_page_offset(answer: &ResourceListResponse) -> Option<i64> {
+    let size = answer.limit.unwrap_or(PAGE_SIZE).max(1);
+    (answer.offset > 0 && answer.rows.is_empty() && answer.offset >= answer.total)
+        .then(|| (answer.total.max(1) - 1) / size * size)
+}
+
 /// A resolved bound lens: the filled, checked spec, and what the read said
 /// each resource it names is.
 #[derive(Debug, Serialize)]
@@ -569,15 +580,25 @@ pub async fn lens_resolve(
     if binding.read != "resource-list" {
         return Err(format!("no read named {} can be bound", binding.read));
     }
-    let params = listing_params(&subject, &view)?;
+    let mut params = listing_params(&subject, &view)?;
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
-    let answer = client
+    let mut answer = client
         .resources()
         .list_meta(&params)
         .await
         .map_err(|e| e.to_string())?;
+    // The listing shrank since the page was asked for, and it now starts past the end:
+    // show its last page rather than a page that says it holds rows it does not.
+    if let Some(last) = last_page_offset(&answer) {
+        params.offset = Some(last);
+        answer = client
+            .resources()
+            .list_meta(&params)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     Ok(Resolved {
         spec: fill(&spec, &binding, table_props(&answer, &subject, &view))?,
         refs: row_resolutions(&answer),
@@ -716,6 +737,67 @@ mod tests {
         // A histogram with nothing in it is not drawn.
         assert_eq!(props["facets"].as_array().unwrap().len(), 2);
         fill(&spec(), &binding(), props).expect("passes");
+    }
+
+    #[test]
+    fn odd_values_from_temper_never_make_the_core_refuse_its_own_view() {
+        let rows = vec![
+            row(
+                1,
+                "task",
+                json!({ "": "nameless", "   ": 2, "kind": ["a"] }),
+                json!({ "temper-stage": "" }),
+            ),
+            row(2, "task", json!({ "kind": [] }), json!({})),
+        ];
+        let mut a = answer(rows, 2, 0, 50);
+        a.facets.stage = HashMap::from([(String::new(), 1), ("done".into(), 1)]);
+        let long_type = "t".repeat(90);
+        a.facets.doc_type.insert(long_type.clone(), 1);
+        let subject = ListingSubject {
+            doc_type: Some(long_type),
+            ..context_subject()
+        };
+        let props = table_props(&a, &subject, &ViewState::default());
+        // The nameless fields are said, not drawn; the blank stage is counted, not listed.
+        assert_eq!(props["fieldsNotShown"], 2);
+        let stage = props["facets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["key"] == "stage")
+            .unwrap();
+        assert_eq!(stage["unlisted"], 1);
+        // A blank value does not make a list of what holds a list.
+        assert_eq!(
+            props["columns"].as_array().unwrap().last().unwrap()["kind"],
+            "list"
+        );
+        fill(&spec(), &binding(), props).expect("passes");
+    }
+
+    #[test]
+    fn the_column_the_rows_are_ordered_by_is_always_drawn() {
+        let view = ViewState {
+            sort: Some(Sort {
+                key: "stage".into(),
+                order: Order::Asc,
+            }),
+            ..Default::default()
+        };
+        let rows = vec![row(1, "note", json!({}), json!({}))];
+        let props = table_props(&answer(rows, 1, 0, 50), &context_subject(), &view);
+        assert_eq!(props["sort"], json!({ "key": "stage", "order": "asc" }));
+        fill(&spec(), &binding(), props).expect("passes");
+    }
+
+    #[test]
+    fn a_page_past_the_end_of_a_shrunken_listing_turns_to_its_last_page() {
+        assert_eq!(last_page_offset(&answer(vec![], 49, 50, 50)), Some(0));
+        assert_eq!(last_page_offset(&answer(vec![], 120, 150, 50)), Some(100));
+        assert_eq!(last_page_offset(&answer(vec![], 0, 50, 50)), Some(0));
+        assert_eq!(last_page_offset(&answer(vec![], 0, 0, 50)), None);
+        assert_eq!(last_page_offset(&answer(tasks(1), 51, 50, 50)), None);
     }
 
     #[test]

@@ -59,6 +59,25 @@ describe('the first-wave components through TemperView', () => {
 		expect(container.querySelector('.facets')?.textContent).toMatch(/draft\s*7.*complete\s*5/s);
 	});
 
+	it('draws a facet that lists one value twice, rather than dropping the table', () => {
+		const props = {
+			...example('Table'),
+			facets: [
+				{
+					key: 'stage',
+					label: 'Stage',
+					counts: [
+						{ value: 'x', count: 1 },
+						{ value: 'x', count: 2 }
+					]
+				}
+			]
+		};
+		const { container } = render(TemperView, { spec: one('Table', props) });
+		expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
+		expect(container.querySelectorAll('.facets .count')).toHaveLength(2);
+	});
+
 	it('offers paging and sorting only when the host handles them', () => {
 		const bare = render(TemperView, { spec: one('Table', example('Table')) });
 		expect(bare.container.querySelector('th button')).toBeNull();

@@ -102,6 +102,9 @@ const hubEntry = (resource: string, leftAt: string, device = 'station') => ({
 	device
 });
 
+/** When set, the next `lens_resolve` fails as an unanswered read would. */
+let failNextResolve = false;
+
 /** What the core answers a bound table with: the lens's spec, its element filled — 5 rows, 2 a page. */
 function boundTable(args?: Record<string, unknown>) {
 	const view = args?.view as { offset: number; sort?: { key: string; order: string } };
@@ -157,6 +160,10 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 			}
 			return Promise.resolve(opened(args?.id as string));
 		case 'lens_resolve':
+			if (failNextResolve) {
+				failNextResolve = false;
+				return Promise.reject('temper did not answer');
+			}
 			return Promise.resolve(boundTable(args));
 		case 'doc_connections':
 			return Promise.resolve({ state: 'present', data: { total: 0, edges: [] } });
@@ -263,6 +270,7 @@ describe('the shell', () => {
 		recentWork = null;
 		shapes = {};
 		contextsList = [CONTRIB];
+		failNextResolve = false;
 		agentSession.lastScope = null;
 		agentSession.lastReferenceUri = null;
 		agentSession.conversation = null;
@@ -453,6 +461,26 @@ describe('the shell', () => {
 				activeBody(container).querySelector('th[aria-sort="ascending"]')?.textContent
 			).toContain('Title')
 		);
+	});
+
+	it('a page turn that fails keeps the table, says so, and can be tried again', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+		await waitFor(() =>
+			expect(activeBody(container)?.querySelectorAll('tbody tr')).toHaveLength(2)
+		);
+		failNextResolve = true;
+		await fireEvent.click(button(activeBody(container), 'Next page'));
+		await waitFor(() =>
+			expect(activeBody(container).querySelector('.failure')?.textContent).toContain(
+				'could not be read: temper did not answer'
+			)
+		);
+		// The page in hand is still drawn, its controls with it.
+		expect(activeBody(container).textContent).toContain('row 0');
+		await fireEvent.click(button(activeBody(container), 'Try again'));
+		await waitFor(() => expect(activeBody(container).textContent).toContain('row 2'));
+		expect(activeBody(container).querySelector('.failure')).toBeNull();
 	});
 
 	it('reach reads in the same place, in the same words, whatever lens is in view', async () => {

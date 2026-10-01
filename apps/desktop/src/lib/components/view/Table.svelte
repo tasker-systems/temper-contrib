@@ -101,7 +101,7 @@
 				<div class="facet">
 					<dt class="t-label">{facet.label}</dt>
 					<dd>
-						{#each facet.counts as c, i (c.value)}
+						{#each facet.counts as c, i (i)}
 							{#if i > 0}<span class="sep" aria-hidden="true">·</span>{/if}
 							<span class="count" aria-current={facet.active === c.value ? 'true' : undefined}
 								>{c.value} <span class="n">{c.count.toLocaleString()}</span></span
