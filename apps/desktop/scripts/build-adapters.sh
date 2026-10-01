@@ -9,11 +9,11 @@
 # and what adapters.rs resolves in dev. Harness binaries are never staged —
 # the adapters wrap the person's own claude/codex/agy, resolved at launch.
 #
-# The integrity chain: the input tree comes from `bun install`, whose
-# --frozen-lockfile form (the package.json pre-hook on this script — bun runs
-# it automatically — and CI's install step) verifies every staged package's
-# sha512 against bun.lock. This script only ever copies from that verified
-# tree; it fetches nothing itself.
+# The integrity chain: the adapter packages land through `bun install
+# --frozen-lockfile` (the CI desktop job's install step, and the flow before
+# any `tauri build`), which verifies every package's sha512 against bun.lock.
+# This script only ever copies from that verified tree; it fetches nothing
+# itself.
 #
 # Run from anywhere; paths are repo-relative. Idempotent: the staging tree is
 # deleted and rebuilt each run.

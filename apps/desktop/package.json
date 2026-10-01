@@ -11,7 +11,6 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"tauri": "tauri",
-		"prebuild:adapters": "bun install --frozen-lockfile",
 		"build:adapters": "scripts/build-adapters.sh",
 		"test": "vitest run",
 		"guard:colours": "node scripts/check-no-literal-colours.mjs",
@@ -43,6 +42,10 @@
 		"marked-highlight": "^2.2.4",
 		"zod": "^4.6.5"
 	},
+	"trustedDependencies": [
+		"node-pty",
+		"better-sqlite3"
+	],
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
 		"@sveltejs/adapter-static": "^3",
@@ -52,7 +55,6 @@
 		"@tauri-apps/cli": "^2",
 		"@testing-library/svelte": "^5.4.2",
 		"@types/d3-force": "^3.0.10",
-		"esbuild": "^0.28.2",
 		"jsdom": "^30.1.1",
 		"playwright-core": "^1.63.0",
 		"svelte": "^5.56.1",
