@@ -7,8 +7,12 @@
 # launch command by hand.
 #
 # `binary` is the name probed on $PATH. `command` is the launch command the store receives,
-# parsed the way the ACP crate parses command strings. Adapter rows probe the runner that
-# fetches them (`npx`), not the agent itself — their `binary` is never the agent's word.
+# parsed the way the ACP crate parses command strings. Self-contained adapters probe their runner
+# (`npx`); adapters wrapping an installed CLI probe that CLI's binary directly (`agy`).
+#
+# Where an adapter is launched via npx, `command` pins a supported semver range
+# (`package@^x.y.z`) so the desktop and its test witnesses launch a vetted version,
+# and rolling out an updated supported version is a TOML-only change.
 
 [[agents]]
 key = "opencode"
@@ -35,12 +39,20 @@ command = "gemini --acp"
 key = "codex"
 label = "Codex CLI"
 binary = "npx"
-command = "npx -y @agentclientprotocol/codex-acp"
+command = "npx -y @agentclientprotocol/codex-acp@^2.0.0"
 # https://github.com/agentclientprotocol/codex-acp — "Run the published package directly: npx -y @agentclientprotocol/codex-acp"
 
 [[agents]]
 key = "claude"
 label = "Claude Agent"
 binary = "npx"
-command = "npx -y @agentclientprotocol/claude-agent-acp"
+command = "npx -y @agentclientprotocol/claude-agent-acp@^0.84.0"
 # https://github.com/agentclientprotocol/claude-agent-acp — the ACP adapter for the Claude Agent SDK
+
+[[agents]]
+key = "antigravity"
+label = "Antigravity CLI"
+binary = "agy"
+command = "npx -y agy-acp@^0.5.2"
+# https://github.com/shindgew/agy-acp — ACP adapter wrapping the Google Antigravity CLI (agy)
+

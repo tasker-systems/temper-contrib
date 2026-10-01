@@ -36,6 +36,12 @@ pub fn roster() -> Vec<RosterEntry> {
         .expect("the bundled roster carries an [[agents]] array")
 }
 
+/// Finds one bundled roster preset by its key.
+#[cfg(test)]
+pub fn roster_entry(key: &str) -> Option<RosterEntry> {
+    roster().into_iter().find(|e| e.key == key)
+}
+
 /// Where one roster entry stands on this machine.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -218,7 +224,7 @@ mod tests {
         assert_eq!(keys.len(), roster.len(), "entry keys are distinct");
     }
 
-    /// The five preset rows the task names, with the launch each doc states.
+    /// The preset rows the roster names, with the launch each doc states.
     #[test]
     fn the_common_agents_are_preset() {
         let roster = roster();
@@ -234,12 +240,24 @@ mod tests {
         assert_eq!(by_key("gemini").command, "gemini --acp");
         assert_eq!(
             by_key("codex").command,
-            "npx -y @agentclientprotocol/codex-acp"
+            "npx -y @agentclientprotocol/codex-acp@^2.0.0"
         );
         assert_eq!(
             by_key("claude").command,
-            "npx -y @agentclientprotocol/claude-agent-acp"
+            "npx -y @agentclientprotocol/claude-agent-acp@^0.84.0"
         );
+        assert_eq!(by_key("antigravity").binary, "agy");
+        assert_eq!(by_key("antigravity").command, "npx -y agy-acp@^0.5.2");
+    }
+
+    #[test]
+    fn roster_entry_resolves_presets_by_key() {
+        assert_eq!(roster_entry("claude").map(|e| e.key), Some("claude".into()));
+        assert_eq!(
+            roster_entry("antigravity").map(|e| e.key),
+            Some("antigravity".into())
+        );
+        assert!(roster_entry("nonexistent-agent").is_none());
     }
 
     fn entry(binary: &str) -> RosterEntry {
