@@ -30,8 +30,15 @@ if [[ ! -d "$NM" ]]; then
 fi
 
 if [[ "$(uname -s)-$(uname -m)" != "Darwin-arm64" ]]; then
-    echo "build-adapters: staging is darwin-arm64 only; this machine is $(uname -s)-$(uname -m)" >&2
-    exit 1
+    if [[ "${TAURI_BUNDLE:-}" == "1" ]]; then
+        echo "build-adapters: shipping bundles are staged on darwin-arm64 only; this machine is $(uname -s)-$(uname -m)" >&2
+        exit 1
+    fi
+    # No bundle being produced (CI's cargo checks, the linux CSP witness's
+    # --no-bundle build): stage what this machine has. The adapters' Rust-side
+    # tests refuse honestly for missing harness CLIs, and the staged tree here
+    # never ships.
+    echo "build-adapters: not darwin-arm64 — staging for local build only (no bundle ships from here)" >&2
 fi
 
 rm -rf "$OUT"
@@ -162,10 +169,12 @@ resolve_check "agy-acp"
 for pkg in "@agentclientprotocol/claude-agent-acp/dist/index.js" \
            "@agentclientprotocol/codex-acp/dist/index.js" \
            "agy-acp/dist/main.js"; do
-    failures=$(cd "$ISOLATED/Resources/node_modules" && \
+    if ! failures=$(cd "$ISOLATED/Resources/node_modules" && \
         bunx esbuild --bundle "$pkg" --platform=node --format=esm \
         --packages=external --outfile=/dev/null 2>&1 | \
-        grep -E 'Could not resolve|ERROR' || true)
+        grep -E 'Could not resolve|ERROR'); then
+        failures=
+    fi
     if [[ -n "$failures" ]]; then
         echo "build-adapters: $pkg's imports do not all resolve from the staged tree:" >&2
         echo "$failures" >&2
