@@ -106,7 +106,7 @@ core in `src-tauri/`.
 
 ```bash
 bun install
-bun run build:adapters   # stages the bundled ACP adapters (also runs from `bun run build`)
+bun run build:adapters   # stages the bundled ACP adapters (tauri build runs it first via beforeBuildCommand)
 bun run tauri dev        # builds the Rust core and opens the app window (bun installs; node runs the toolchain)
 ```
 

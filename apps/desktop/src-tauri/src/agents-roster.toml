@@ -61,4 +61,6 @@ label = "Antigravity CLI"
 binary = "agy"
 command = "node {{adapter:antigravity}}"
 # https://github.com/shindgew/agy-acp — ACP adapter wrapping the Google Antigravity CLI
-# (agy); AGY_BIN at launch, and the adapter can install agy itself when it is absent
+# (agy); AGY_BIN points it at the probed binary at launch. (The adapter also carries an
+# upstream install-on-missing path — unreachable from this row, since the probe above
+# already gates the offer on agy being present.)

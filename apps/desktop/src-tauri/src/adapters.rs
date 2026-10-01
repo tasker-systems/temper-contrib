@@ -34,7 +34,8 @@ pub const ADAPTER_MARKER: &str = "{{adapter:";
 /// its entry file within it, and the harness CLI resolution it declares.
 struct AdapterSpec {
     /// The directory the staging script ships, as it lands under
-    /// `acp-adapters/` in the bundle (and under `acp-adapter-staging/…` in dev).
+    /// `acp-adapters/node_modules/` in the bundle (and under
+    /// `acp-adapter-staging/node_modules/…` in dev).
     package_dir: &'static str,
     /// The adapter's executable script, relative to `package_dir`.
     entry: &'static str,
@@ -52,13 +53,13 @@ struct AdapterSpec {
 fn adapter_spec(key: &str) -> Option<AdapterSpec> {
     match key {
         "claude" => Some(AdapterSpec {
-            package_dir: "claude-agent-acp",
+            package_dir: "@agentclientprotocol/claude-agent-acp",
             entry: "dist/index.js",
             harness_binary: "claude",
             cli_env: "CLAUDE_CODE_EXECUTABLE",
         }),
         "codex" => Some(AdapterSpec {
-            package_dir: "codex-acp",
+            package_dir: "@agentclientprotocol/codex-acp",
             entry: "dist/index.js",
             harness_binary: "codex",
             cli_env: "CODEX_PATH",
@@ -104,12 +105,20 @@ fn which_in_path(name: &str, path_var: &str) -> Option<PathBuf> {
 /// data events, no error, verified 2026-10-01 against agy-acp and a bare
 /// `/bin/echo` PTY) — a bun-preferred default silently wedges every
 /// PTY-driven adapter. `TEMPER_ACP_INTERPRETER=bun|node` pins one — the
-/// parity witnesses drive both, and a pinned interpreter that is absent is
-/// an error, never a silent fallback that would make a witness's interpreter
-/// label a lie.
+/// parity witnesses drive both. The pin is closed: only the two interpreters
+/// are pinnable, and a pin the PATH cannot answer is an error, never a
+/// silent fallback that would make a witness's interpreter label a lie.
+/// First-hit PATH resolution (the login shell's PATH for a GUI app) is the
+/// trust boundary for the interpreter and harness alike — the same posture
+/// the retired npx launch carried.
 fn interpreter(path_var: &str) -> Result<PathBuf, String> {
     if let Ok(pin) = std::env::var("TEMPER_ACP_INTERPRETER") {
         let pin = pin.trim().to_string();
+        if !matches!(pin.as_str(), "bun" | "node") {
+            return Err(format!(
+                "TEMPER_ACP_INTERPRETER pins `{pin}`; the pinnable interpreters are bun and node"
+            ));
+        }
         return which_in_path(&pin, path_var)
             .ok_or_else(|| format!("TEMPER_ACP_INTERPRETER pins `{pin}`, which is not on PATH"));
     }
@@ -132,13 +141,14 @@ fn desktop_root() -> PathBuf {
 fn adapter_root(spec: &AdapterSpec) -> Result<PathBuf, String> {
     let dev = desktop_root()
         .join("acp-adapter-staging")
+        .join("node_modules")
         .join(spec.package_dir);
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|e| e.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
     let bundled = exe_dir
-        .join("../Resources/acp-adapters")
+        .join("../Resources/acp-adapters/node_modules")
         .join(spec.package_dir);
     let root = if dev.is_dir() {
         dev
@@ -146,19 +156,16 @@ fn adapter_root(spec: &AdapterSpec) -> Result<PathBuf, String> {
         bundled
     } else {
         return Err(format!(
-            "the {} adapter is not staged with the app (looked in {} and {}) — \
-             run `bun run build:adapters` before launching agents",
+            "the {} adapter is not staged with the app — run `bun run build:adapters` \
+             before launching agents",
             spec.package_dir,
-            dev.display(),
-            bundled.display(),
         ));
     };
     let entry = root.join(spec.entry);
     if !entry.is_file() {
         return Err(format!(
-            "the {} adapter is staged without its entry {}; the staging build is incomplete",
+            "the {} adapter is staged without its entry file; the staging build is incomplete",
             spec.package_dir,
-            entry.display(),
         ));
     }
     Ok(root)
@@ -248,13 +255,23 @@ mod tests {
                         exe.ends_with("bun") || exe.ends_with("node"),
                         "the interpreter is bun or node: {exe}"
                     );
+                    let args = config.arguments();
+                    let entry_arg = args
+                        .iter()
+                        .find(|a| a.ends_with("dist/index.js") || a.ends_with("dist/main.js"))
+                        .unwrap_or_else(|| panic!("the entry file is an argument: {args:?}"));
+                    // The render must point at a real file in the staged
+                    // layout — a path through node_modules, so the bundle's
+                    // closure resolution works. A path that only resolves by
+                    // walk-up into the repo's node_modules is the masking
+                    // defect this guard exists to catch.
                     assert!(
-                        config
-                            .arguments()
-                            .iter()
-                            .any(|a| a.ends_with("dist/index.js") || a.ends_with("dist/main.js")),
-                        "the entry file is an argument: {:?}",
-                        config.arguments()
+                        entry_arg.contains("acp-adapter-staging/node_modules/"),
+                        "the entry resolves in the staged layout, not by walk-up: {entry_arg}"
+                    );
+                    assert!(
+                        std::path::Path::new(entry_arg).is_file(),
+                        "the rendered entry exists: {entry_arg}"
                     );
                     let spec = adapter_spec(key).unwrap();
                     let env = config.environment();
@@ -263,6 +280,13 @@ mod tests {
                         "the harness CLI env {} is set: {:?}",
                         spec.cli_env,
                         env.keys().collect::<Vec<_>>()
+                    );
+                    // And the harness path the env carries is a real binary.
+                    let harness = &env[spec.cli_env];
+                    assert!(
+                        std::path::Path::new(harness).is_file(),
+                        "the harness CLI in {} exists: {harness}",
+                        spec.cli_env
                     );
                 }
                 Err(e) => {
@@ -298,13 +322,21 @@ mod tests {
                 resolved.display()
             );
         }
+        // A pin outside the closed set refuses by name, before PATH is asked.
+        std::env::set_var("TEMPER_ACP_INTERPRETER", "python3");
+        let err = interpreter(&path_var).expect_err("an unknown pin refuses");
+        assert!(
+            err.contains("python3") && err.contains("bun and node"),
+            "the refusal names the pin and the closed set: {err}"
+        );
+        std::env::remove_var("TEMPER_ACP_INTERPRETER");
         // A pin that resolves nowhere refuses by name.
         std::env::set_var("TEMPER_ACP_INTERPRETER", "no-such-runtime-019f");
         let err = interpreter(&path_var).expect_err("an absent pinned interpreter refuses");
         std::env::remove_var("TEMPER_ACP_INTERPRETER");
         assert!(
-            err.contains("no-such-runtime-019f"),
-            "the refusal names the pin: {err}"
+            err.contains("no-such-runtime-019f") && err.contains("bun and node"),
+            "the refusal names the pin and the closed set: {err}"
         );
     }
 }
