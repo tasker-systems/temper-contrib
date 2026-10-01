@@ -21,3 +21,13 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 		})
 	});
 }
+
+// jsdom has no ResizeObserver; LayerChart measures its container through Svelte's size
+// bindings. A stub that never reports leaves a chart at its first size — enough to render.
+if (typeof window !== 'undefined' && typeof window.ResizeObserver !== 'function') {
+	window.ResizeObserver = class {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	};
+}

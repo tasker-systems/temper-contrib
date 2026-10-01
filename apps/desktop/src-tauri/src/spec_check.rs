@@ -5,7 +5,7 @@
 //! checked. It checks what `checkSpec` checks, from the same catalog file: the
 //! closed shape and every element's props against the schema the server
 //! advertises (compiled from the catalog), one bounded tree from `root`, and
-//! the BoundedList counts JSON Schema cannot say.
+//! each component's declared checks — what JSON Schema cannot say.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -71,7 +71,7 @@ pub fn check_spec(spec: &Value) -> Result<(), Vec<String>> {
         })
         .collect();
     errors.extend(tree_errors(spec));
-    errors.extend(bounded_list_errors(spec));
+    errors.extend(declared_errors(spec));
     let mut seen = HashSet::new();
     errors.retain(|e| seen.insert(e.clone()));
     if errors.is_empty() {
@@ -150,44 +150,171 @@ fn tree_errors(spec: &Value) -> Vec<String> {
     errors
 }
 
-/// A BoundedList never shows more rows than it stands for, nor a different
-/// number of rows than it has. Counts are read as numbers, not only as
-/// `u64`: JSON Schema admits `5.0` and an integer past `u64` as integers, and
-/// the webview reads both — a count this check skipped would pass a spec the
-/// webview refuses.
-fn bounded_list_errors(spec: &Value) -> Vec<String> {
+/// Each component's declared checks, read from the catalog file `checkSpec`
+/// reads them from: what JSON Schema cannot say.
+fn checks() -> &'static serde_json::Map<String, Value> {
+    static CHECKS: OnceLock<serde_json::Map<String, Value>> = OnceLock::new();
+    CHECKS.get_or_init(|| {
+        let catalog: Value =
+            serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
+        catalog["components"]
+            .as_object()
+            .expect("the catalog carries components")
+            .iter()
+            .filter_map(|(name, c)| c.get("checks").map(|k| (name.clone(), k.clone())))
+            .collect()
+    })
+}
+
+/// The values a check's path names, from an element's props (or its
+/// children, for `$children`); `*` steps into every item of a list.
+fn walk<'a>(el: &'a Value, path: &str) -> Vec<&'a Value> {
+    let mut steps = path.split('/');
+    let head = steps.next().unwrap_or_default();
+    let mut at: Vec<&Value> = if head == "$children" {
+        el.get("children").into_iter().collect()
+    } else {
+        el.get("props")
+            .and_then(|p| p.get(head))
+            .into_iter()
+            .collect()
+    };
+    for step in steps {
+        at = at
+            .into_iter()
+            .flat_map(|v| -> Vec<&Value> {
+                if step == "*" {
+                    v.as_array().map(|a| a.iter().collect()).unwrap_or_default()
+                } else {
+                    v.get(step).into_iter().collect()
+                }
+            })
+            .collect();
+    }
+    at
+}
+
+/// Every declared check an element fails — the same checks, in the same
+/// words, as the webview's `declaredErrors`. Counts are read as numbers, not
+/// only as `u64`: JSON Schema admits `5.0` and an integer past `u64` as
+/// integers, and the webview reads both — a count this check skipped would
+/// pass a spec the webview refuses.
+fn declared_errors(spec: &Value) -> Vec<String> {
     let Some(elements) = spec.get("elements").and_then(Value::as_object) else {
         return Vec::new();
     };
     let mut errors = Vec::new();
     for (key, el) in elements {
-        if el.get("type").and_then(Value::as_str) != Some("BoundedList") {
-            continue;
-        }
-        let props = el.get("props");
-        let count = |name: &str| props.and_then(|p| p.get(name)).and_then(Value::as_f64);
-        let (Some(total), Some(shown)) = (count("total"), count("shown")) else {
+        let Some(checks) = el
+            .get("type")
+            .and_then(Value::as_str)
+            .and_then(|t| checks().get(t))
+            .and_then(Value::as_array)
+        else {
             continue;
         };
-        for (name, value) in [("total", total), ("shown", shown)] {
-            if value > MAX_SAFE_INTEGER {
-                errors.push(format!(
-                    "elements/{key}/props/{name}: larger than {MAX_SAFE_INTEGER}"
-                ));
+        let prop = |name: &str| el.get("props").and_then(|p| p.get(name));
+        for check in checks {
+            if let Some(path) = check.get("count").and_then(Value::as_str) {
+                let items = walk(el, path)
+                    .iter()
+                    .filter_map(|v| v.as_array())
+                    .map(Vec::len)
+                    .sum::<usize>() as f64;
+                let count = |field: &str| {
+                    check
+                        .get(field)
+                        .and_then(Value::as_str)
+                        .and_then(prop)
+                        .and_then(Value::as_f64)
+                };
+                let Some(total) = count("within") else {
+                    continue;
+                };
+                let mut counts = vec![("within", total)];
+                let shown = count("equals");
+                if let Some(shown) = shown {
+                    counts.push(("equals", shown));
+                }
+                for (field, value) in counts {
+                    if value > MAX_SAFE_INTEGER {
+                        let name = check[field].as_str().unwrap_or_default();
+                        errors.push(format!(
+                            "elements/{key}/props/{name}: larger than {MAX_SAFE_INTEGER}"
+                        ));
+                    }
+                }
+                match (check.get("equals"), shown) {
+                    (None, _) => {
+                        if items > total {
+                            errors.push(format!("elements/{key}: shows {items} of {total}"));
+                        }
+                    }
+                    (Some(_), Some(shown)) => {
+                        if shown > total {
+                            errors.push(format!("elements/{key}: shows {shown} of {total}"));
+                        }
+                        let present = prop("state").and_then(Value::as_str) == Some("present");
+                        if present && items != shown {
+                            errors.push(format!(
+                                "elements/{key}: says it shows {shown} but has {items} rows"
+                            ));
+                        }
+                    }
+                    (Some(_), None) => {}
+                }
+            } else if let Some(path) = check.get("unique").and_then(Value::as_str) {
+                let mut seen = HashSet::new();
+                for v in walk(el, path) {
+                    if !seen.insert(v.to_string()) {
+                        let shown = v.as_str().map_or_else(|| v.to_string(), str::to_owned);
+                        errors.push(format!(
+                            "elements/{key}/props/{path}: \"{shown}\" appears twice"
+                        ));
+                    }
+                }
+            } else if let Some(path) = check.get("keys").and_then(Value::as_str) {
+                let within = check.get("in").and_then(Value::as_str).unwrap_or_default();
+                let allowed: HashSet<&str> =
+                    walk(el, within).iter().filter_map(|v| v.as_str()).collect();
+                for obj in walk(el, path).iter().filter_map(|v| v.as_object()) {
+                    for k in obj.keys().filter(|k| !allowed.contains(k.as_str())) {
+                        errors.push(format!(
+                            "elements/{key}/props/{path}: \"{k}\" is not one of {within}"
+                        ));
+                    }
+                }
+            } else if let Some(types) = check.get("children").and_then(Value::as_array) {
+                let bound = |field: &str| check.get(field).and_then(Value::as_u64).unwrap_or(0);
+                let (min, max) = (bound("min"), bound("max"));
+                let children = el
+                    .get("children")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                let n = children.len() as u64;
+                if n < min || n > max {
+                    errors.push(format!(
+                        "elements/{key}: holds {n} children, not {min} to {max}"
+                    ));
+                }
+                let names: Vec<&str> = types.iter().filter_map(Value::as_str).collect();
+                for child in children.iter().filter_map(Value::as_str) {
+                    let Some(t) = elements
+                        .get(child)
+                        .and_then(|c| c.get("type"))
+                        .and_then(Value::as_str)
+                    else {
+                        continue;
+                    };
+                    if !names.contains(&t) {
+                        errors.push(format!(
+                            "elements/{key}: holds a {t}, but only {}",
+                            names.join(", ")
+                        ));
+                    }
+                }
             }
-        }
-        if shown > total {
-            errors.push(format!("elements/{key}: shows {shown} of {total}"));
-        }
-        let present = props.and_then(|p| p.get("state")).and_then(Value::as_str) == Some("present");
-        let rows = el
-            .get("children")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len) as f64;
-        if present && rows != shown {
-            errors.push(format!(
-                "elements/{key}: says it shows {shown} but has {rows} rows"
-            ));
         }
     }
     errors

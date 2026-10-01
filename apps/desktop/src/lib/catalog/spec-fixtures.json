@@ -690,6 +690,1080 @@
 			"spec": {
 				"root": "r"
 			}
+		},
+		{
+			"name": "a stack and a grid of text, heading, tag and stat",
+			"ok": true,
+			"spec": {
+				"root": "s",
+				"elements": {
+					"s": {
+						"type": "Stack",
+						"props": {
+							"gap": "loose"
+						},
+						"children": [
+							"h",
+							"g"
+						]
+					},
+					"h": {
+						"type": "Heading",
+						"props": {
+							"text": "This week",
+							"level": 1
+						},
+						"children": []
+					},
+					"g": {
+						"type": "Grid",
+						"props": {
+							"columns": 3
+						},
+						"children": [
+							"st",
+							"tg",
+							"tx"
+						]
+					},
+					"st": {
+						"type": "Stat",
+						"props": {
+							"label": "words this week",
+							"value": 4210,
+							"delta": {
+								"value": "+12%",
+								"direction": "up",
+								"tone": "success"
+							}
+						},
+						"children": []
+					},
+					"tg": {
+						"type": "Tag",
+						"props": {
+							"label": "draft",
+							"tint": "cat-2"
+						},
+						"children": []
+					},
+					"tx": {
+						"type": "Text",
+						"props": {
+							"text": "<b>not markup</b>, shown as written",
+							"tone": "muted"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a timeline",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Timeline",
+						"props": {
+							"total": 2,
+							"scope": "in this goal",
+							"label": "sessions",
+							"state": "present",
+							"items": [
+								{
+									"when": "2026-09-29",
+									"title": "Grounding done"
+								},
+								{
+									"when": "2026-09-30",
+									"title": "Rulings recorded",
+									"tint": "cat-3"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table keyed by its columns",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a chart",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Chart",
+						"props": {
+							"total": 8,
+							"scope": "weekly word counts",
+							"label": "word counts",
+							"state": "present",
+							"kind": "bar",
+							"x": {
+								"label": "week",
+								"kind": "category"
+							},
+							"y": {
+								"label": "words"
+							},
+							"series": [
+								{
+									"name": "drafting",
+									"tint": "cat-1",
+									"points": [
+										{
+											"x": "W36",
+											"y": 2100
+										},
+										{
+											"x": "W37",
+											"y": 3400
+										},
+										{
+											"x": "W38",
+											"y": 2800
+										},
+										{
+											"x": "W39",
+											"y": 4210
+										}
+									]
+								},
+								{
+									"name": "revision",
+									"tint": "cat-3",
+									"points": [
+										{
+											"x": "W36",
+											"y": 600
+										},
+										{
+											"x": "W37",
+											"y": 900
+										},
+										{
+											"x": "W38",
+											"y": 1500
+										},
+										{
+											"x": "W39",
+											"y": 1200
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "tabs of sections",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Tabs",
+						"props": {
+							"label": "Story parts"
+						},
+						"children": [
+							"b",
+							"c"
+						]
+					},
+					"b": {
+						"type": "Section",
+						"props": {
+							"title": "One"
+						},
+						"children": []
+					},
+					"c": {
+						"type": "Section",
+						"props": {
+							"title": "Two"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "an accordion of sections",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Accordion",
+						"props": {
+							"multiple": true
+						},
+						"children": [
+							"b"
+						]
+					},
+					"b": {
+						"type": "Section",
+						"props": {
+							"title": "One"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a section on its own",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Section",
+						"props": {
+							"title": "Notes"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table not present carries no rows",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 0,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "arriving",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								}
+							],
+							"rows": []
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a tag tinted with a colour",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Tag",
+						"props": {
+							"label": "x",
+							"tint": "#ff0000"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a stack with a style",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Stack",
+						"props": {
+							"gap": "normal",
+							"style": "padding: 4px"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a grid wider than four columns",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Grid",
+						"props": {
+							"columns": 5
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a heading past level three",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Heading",
+						"props": {
+							"text": "x",
+							"level": 4
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a stat whose value is not a figure",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Stat",
+						"props": {
+							"label": "x",
+							"value": true
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a timeline item without a date",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Timeline",
+						"props": {
+							"total": 2,
+							"scope": "in this goal",
+							"label": "sessions",
+							"state": "present",
+							"items": [
+								{
+									"when": "last tuesday",
+									"title": "x"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a timeline carrying more than it stands for",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Timeline",
+						"props": {
+							"total": 1,
+							"scope": "in this goal",
+							"label": "sessions",
+							"state": "present",
+							"items": [
+								{
+									"when": "2026-09-29",
+									"title": "Grounding done"
+								},
+								{
+									"when": "2026-09-30",
+									"title": "Rulings recorded",
+									"tint": "cat-3"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table carrying more rows than it stands for",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 1,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table row keyed by no column",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								}
+							],
+							"rows": [
+								{
+									"title": "x",
+									"colour": "red"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table with a column twice",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								},
+								{
+									"key": "title",
+									"header": "Again",
+									"kind": "text"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table category tinted with a colour",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 12,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "T",
+									"kind": "category",
+									"tints": {
+										"draft": "red"
+									}
+								}
+							],
+							"rows": [
+								{
+									"title": "draft"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a table whose count is past the safe integers",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 1e+20,
+							"scope": "stories in this context",
+							"label": "stories",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								},
+								{
+									"key": "status",
+									"header": "Status",
+									"kind": "category",
+									"tints": {
+										"draft": "cat-2",
+										"complete": "cat-4"
+									}
+								},
+								{
+									"key": "words",
+									"header": "Words",
+									"kind": "number"
+								}
+							],
+							"rows": [
+								{
+									"title": "The lighthouse",
+									"status": "draft",
+									"words": 3120
+								},
+								{
+									"title": "Harbour",
+									"status": "complete",
+									"words": 5400
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a chart carrying more points than it stands for",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Chart",
+						"props": {
+							"total": 3,
+							"scope": "weekly word counts",
+							"label": "word counts",
+							"state": "present",
+							"kind": "bar",
+							"x": {
+								"label": "week",
+								"kind": "category"
+							},
+							"y": {
+								"label": "words"
+							},
+							"series": [
+								{
+									"name": "drafting",
+									"tint": "cat-1",
+									"points": [
+										{
+											"x": "W36",
+											"y": 2100
+										},
+										{
+											"x": "W37",
+											"y": 3400
+										},
+										{
+											"x": "W38",
+											"y": 2800
+										},
+										{
+											"x": "W39",
+											"y": 4210
+										}
+									]
+								},
+								{
+									"name": "revision",
+									"tint": "cat-3",
+									"points": [
+										{
+											"x": "W36",
+											"y": 600
+										},
+										{
+											"x": "W37",
+											"y": 900
+										},
+										{
+											"x": "W38",
+											"y": 1500
+										},
+										{
+											"x": "W39",
+											"y": 1200
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a chart with a series named twice",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Chart",
+						"props": {
+							"total": 16,
+							"scope": "weekly word counts",
+							"label": "word counts",
+							"state": "present",
+							"kind": "bar",
+							"x": {
+								"label": "week",
+								"kind": "category"
+							},
+							"y": {
+								"label": "words"
+							},
+							"series": [
+								{
+									"name": "drafting",
+									"tint": "cat-1",
+									"points": [
+										{
+											"x": "W36",
+											"y": 2100
+										},
+										{
+											"x": "W37",
+											"y": 3400
+										},
+										{
+											"x": "W38",
+											"y": 2800
+										},
+										{
+											"x": "W39",
+											"y": 4210
+										}
+									]
+								},
+								{
+									"name": "drafting",
+									"tint": "cat-3",
+									"points": [
+										{
+											"x": "W36",
+											"y": 600
+										},
+										{
+											"x": "W37",
+											"y": 900
+										},
+										{
+											"x": "W38",
+											"y": 1500
+										},
+										{
+											"x": "W39",
+											"y": 1200
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a chart series with a colour",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Chart",
+						"props": {
+							"total": 8,
+							"scope": "weekly word counts",
+							"label": "word counts",
+							"state": "present",
+							"kind": "bar",
+							"x": {
+								"label": "week",
+								"kind": "category"
+							},
+							"y": {
+								"label": "words"
+							},
+							"series": [
+								{
+									"name": "drafting",
+									"tint": "blue",
+									"points": [
+										{
+											"x": "W36",
+											"y": 2100
+										},
+										{
+											"x": "W37",
+											"y": 3400
+										},
+										{
+											"x": "W38",
+											"y": 2800
+										},
+										{
+											"x": "W39",
+											"y": 4210
+										}
+									]
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "tabs holding something other than sections",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Tabs",
+						"props": {
+							"label": "Story parts"
+						},
+						"children": [
+							"b"
+						]
+					},
+					"b": {
+						"type": "Text",
+						"props": {
+							"text": "x"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "tabs with no sections",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Tabs",
+						"props": {
+							"label": "Story parts"
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "an accordion of more than twelve sections",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Accordion",
+						"props": {},
+						"children": [
+							"s0",
+							"s1",
+							"s2",
+							"s3",
+							"s4",
+							"s5",
+							"s6",
+							"s7",
+							"s8",
+							"s9",
+							"s10",
+							"s11",
+							"s12"
+						]
+					},
+					"s0": {
+						"type": "Section",
+						"props": {
+							"title": "0"
+						},
+						"children": []
+					},
+					"s1": {
+						"type": "Section",
+						"props": {
+							"title": "1"
+						},
+						"children": []
+					},
+					"s2": {
+						"type": "Section",
+						"props": {
+							"title": "2"
+						},
+						"children": []
+					},
+					"s3": {
+						"type": "Section",
+						"props": {
+							"title": "3"
+						},
+						"children": []
+					},
+					"s4": {
+						"type": "Section",
+						"props": {
+							"title": "4"
+						},
+						"children": []
+					},
+					"s5": {
+						"type": "Section",
+						"props": {
+							"title": "5"
+						},
+						"children": []
+					},
+					"s6": {
+						"type": "Section",
+						"props": {
+							"title": "6"
+						},
+						"children": []
+					},
+					"s7": {
+						"type": "Section",
+						"props": {
+							"title": "7"
+						},
+						"children": []
+					},
+					"s8": {
+						"type": "Section",
+						"props": {
+							"title": "8"
+						},
+						"children": []
+					},
+					"s9": {
+						"type": "Section",
+						"props": {
+							"title": "9"
+						},
+						"children": []
+					},
+					"s10": {
+						"type": "Section",
+						"props": {
+							"title": "10"
+						},
+						"children": []
+					},
+					"s11": {
+						"type": "Section",
+						"props": {
+							"title": "11"
+						},
+						"children": []
+					},
+					"s12": {
+						"type": "Section",
+						"props": {
+							"title": "12"
+						},
+						"children": []
+					}
+				}
+			}
 		}
 	]
 }

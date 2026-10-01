@@ -6,7 +6,8 @@ Content-Security-Policy in tauri.conf.json both ways.
    in a tab, a second tab, a switch between them (the room kept, not remounted), a switch to a
    lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
    from it), the ways-in panel opened from the menu chip and closed and reopened from the
-   panel's own ×, settings and setup opened as tabs, and home again.
+   panel's own ×, settings and setup opened as tabs, the view catalog in every theme painting
+   only from theme roles (`catalog_paint.py`), and home again.
 2. The policy is a backstop: an injected inline script, eval, an inline event handler, an inline
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
    as a violation naming its directive. Styling through the CSSOM, which Svelte's `style:`
@@ -35,6 +36,7 @@ import sys
 import time
 from pathlib import Path
 
+from catalog_paint import witness_catalog
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.action_chains import ActionChains
@@ -407,6 +409,14 @@ def main() -> int:
                 WebDriverWait(driver, 10).until(active_text(words))
                 step(href.strip("/"))
 
+            # The view catalog, opened in a tab: every component under the policy, painting only
+            # from theme roles, in every theme.
+            catalog, catalog_failures = witness_catalog(
+                driver, lambda d: d.execute_script(FOLLOW_LINK, "/catalog", True)
+            )
+            failures.extend(catalog_failures)
+            step("the view catalog")
+
             driver.find_element(By.CSS_SELECTOR, 'header a[href="/"]').click()
             WebDriverWait(driver, 10).until(
                 lambda d: (
@@ -435,6 +445,7 @@ def main() -> int:
             report = {
                 "binary": str(binary),
                 "steps": steps,
+                "catalog": catalog,
                 "violations_while_rendering": clean,
                 "probes": probes,
                 "violations_from_probes": violations,

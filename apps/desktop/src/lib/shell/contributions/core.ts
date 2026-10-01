@@ -1,7 +1,8 @@
 /**
- * Core's contribution: the lenses the desktop ships with. Place lenses (home, settings, setup) are
- * core's own and a plugin never contributes one; a plugin may pin a section to home. The table, graph, shape and search lenses are
- * named and not built: each lands with its own port, and until then a tab opened on one says so.
+ * Core's contribution: the lenses the desktop ships with. Place lenses (home, settings, setup,
+ * catalog) are core's own and a plugin never contributes one; a plugin may pin a section to home.
+ * The table, graph, shape and search lenses are named and not built: each lands with its own
+ * port, and until then a tab opened on one says so.
  */
 import type { Contribution } from '../lenses';
 
@@ -73,6 +74,13 @@ export const core: Contribution = {
 			plugin: 'core',
 			accepts: { kinds: ['place'], places: ['setup'] },
 			build: { state: 'built', component: () => import('../lenses/SetupLens.svelte') }
+		},
+		{
+			id: 'core/catalog',
+			name: 'catalog',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['catalog'] },
+			build: { state: 'built', component: () => import('../lenses/CatalogLens.svelte') }
 		},
 		{
 			id: 'core/presentation',

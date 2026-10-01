@@ -1,7 +1,7 @@
 {
   "catalog": "temper",
   "version": "1.0.0",
-  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
+  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup — colour enters only as a categorical role (cat-1…cat-8) or a condition. `checks` declares what JSON Schema cannot say (a count within its total, keys among columns, which children a component holds); both gates read them from this file. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
   "limits": {
     "maxElements": 256,
     "maxDepth": 8,
@@ -41,11 +41,16 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["step"],
-            "properties": { "step": { "type": "integer", "minimum": 1, "maximum": 100 } },
+            "properties": {
+              "step": { "type": "integer", "minimum": 1, "maximum": 100 }
+            },
             "description": "Offer to show more, `step` at a time. Emits `more`; a view action, never a write."
           }
         }
-      }
+      },
+      "checks": [
+        { "count": "$children", "within": "total", "equals": "shown" }
+      ]
     },
     "ResourceRef": {
       "description": "A link to a temper resource by id. The app resolves the title, doc type and home; `titleHint` shows only while resolving and never stands in for the resource. Use for every mention of a resource.",
@@ -56,15 +61,370 @@
         "additionalProperties": false,
         "required": ["id"],
         "properties": {
-          "id": {
-            "type": "string",
-            "pattern": "^([a-z0-9-]{0,120}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            "description": "A resource UUID, or its decorated slug-<uuid> ref."
-          },
+          "id": { "type": "string", "pattern": "^([a-z0-9-]{0,120}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "A resource UUID, or its decorated slug-<uuid> ref." },
           "titleHint": { "type": "string", "maxLength": 200, "description": "Shown only while the reference resolves." },
           "block": { "type": "string", "maxLength": 120, "description": "A block within the resource, by its heading-stable id." }
         }
       }
+    },
+    "Stack": {
+      "description": "Lays its children out in one direction. Gaps and alignment are named steps, never lengths.",
+      "slots": ["default"],
+      "example": { "direction": "horizontal", "gap": "normal", "align": "baseline" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "direction": { "enum": ["vertical", "horizontal"] },
+          "gap": { "enum": ["tight", "normal", "loose"] },
+          "align": { "enum": ["start", "center", "end", "stretch", "baseline"] },
+          "wrap": { "type": "boolean", "description": "Horizontal only: let children wrap to further lines." }
+        }
+      }
+    },
+    "Grid": {
+      "description": "Lays its children out in equal columns, narrowing to fewer when the view is narrow.",
+      "slots": ["default"],
+      "example": { "columns": 3, "gap": "normal" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["columns"],
+        "properties": {
+          "columns": { "type": "integer", "minimum": 1, "maximum": 4 },
+          "gap": { "enum": ["tight", "normal", "loose"] }
+        }
+      }
+    },
+    "Heading": {
+      "description": "A heading, plain text. Level 1 titles a view; 2 and 3 divide it.",
+      "slots": [],
+      "example": { "text": "Reading log", "level": 2 },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "level"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "level": { "enum": [1, 2, 3] }
+        }
+      }
+    },
+    "Text": {
+      "description": "A paragraph of plain text — no markup. `tone` steps it back: body, muted, subtle; `label` is the small uppercase eyebrow.",
+      "slots": [],
+      "example": { "text": "Three of the five chapters are drafted.", "tone": "body" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "tone": { "enum": ["body", "muted", "subtle", "label"] }
+        }
+      }
+    },
+    "Tag": {
+      "description": "A short label, tinted by a categorical role or a condition.",
+      "slots": [],
+      "example": { "label": "draft", "tint": "cat-2" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "tint": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8", "notice", "success", "danger", "pending"], "description": "A categorical role (cat-1…cat-8) or a condition. Never a colour." }
+        }
+      }
+    },
+    "Stat": {
+      "description": "One figure with its label: a value, an optional unit, and an optional change with its direction.",
+      "slots": [],
+      "example": {
+        "label": "words this week",
+        "value": 4210,
+        "delta": { "value": "+12%", "direction": "up", "tone": "success" }
+      },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "value"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "value": { "type": ["string", "number"], "maxLength": 40, "description": "The figure, as a number or already formatted." },
+          "unit": { "type": "string", "maxLength": 20 },
+          "delta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "direction"],
+            "properties": {
+              "value": { "type": "string", "minLength": 1, "maxLength": 20 },
+              "direction": { "enum": ["up", "down", "flat"] },
+              "tone": { "enum": ["success", "danger", "neutral"], "description": "Whether the change is good, bad, or neither; the direction alone does not say." }
+            }
+          },
+          "detail": { "type": "string", "maxLength": 120 }
+        }
+      }
+    },
+    "Timeline": {
+      "description": "Dated items in order, with what they omit. `total` is every item the timeline stands for; `items` are those shown. The omission sentence is composed; do not word it yourself.",
+      "slots": [],
+      "example": {
+        "total": 2,
+        "scope": "in this goal",
+        "label": "sessions",
+        "state": "present",
+        "items": [
+          { "when": "2026-09-29", "title": "Grounding done" },
+          { "when": "2026-09-30", "title": "Rulings recorded", "tint": "cat-3" }
+        ]
+      },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["total", "scope", "label", "state", "items"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0, "description": "Every item the view stands for, not only those carried here." },
+          "scope": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What total counts: \"in this context\", \"since Monday\"." },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The view's noun, used when it is not present and in its accessible name." },
+          "state": { "enum": ["present", "arriving", "empty", "gave-up", "failed"] },
+          "items": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["when", "title"],
+              "properties": {
+                "when": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}(-[0-9]{2}([T ][0-9]{2}:[0-9]{2}(:[0-9]{2}(\\.[0-9]{1,9})?)?(Z|[+-][0-9]{2}:[0-9]{2})?)?)?$", "description": "An ISO 8601 date or date-time: 2026-09, 2026-09-30, 2026-09-30T14:05Z." },
+                "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+                "detail": { "type": "string", "maxLength": 300 },
+                "ref": { "type": "string", "pattern": "^([a-z0-9-]{0,120}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "A resource UUID, or its decorated slug-<uuid> ref." },
+                "tint": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8", "notice", "success", "danger", "pending"], "description": "A categorical role (cat-1…cat-8) or a condition. Never a colour." }
+              }
+            }
+          }
+        }
+      },
+      "checks": [
+        { "count": "items", "within": "total" }
+      ]
+    },
+    "Table": {
+      "description": "Rows under typed columns, with what they omit. `total` is every row the table stands for; `rows` are those shown, each keyed by column. A `category` column tints its values through `tints` (value → cat-N). The omission sentence is composed; do not word it yourself.",
+      "slots": [],
+      "example": {
+        "total": 12,
+        "scope": "stories in this context",
+        "label": "stories",
+        "state": "present",
+        "columns": [
+          { "key": "title", "header": "Title", "kind": "text" },
+          {
+            "key": "status",
+            "header": "Status",
+            "kind": "category",
+            "tints": { "draft": "cat-2", "complete": "cat-4" }
+          },
+          { "key": "words", "header": "Words", "kind": "number" }
+        ],
+        "rows": [
+          { "title": "The lighthouse", "status": "draft", "words": 3120 },
+          { "title": "Harbour", "status": "complete", "words": 5400 }
+        ]
+      },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["total", "scope", "label", "state", "columns", "rows"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0, "description": "Every row the view stands for, not only those carried here." },
+          "scope": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What total counts: \"in this context\", \"since Monday\"." },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The view's noun, used when it is not present and in its accessible name." },
+          "state": { "enum": ["present", "arriving", "empty", "gave-up", "failed"] },
+          "columns": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["key", "header", "kind"],
+              "properties": {
+                "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+                "header": { "type": "string", "minLength": 1, "maxLength": 40 },
+                "kind": { "enum": ["text", "number", "date", "resource", "category"], "description": "How cells render: a resource cell is a resource id, drawn as a link; a category cell is tinted through `tints`." },
+                "tints": {
+                  "type": "object",
+                  "maxProperties": 8,
+                  "propertyNames": { "maxLength": 40 },
+                  "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical role, cat-1…cat-8. Plugins bind their vocabulary to these; never a colour." }
+                }
+              }
+            }
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "maxProperties": 8,
+              "propertyNames": { "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+              "additionalProperties": { "type": ["string", "number", "null"], "maxLength": 200 }
+            }
+          }
+        }
+      },
+      "checks": [
+        { "count": "rows", "within": "total" },
+        { "unique": "columns/*/key" },
+        { "keys": "rows/*", "in": "columns/*/key" }
+      ]
+    },
+    "Chart": {
+      "description": "A line, bar, area or scatter chart. Each series takes a categorical role. `total` is every point the chart stands for; the points carried are those shown, and the omission sentence is composed.",
+      "slots": [],
+      "example": {
+        "total": 8,
+        "scope": "weekly word counts",
+        "label": "word counts",
+        "state": "present",
+        "kind": "bar",
+        "x": { "label": "week", "kind": "category" },
+        "y": { "label": "words" },
+        "series": [
+          {
+            "name": "drafting",
+            "tint": "cat-1",
+            "points": [
+              { "x": "W36", "y": 2100 },
+              { "x": "W37", "y": 3400 },
+              { "x": "W38", "y": 2800 },
+              { "x": "W39", "y": 4210 }
+            ]
+          },
+          {
+            "name": "revision",
+            "tint": "cat-3",
+            "points": [
+              { "x": "W36", "y": 600 },
+              { "x": "W37", "y": 900 },
+              { "x": "W38", "y": 1500 },
+              { "x": "W39", "y": 1200 }
+            ]
+          }
+        ]
+      },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["total", "scope", "label", "state", "kind", "x", "y", "series"],
+        "properties": {
+          "total": { "type": "integer", "minimum": 0, "description": "Every point the view stands for, not only those carried here." },
+          "scope": { "type": "string", "minLength": 1, "maxLength": 80, "description": "What total counts: \"in this context\", \"since Monday\"." },
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The view's noun, used when it is not present and in its accessible name." },
+          "state": { "enum": ["present", "arriving", "empty", "gave-up", "failed"] },
+          "kind": { "enum": ["line", "bar", "area", "scatter"] },
+          "x": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "kind"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "kind": { "enum": ["number", "date", "category"], "description": "date: each x is an ISO 8601 date string." }
+            }
+          },
+          "y": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "unit": { "type": "string", "maxLength": 20 }
+            }
+          },
+          "series": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "tint", "points"],
+              "properties": {
+                "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+                "tint": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical role, cat-1…cat-8. Plugins bind their vocabulary to these; never a colour." },
+                "points": {
+                  "type": "array",
+                  "maxItems": 200,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["x", "y"],
+                    "properties": {
+                      "x": { "type": ["string", "number"], "maxLength": 40 },
+                      "y": { "type": "number" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "checks": [
+        { "count": "series/*/points", "within": "total" },
+        { "unique": "series/*/name" }
+      ]
+    },
+    "Section": {
+      "description": "A titled part of a view. Inside Tabs it is one tab; inside Accordion, one collapsible item; anywhere else, a titled block.",
+      "slots": ["default"],
+      "example": { "title": "Characters" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "open": { "type": "boolean", "description": "Inside Accordion: starts open." }
+        }
+      }
+    },
+    "Accordion": {
+      "description": "Collapsible Sections, one or many open at a time. Its children are Sections.",
+      "slots": ["default"],
+      "example": { "multiple": false },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "multiple": { "type": "boolean", "description": "Let more than one Section be open at once." }
+        }
+      },
+      "checks": [
+        { "children": ["Section"], "min": 1, "max": 12 }
+      ]
+    },
+    "Tabs": {
+      "description": "Sections shown one at a time, chosen by their titles. Its children are Sections; the first is shown first.",
+      "slots": ["default"],
+      "example": { "label": "Story parts" },
+      "props": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label"],
+        "properties": {
+          "label": { "type": "string", "minLength": 1, "maxLength": 60, "description": "What the tabs choose between, for their accessible name." }
+        }
+      },
+      "checks": [
+        { "children": ["Section"], "min": 1, "max": 12 }
+      ]
     }
   }
 }
