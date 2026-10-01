@@ -188,15 +188,107 @@ describe('the graph through TemperView', () => {
 	const graph = example('Graph');
 
 	it('draws the connected nodes, lists the one with no edge, and says what it omits', () => {
-		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		const props = {
+			total: 9,
+			scope: 'around this goal',
+			label: 'neighbourhood',
+			state: 'present',
+			nodes: [
+				{
+					id: 'goal',
+					label: 'Temper is worked from the desktop',
+					kind: 'goal',
+					tint: 'doctype-goal',
+					core: true
+				},
+				{ id: 't1', label: 'Catalog: a read-only Graph', kind: 'task', tint: 'doctype-task' },
+				{ id: 'x1', label: 'A character sketch', kind: 'character' }
+			],
+			edges: [{ source: 't1', target: 'goal', label: 'advances' }]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
 		expect(container.querySelector('[role="alert"]')).toBeNull();
-		// Seven nodes are joined by an edge; the character sketch is joined to nothing.
-		expect(container.querySelectorAll('svg .node')).toHaveLength(7);
-		expect(container.querySelectorAll('svg .edge')).toHaveLength(6);
+		expect(container.querySelectorAll('svg .node')).toHaveLength(2);
+		expect(container.querySelectorAll('svg .edge')).toHaveLength(1);
 		expect(container.querySelector('svg')?.textContent).not.toContain('A character sketch');
 		expect(container.querySelector('.unconnected')?.textContent).toContain('A character sketch');
 		expect(container.querySelector('.unconnected')?.textContent).toContain('character');
-		expect(container.textContent).toContain('8 of 9 around this goal; 1 not shown.');
+		expect(container.textContent).toContain('3 of 9 around this goal; 6 not shown.');
+	});
+
+	it('carries what the corpus knows of a node in its tooltip and its entry', () => {
+		const props = {
+			total: 2,
+			scope: 'here',
+			label: 'family',
+			state: 'present',
+			nodes: [
+				{
+					id: 'mara',
+					label: 'Mara',
+					kind: 'character',
+					excerpt: 'The elder sister.',
+					stage: 'shipped',
+					updated: '2026-09-30',
+					home: '+temper-dev/contrib',
+					homeKind: 'context',
+					corpusDegree: 41
+				},
+				{ id: 'jun', label: 'Jun' }
+			],
+			edges: [{ source: 'jun', target: 'mara', label: 'writes to' }]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.querySelector('svg .node title')?.textContent).toBe(
+			'Mara · character · The elder sister. · shipped · 2026-09-30 · +temper-dev/contrib (context) · 1 here of 41 in the corpus'
+		);
+		const entry = [...container.querySelectorAll('.listed li')].find((li) =>
+			li.querySelector('.name')?.textContent?.includes('Mara')
+		);
+		expect(entry?.textContent).toContain('The elder sister.');
+		expect(entry?.textContent).toContain('shipped');
+		expect(entry?.textContent).toContain('2026-09-30');
+		expect(entry?.textContent).toContain('+temper-dev/contrib (context)');
+		expect(entry?.textContent).toContain('1 here of 41 in the corpus');
+	});
+
+	it('derives the drawing grammar from the relation it carries', () => {
+		const props = {
+			total: 4,
+			scope: 'here',
+			label: 'relations',
+			state: 'present',
+			nodes: [
+				{ id: 'a', label: 'A' },
+				{ id: 'b', label: 'B' },
+				{ id: 'c', label: 'C' },
+				{ id: 'd', label: 'D' }
+			],
+			edges: [
+				{ source: 'a', target: 'b', label: 'derived_from', edgeKind: 'express', weight: 0.5 },
+				{ source: 'b', target: 'c', label: 'contradicts', edgeKind: 'leads_to' },
+				{ source: 'c', target: 'd', edgeKind: 'near' },
+				{ source: 'd', target: 'a', weight: 0.5 }
+			]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		// The label dashes first: a `derived_from` line dashes whatever its kind.
+		const derived = container.querySelector('.edge[data-role="derived"] line');
+		expect(derived?.getAttribute('stroke-dasharray')).toBe('7 4');
+		expect(derived?.getAttribute('stroke-width')).toBe('1');
+		expect(container.querySelector('.edge[data-role="contradicts"] line')).not.toBeNull();
+		// A `near` relation dashes short and heads neither end, and draws unweighted, stated.
+		const near = [...container.querySelectorAll('svg .edge')].find(
+			(e) => e.querySelector('line')?.getAttribute('stroke-dasharray') === '4 4'
+		);
+		expect(near?.querySelectorAll('.head')).toHaveLength(0);
+		expect(near?.querySelector('line')?.getAttribute('stroke-width')).toBe('1.4');
+		// A weighted relation draws at its clamped width, never at the unweighted one.
+		const weighted = [...container.querySelectorAll('svg .edge')].find(
+			(e) => e.querySelector('line')?.getAttribute('stroke-dasharray') === null
+		);
+		expect(weighted?.querySelector('line')?.getAttribute('stroke-width')).toBe('1');
 	});
 
 	it('paints a node only through its role, and an untinted node neutral', () => {
@@ -237,7 +329,7 @@ describe('the graph through TemperView', () => {
 				{ id: 'lone', label: 'Lone' }
 			],
 			edges: [
-				{ source: 'mara', target: 'jun', label: 'sister of', direction: 'none' },
+				{ source: 'mara', target: 'jun', label: 'sister of', edgeKind: 'near' },
 				{ source: 'mara', target: 'jun', label: 'writes to' },
 				{ source: 'lone', target: 'lone', label: 'haunts' }
 			]
@@ -256,10 +348,14 @@ describe('the graph through TemperView', () => {
 	});
 
 	it('says nothing about connection when it carries no nodes', () => {
-		const props = { ...graph, nodes: [], edges: [] };
+		const { arm: _arm, bounds: _bounds, cut: _cut, ...empty } = graph;
+		const props = { ...empty, nodes: [], edges: [] };
 		const { container } = render(TemperView, { spec: one('Graph', props) });
-		expect(container.textContent).toContain('0 of 9 around this goal; 9 not shown.');
-		expect(container.textContent).not.toContain('connected');
+		expect(container.textContent).toContain(
+			'0 of 600 the most-connected in this context; 600 not shown.'
+		);
+		expect(container.querySelector('svg')).toBeNull();
+		expect(container.textContent).not.toContain('not connected to anything shown');
 	});
 
 	it('draws two graphs on one page with no id for one to answer for the other', () => {

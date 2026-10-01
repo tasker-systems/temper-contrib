@@ -1,4 +1,5 @@
 <script lang="ts" module>
+	import type { EdgeKind } from './graph';
 	import type { Tint } from './Tag.svelte';
 
 	export type DocTypeRole =
@@ -17,14 +18,23 @@
 		tint?: DocTypeRole | Tint;
 		ref?: string;
 		core?: boolean;
+		/** The node's edge count across the whole visible corpus, named beside the in-view degree. */
+		corpusDegree?: number;
+		excerpt?: string;
+		stage?: string;
+		updated?: string;
+		/** Where the node is homed: the anchor's words, or its bare id when unmatched. */
+		home?: string;
+		homeKind?: 'context' | 'cogmap';
 	};
 
 	export type GraphEdge = {
 		source: string;
 		target: string;
 		label?: string;
-		direction?: 'forward' | 'inverse' | 'none';
-		kind?: 'link' | 'derived' | 'contradicts';
+		edgeKind?: EdgeKind;
+		polarity?: 'forward' | 'inverse';
+		weight?: number;
 	};
 </script>
 
@@ -58,7 +68,7 @@
 		type GraphLayout,
 		nodeRadius,
 		pairEnds,
-		pairKind,
+		pairStroke,
 		placeCaptions,
 		settle
 	} from './graph';
@@ -115,9 +125,13 @@
 	/** A relation, as read from one end: which way it points, what it is, and the other node. */
 	const phrase = (edge: GraphEdge, from: 'source' | 'target') => {
 		const other = nameOf(from === 'source' ? edge.target : edge.source);
-		const direction = edge.direction ?? 'forward';
+		// A `near` relation points both ways at once, so it reads with no arrow at all.
 		const arrow =
-			direction === 'none' ? '—' : (direction === 'forward') === (from === 'source') ? '→' : '←';
+			edge.edgeKind === 'near'
+				? '—'
+				: ((edge.polarity ?? 'forward') === 'forward') === (from === 'source')
+					? '→'
+					: '←';
 		return `${arrow} ${edge.label ?? 'joined'}: ${other}`;
 	};
 
@@ -133,7 +147,20 @@
 		return out;
 	});
 
-	const tooltip = (n: GraphNode) => (n.kind ? `${n.label} · ${n.kind}` : n.label);
+	const tooltip = (n: GraphNode, inView?: number) =>
+		[n.label, n.kind, ...words(n, inView)].filter(Boolean).join(' · ');
+
+	/** What the corpus knows of a node, worded where it is present and absent where it is not. */
+	const words = (n: GraphNode, inView?: number): string[] => {
+		const out: string[] = [];
+		if (n.excerpt) out.push(n.excerpt);
+		if (n.stage) out.push(n.stage);
+		if (n.updated) out.push(n.updated);
+		if (n.home) out.push(n.homeKind ? `${n.home} (${n.homeKind})` : n.home);
+		if (n.corpusDegree !== undefined)
+			out.push(`${inView ?? 0} here of ${n.corpusDegree} in the corpus`);
+		return out;
+	};
 	const relations = (pair: (typeof settled.edges)[number]) =>
 		pair.edges.map(({ edge }) => phrase(edge, 'source').replace(/^\S+ /, '')).join('\n');
 	const described = $derived(
@@ -152,20 +179,29 @@
 				aria-label={described}
 				style:height
 			>
-				<!-- Lines first, so a mark is never hidden under a stroke. -->
-				{#each settled.edges as pair, i (i)}
-					{@const g = edgeGeometry(pair.source, pair.target, pairEnds(pair.edges))}
-					<g class="edge" data-kind={pairKind(pair.edges)}>
-						<title>{relations(pair)}</title>
-						<line x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2} />
-						{#each g.heads as d (d)}
-							<path class="head" {d} />
-						{/each}
-					</g>
-				{/each}
-				{#each marks as m (m.id)}
-					<g class="node" data-tint={m.node.tint ?? 'none'}>
-						<title>{tooltip(m.node)}</title>
+			<!-- Lines first, so a mark is never hidden under a stroke. The line's dash and width are
+			     the pair's own, as presentation attributes; its colour is its role, never a literal. -->
+			{#each settled.edges as pair, i (i)}
+				{@const g = edgeGeometry(pair.source, pair.target, pairEnds(pair.edges))}
+				{@const s = pairStroke(pair.edges)}
+				<g class="edge" data-role={s.role}>
+					<title>{relations(pair)}</title>
+					<line
+						x1={g.x1}
+						y1={g.y1}
+						x2={g.x2}
+						y2={g.y2}
+						stroke-width={s.width}
+						stroke-dasharray={s.dash}
+					/>
+					{#each g.heads as d (d)}
+						<path class="head" {d} />
+					{/each}
+				</g>
+			{/each}
+			{#each marks as m (m.id)}
+				<g class="node" data-tint={m.node.tint ?? 'none'}>
+					<title>{tooltip(m.node, m.degree)}</title>
 						{#if m.node.core && layout === 'radial'}
 							<circle class="ring" cx={m.x} cy={m.y} r={m.r + 4} />
 						{/if}
@@ -220,6 +256,9 @@
 								<span class="name">{n.label}</span>
 							{/if}
 							{#if n.kind}<span class="kind">{n.kind}</span>{/if}
+							{#each words(n, 0) as word (word)}
+								<span class="word">{word}</span>
+							{/each}
 						</li>
 					{/each}
 				</ul>
@@ -239,6 +278,9 @@
 								<span class="name">{m.node.label}</span>
 							{/if}
 							{#if m.node.kind}<span class="kind">{m.node.kind}</span>{/if}
+							{#each words(m.node, m.degree) as word (word)}
+								<span class="word">{word}</span>
+							{/each}
 							<span class="joins">{(joins.get(m.id) ?? []).join('; ')}</span>
 						</li>
 					{/each}
@@ -286,19 +328,23 @@
 	}
 	.edge line {
 		stroke: var(--tp-text-subtle);
-		stroke-width: 1.4;
 	}
 	.edge .head {
 		fill: var(--tp-text-subtle);
 		stroke: none;
 	}
-	.edge[data-kind='derived'] line {
-		stroke-dasharray: 6 4;
+	/* A line's colour is its role: the derivation bridge, a contradiction, or the structure.
+	   Its dash and width ride the line as presentation attributes, one per pair. */
+	.edge[data-role='derived'] line {
+		stroke: var(--tp-accent);
 	}
-	.edge[data-kind='contradicts'] line {
+	.edge[data-role='derived'] .head {
+		fill: var(--tp-accent);
+	}
+	.edge[data-role='contradicts'] line {
 		stroke: var(--tp-danger);
 	}
-	.edge[data-kind='contradicts'] .head {
+	.edge[data-role='contradicts'] .head {
 		fill: var(--tp-danger);
 	}
 	.captions text {
@@ -350,11 +396,18 @@
 		text-transform: uppercase;
 		color: var(--tp-text-subtle);
 	}
-	.joins {
+	.joins,
+	.word {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.word {
+		font-size: 0.75rem;
+		color: var(--tp-text-subtle);
+	}
+	.joins {
 		font-size: 0.75rem;
 		color: var(--tp-text-subtle);
 	}

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { degrees, edgeGeometry, frame, pairEnds, pairKind, placeCaptions, settle } from './graph';
+import {
+	degrees,
+	edgeGeometry,
+	frame,
+	pairEnds,
+	pairStroke,
+	placeCaptions,
+	settle,
+	stroke,
+	UNWEIGHTED_WIDTH
+} from './graph';
 
 const nodes = ['a', 'b', 'c', 'd', 'loner'].map((id) => ({ id, core: id === 'a' }));
 const edges = [
@@ -80,8 +90,8 @@ describe('the graph geometry', () => {
 		const g = settle(
 			[{ id: 'a' }, { id: 'b' }],
 			[
-				{ source: 'a', target: 'b', kind: 'derived' as const },
-				{ source: 'b', target: 'a', kind: 'contradicts' as const }
+				{ source: 'a', target: 'b', edgeKind: 'leads_to' as const },
+				{ source: 'b', target: 'a', label: 'contradicts', edgeKind: 'express' as const }
 			],
 			'force'
 		);
@@ -89,12 +99,48 @@ describe('the graph geometry', () => {
 		const pair = g.edges[0];
 		expect(pair.edges.map((e) => e.reversed)).toEqual([false, true]);
 		expect(pairEnds(pair.edges)).toEqual({ atSource: true, atTarget: true });
-		expect(pairKind(pair.edges)).toBe('contradicts');
-		expect(pairKind([{ edge: { kind: 'derived' as const } }, { edge: {} }])).toBe('link');
-		expect(pairEnds([{ edge: { direction: 'none' as const }, reversed: false }])).toEqual({
+		expect(pairStroke(pair.edges).role).toBe('contradicts');
+		expect(pairStroke([{ edge: { label: 'derived_from' } }, { edge: {} }])).toEqual({
+			role: 'structural',
+			dash: null,
+			width: UNWEIGHTED_WIDTH
+		});
+		expect(pairEnds([{ edge: { edgeKind: 'near' as const }, reversed: false }])).toEqual({
 			atSource: false,
 			atTarget: false
 		});
+	});
+
+	it('reads the drawing grammar from the relation it carries', () => {
+		// A `derived_from` label colours and dashes first, whatever the kind says.
+		expect(stroke({ label: 'derived_from', edgeKind: 'express' })).toMatchObject({
+			role: 'derived',
+			dash: '7 4'
+		});
+		expect(stroke({ label: 'contradicts' }).role).toBe('contradicts');
+		// Otherwise the dash is the kind's.
+		expect(stroke({}).dash).toBeNull();
+		expect(stroke({ edgeKind: 'leads_to' }).dash).toBe('7 4');
+		expect(stroke({ edgeKind: 'express' }).dash).toBe('1 4');
+		expect(stroke({ edgeKind: 'near' }).dash).toBe('4 4');
+		// Weight draws as width, clamped; absent, the unweighted width is stated, not defaulted.
+		expect(stroke({}).width).toBe(UNWEIGHTED_WIDTH);
+		expect(stroke({ weight: 0.2 }).width).toBe(1);
+		expect(stroke({ weight: 3 }).width).toBe(3);
+		expect(stroke({ weight: 9 }).width).toBe(5);
+		// Arrowheads follow polarity; a `near` relation heads neither end.
+		expect(stroke({})).toMatchObject({ atSource: false, atTarget: true });
+		expect(stroke({ polarity: 'inverse' })).toMatchObject({ atSource: true, atTarget: false });
+		expect(stroke({ edgeKind: 'near' })).toMatchObject({ atSource: false, atTarget: false });
+	});
+
+	it('draws a pair of dashing edges dashed, and never thinner than its heaviest relation', () => {
+		const dashed = pairStroke([
+			{ edge: { edgeKind: 'leads_to' as const, weight: 3 } },
+			{ edge: { edgeKind: 'near' as const } }
+		]);
+		expect(dashed.dash).toBe('7 4');
+		expect(dashed.width).toBe(3);
 	});
 
 	it('keeps separate clusters near enough to read', () => {

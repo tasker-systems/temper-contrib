@@ -38,6 +38,8 @@ type Source = {
  * - `page`: the page prop agrees with the rows and the total — no more rows than a page holds,
  *   none past the total, and `more` exactly when rows follow this page.
  * - `children`: the element's children are only these types, between `min` and `max` of them.
+ * - `drawn`: what a graph says it drew agrees with what it carries — the bounds' `drawn` count is
+ *   the nodes carried when nothing was cut, and a cut draws to its bounds, never short of them.
  */
 export type Check =
 	| { count: string; within: string; equals?: string }
@@ -45,7 +47,8 @@ export type Check =
 	| { keys: string; in: string }
 	| { values: string; in: string }
 	| { page: string; rows: string; within: string }
-	| { children: string[]; min: number; max: number };
+	| { children: string[]; min: number; max: number }
+	| { drawn: string; cut: string; nodes: string; nodesAt: number; edges: string; edgesAt: number };
 
 // fromJSONSchema accepts the JSON Schema object; the cast narrows our JSON import's type.
 const propsSchemas: Record<string, z.ZodType> = Object.fromEntries(
@@ -257,6 +260,23 @@ function declaredErrors(
 					errors.push(
 						`elements/${key}/props/${check.values}: "${String(v)}" is not one of ${check.in}`
 					);
+		} else if ('drawn' in check) {
+			if (props.state !== 'present') continue;
+			const nodes = props[check.nodes];
+			const edges = props[check.edges];
+			const cut = props[check.cut];
+			if (cut === undefined) {
+				const bounds = props[check.drawn];
+				const drawn = isRecord(bounds) ? countOf(bounds.drawn) : null;
+				if (drawn !== null && Array.isArray(nodes) && drawn !== nodes.length)
+					errors.push(`elements/${key}: says it draws ${drawn} but carries ${nodes.length} nodes`);
+				continue;
+			}
+			if (!isRecord(cut)) continue;
+			if (has(cut, 'nodes') && Array.isArray(nodes) && nodes.length !== check.nodesAt)
+				errors.push(`elements/${key}: cut draws ${nodes.length} of ${check.nodesAt} nodes`);
+			if (has(cut, 'edges') && Array.isArray(edges) && edges.length !== check.edgesAt)
+				errors.push(`elements/${key}: cut draws ${edges.length} of ${check.edgesAt} edges`);
 		} else {
 			const children = Array.isArray(el.children) ? el.children : [];
 			if (children.length < check.min || children.length > check.max)
