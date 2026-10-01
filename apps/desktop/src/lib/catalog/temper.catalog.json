@@ -427,7 +427,7 @@
       ]
     },
     "Graph": {
-      "description": "Nodes and the edges between them, drawn read-only, with what it omits. `total` is every node the graph stands for; `nodes` are those shown. A node with no edge among those carried is listed beneath the drawing, not drawn. A node's `tint` is a doc-type role, a categorical role (cat-1…cat-8) or a condition, never a colour; a node with none is drawn neutral. `kind` is the word for what a node is (a doc type: \"task\", \"character\") and is shown with it, so colour never carries identity alone. Edges join nodes by `id`; `ref` makes a node's listing a link to that resource. In a `radial` layout, `core` nodes settle at the centre. The omission sentence is composed; do not word it yourself.",
+      "description": "Nodes and the edges between them, drawn read-only, with what it omits. `total` is every node the graph stands for; `nodes` are those shown. A node with no edge among those carried is listed beneath the drawing, not drawn. A node's `tint` is a doc-type role, a categorical role (cat-1…cat-8) or a condition, never a colour; a node with none is drawn neutral. `kind` is the word for what a node is (a doc type: \"task\", \"character\") and is shown beside its colour in the graph's legend, so colour never carries identity alone. Edges join nodes by `id`; edges between one pair share a line, and an edge joining a node to itself is stated beneath, not drawn. `ref` makes a node's listing a link to that resource. In a `radial` layout, `core` nodes settle at the centre. The omission sentence is composed; do not word it yourself.",
       "slots": [],
       "example": {
         "total": 9,

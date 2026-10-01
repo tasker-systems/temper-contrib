@@ -6,10 +6,12 @@
 
 <script lang="ts">
 	/**
-	 * A short label, tinted by a categorical role or a condition. The one place a tint becomes an
-	 * appearance: Table's category cells and Timeline's markers draw through it too. `dot` draws
-	 * only the marker, for a row whose words are elsewhere.
+	 * A short label, tinted by a categorical role or a condition. Table's category cells and
+	 * Timeline's markers draw through it; which role a tint names is `tints.css`, shared with Graph.
+	 * `dot` draws only the marker, for a row whose words are elsewhere.
 	 */
+	import './tints.css';
+
 	let { label, tint, dot = false }: { label: string; tint?: Tint | null; dot?: boolean } = $props();
 </script>
 
@@ -44,23 +46,15 @@
 		background: var(--tag-ink);
 	}
 	[data-tint] {
-		--tag-ink: var(--tp-text-muted);
-		--tag-line: var(--tp-rule-strong);
+		--tag-ink: var(--tint, var(--tp-text-muted));
+		--tag-line: var(--tint, var(--tp-rule-strong));
 		--tag-wash: transparent;
 	}
 	.dot[data-tint='none'] {
 		background: transparent;
 	}
-	[data-tint='cat-1'] { --tag-ink: var(--tp-cat-1); --tag-line: var(--tp-cat-1); }
-	[data-tint='cat-2'] { --tag-ink: var(--tp-cat-2); --tag-line: var(--tp-cat-2); }
-	[data-tint='cat-3'] { --tag-ink: var(--tp-cat-3); --tag-line: var(--tp-cat-3); }
-	[data-tint='cat-4'] { --tag-ink: var(--tp-cat-4); --tag-line: var(--tp-cat-4); }
-	[data-tint='cat-5'] { --tag-ink: var(--tp-cat-5); --tag-line: var(--tp-cat-5); }
-	[data-tint='cat-6'] { --tag-ink: var(--tp-cat-6); --tag-line: var(--tp-cat-6); }
-	[data-tint='cat-7'] { --tag-ink: var(--tp-cat-7); --tag-line: var(--tp-cat-7); }
-	[data-tint='cat-8'] { --tag-ink: var(--tp-cat-8); --tag-line: var(--tp-cat-8); }
-	[data-tint='notice'] { --tag-ink: var(--tp-notice); --tag-line: var(--tp-notice); --tag-wash: var(--tp-notice-wash); }
-	[data-tint='success'] { --tag-ink: var(--tp-success); --tag-line: var(--tp-success); --tag-wash: var(--tp-success-wash); }
-	[data-tint='danger'] { --tag-ink: var(--tp-danger); --tag-line: var(--tp-danger); --tag-wash: var(--tp-danger-wash); }
-	[data-tint='pending'] { --tag-ink: var(--tp-pending); --tag-line: var(--tp-pending); --tag-wash: var(--tp-pending-wash); }
+	[data-tint='notice'] { --tag-wash: var(--tp-notice-wash); }
+	[data-tint='success'] { --tag-wash: var(--tp-success-wash); }
+	[data-tint='danger'] { --tag-wash: var(--tp-danger-wash); }
+	[data-tint='pending'] { --tag-wash: var(--tp-pending-wash); }
 </style>

@@ -150,6 +150,55 @@ describe('the graph through TemperView', () => {
 				expect(el.hasAttribute(attr), attr).toBe(false);
 	});
 
+	it('names each kind beside its colour in a legend', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		const entries = [...container.querySelectorAll('.legend .entry')].map((e) => [
+			e.querySelector('[data-tint]')?.getAttribute('data-tint'),
+			e.textContent?.trim()
+		]);
+		expect(entries).toContainEqual(['doctype-goal', 'goal']);
+		expect(entries).toContainEqual(['doctype-task', 'task']);
+		// The unconnected character is listed, not drawn, so it is not in the drawing's legend.
+		expect(entries.map(([, k]) => k)).not.toContain('character');
+	});
+
+	it('states a self-join, draws a repeated pair once, and reads each relation its own way', () => {
+		const props = {
+			total: 3,
+			scope: 'here',
+			label: 'family',
+			state: 'present',
+			nodes: [
+				{ id: 'mara', label: 'Mara' },
+				{ id: 'jun', label: 'Jun' },
+				{ id: 'lone', label: 'Lone' }
+			],
+			edges: [
+				{ source: 'mara', target: 'jun', label: 'sister of', direction: 'none' },
+				{ source: 'mara', target: 'jun', label: 'writes to' },
+				{ source: 'lone', target: 'lone', label: 'haunts' }
+			]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.querySelectorAll('svg .edge')).toHaveLength(1);
+		expect(container.querySelectorAll('svg .edge .head')).toHaveLength(1);
+		expect(container.textContent?.replace(/\s+/g, ' ')).toContain(
+			'1 edge joins a node to itself, so it has no line: Lone (haunts)'
+		);
+		const jun = [...container.querySelectorAll('.listed li')].find(
+			(li) => li.querySelector('.name')?.textContent === 'Jun'
+		);
+		expect(jun?.querySelector('.joins')?.textContent).toBe('— sister of: Mara; ← writes to: Mara');
+	});
+
+	it('says nothing about connection when it carries no nodes', () => {
+		const props = { ...graph, nodes: [], edges: [] };
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.textContent).toContain('0 of 9 around this goal; 9 not shown.');
+		expect(container.textContent).not.toContain('connected');
+	});
+
 	it('draws two graphs on one page with no id for one to answer for the other', () => {
 		const spec = {
 			root: 's',

@@ -15,6 +15,8 @@ import {
 	forceManyBody,
 	forceRadial,
 	forceSimulation,
+	forceX,
+	forceY,
 	type SimulationNodeDatum
 } from 'd3-force';
 
@@ -33,8 +35,12 @@ export interface Placed extends SimulationNodeDatum {
 	y: number;
 }
 
+/**
+ * Every edge between one pair of nodes, drawn as one line. Edges are kept in the order they came,
+ * oriented from `source` to `target`: an edge that runs the other way is `reversed`.
+ */
 export interface Joined<E> {
-	edge: E;
+	edges: { edge: E; reversed: boolean }[];
 	source: Placed;
 	target: Placed;
 }
@@ -47,32 +53,39 @@ const TICKS = 300;
 /** A mark's radius: more connected, a little larger, and never past a bound. */
 export const nodeRadius = (degree: number): number => 6 + Math.min(8, degree * 0.6);
 
-/** How many edges among those carried touch each node, counting each edge once per end. */
+/**
+ * How many other carried nodes each node is joined to. Neighbours, not edges: two relations
+ * between the same pair are one line, and a node joined only to itself has none.
+ */
 export function degrees(
 	nodes: { id: string }[],
 	edges: { source: string; target: string }[]
 ): Map<string, number> {
-	const degree = new Map(nodes.map((n) => [n.id, 0]));
+	const neighbours = new Map(nodes.map((n) => [n.id, new Set<string>()]));
 	for (const e of edges) {
 		if (e.source === e.target) continue;
-		if (!degree.has(e.source) || !degree.has(e.target)) continue;
-		degree.set(e.source, (degree.get(e.source) ?? 0) + 1);
-		degree.set(e.target, (degree.get(e.target) ?? 0) + 1);
+		neighbours.get(e.source)?.add(e.target);
+		neighbours.get(e.target)?.add(e.source);
 	}
-	return degree;
+	return new Map(
+		[...neighbours].map(([id, set]) => [
+			id,
+			[...set].filter((other) => neighbours.has(other)).length
+		])
+	);
 }
 
 /**
  * Settles the connected nodes. Nodes with no edge among those carried are not placed: a graph
  * lists them beneath its drawing, because a position for an unconnected node would claim a
- * relation that is not there. An edge naming a node that is not carried, or joining a node to
- * itself, is not drawn.
+ * relation that is not there. Edges between one pair are joined into one line. An edge joining a
+ * node to itself has no line to draw; it is returned in `selfJoined` so the graph can say so.
  */
 export function settle<E extends { source: string; target: string }>(
 	input: LayoutInput[],
 	edges: E[],
 	layout: GraphLayout
-): { nodes: Placed[]; edges: Joined<E>[]; unconnected: string[] } {
+): { nodes: Placed[]; edges: Joined<E>[]; selfJoined: E[]; unconnected: string[] } {
 	const degree = degrees(input, edges);
 	const connected = input.filter((n) => (degree.get(n.id) ?? 0) > 0);
 	const count = Math.max(1, connected.length);
@@ -83,13 +96,17 @@ export function settle<E extends { source: string; target: string }>(
 		y: H / 2 + Math.sin((i / count) * 2 * Math.PI) * 120
 	}));
 	const byId = new Map(nodes.map((n) => [n.id, n]));
-	const joined = edges
-		.map((edge) => {
-			const source = byId.get(edge.source);
-			const target = byId.get(edge.target);
-			return source && target && source !== target ? { edge, source, target } : null;
-		})
-		.filter((j): j is Joined<E> => j !== null);
+	const pairs = new Map<string, Joined<E>>();
+	for (const edge of edges) {
+		const source = byId.get(edge.source);
+		const target = byId.get(edge.target);
+		if (!source || !target || source === target) continue;
+		const key = JSON.stringify([edge.source, edge.target].sort());
+		const pair = pairs.get(key);
+		if (pair) pair.edges.push({ edge, reversed: pair.source !== source });
+		else pairs.set(key, { edges: [{ edge, reversed: false }], source, target });
+	}
+	const joined = [...pairs.values()];
 
 	const core = new Set(input.filter((n) => n.core).map((n) => n.id));
 	const sim = forceSimulation(nodes)
@@ -99,8 +116,12 @@ export function settle<E extends { source: string; target: string }>(
 				.distance(80)
 				.strength(0.6)
 		)
-		.force('charge', forceManyBody().strength(-260))
+		.force('charge', forceManyBody().strength(-260).distanceMax(240))
 		.force('center', forceCenter(W / 2, H / 2))
+		// A weak pull to the middle keeps separate clusters near one another: the drawing is fitted
+		// to where nodes land, and clusters left to drift apart would shrink every mark with it.
+		.force('x', forceX(W / 2).strength(0.08))
+		.force('y', forceY(H / 2).strength(0.08))
 		.force(
 			'collide',
 			forceCollide<Placed>().radius((n) => nodeRadius(n.degree) + 6)
@@ -122,6 +143,7 @@ export function settle<E extends { source: string; target: string }>(
 	return {
 		nodes,
 		edges: joined,
+		selfJoined: edges.filter((e) => e.source === e.target && degree.has(e.source)),
 		unconnected: input.filter((n) => (degree.get(n.id) ?? 0) === 0).map((n) => n.id)
 	};
 }
@@ -216,14 +238,14 @@ export function frame(nodes: Placed[], captions: Caption[], margin = 12): Box {
 }
 
 /**
- * An edge's line, trimmed to the rims of its two marks, and the arrowhead at an end that has a
- * direction. Arrowheads are drawn as shapes rather than SVG markers, so a graph holds no ids and
+ * A pair's line, trimmed to the rims of its two marks, and an arrowhead at each end an edge
+ * points to. Arrowheads are drawn as shapes rather than SVG markers, so a graph holds no ids and
  * any number of graphs share a page without one's markers answering for another's.
  */
 export function edgeGeometry(
 	source: Placed,
 	target: Placed,
-	direction: 'forward' | 'inverse' | 'none'
+	ends: { atSource: boolean; atTarget: boolean }
 ): { x1: number; y1: number; x2: number; y2: number; heads: string[] } {
 	const dx = target.x - source.x;
 	const dy = target.y - source.y;
@@ -245,11 +267,40 @@ export function edgeGeometry(
 		const f = (v: number) => v.toFixed(2);
 		return `M${f(tipX)},${f(tipY)} L${f(bx + px)},${f(by + py)} L${f(bx - px)},${f(by - py)} Z`;
 	};
-	const heads =
-		direction === 'forward'
-			? [head(x2, y2, ux, uy)]
-			: direction === 'inverse'
-				? [head(x1, y1, -ux, -uy)]
-				: [];
+	const heads = [
+		...(ends.atTarget ? [head(x2, y2, ux, uy)] : []),
+		...(ends.atSource ? [head(x1, y1, -ux, -uy)] : [])
+	];
 	return { x1, y1, x2, y2, heads };
+}
+
+type Directed = {
+	direction?: 'forward' | 'inverse' | 'none';
+	kind?: 'link' | 'derived' | 'contradicts';
+};
+
+/** Where a pair's arrowheads go: at each end some edge between them points to. */
+export function pairEnds<E extends Directed>(
+	edges: { edge: E; reversed: boolean }[]
+): { atSource: boolean; atTarget: boolean } {
+	const ends = { atSource: false, atTarget: false };
+	for (const { edge, reversed } of edges) {
+		const direction = edge.direction ?? 'forward';
+		if (direction === 'none') continue;
+		if ((direction === 'forward') !== reversed) ends.atTarget = true;
+		else ends.atSource = true;
+	}
+	return ends;
+}
+
+/**
+ * How a pair's line is drawn when its edges differ: a contradiction is never hidden behind a
+ * plain link, and a line is dashed as derived only when every edge on it is derived.
+ */
+export function pairKind<E extends Directed>(
+	edges: { edge: E }[]
+): 'link' | 'derived' | 'contradicts' {
+	const kinds = edges.map(({ edge }) => edge.kind ?? 'link');
+	if (kinds.includes('contradicts')) return 'contradicts';
+	return kinds.every((k) => k === 'derived') ? 'derived' : 'link';
 }

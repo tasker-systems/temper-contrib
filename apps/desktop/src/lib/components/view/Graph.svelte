@@ -38,17 +38,31 @@
 	 * Reshaped for the catalog. Every colour is a role, set through `data-tint` and classes, never
 	 * a literal and never a style attribute. Arrowheads are shapes rather than SVG markers, so a
 	 * graph holds no ids and any number share a page. The drawing is fitted to where its nodes
-	 * land, so it fills its column at any width. There is no pan or zoom: a bounded glance does
-	 * not need one, and a camera would take the wheel from the page it sits in.
+	 * land, so it fills its column at any width, and a larger drawing gets a taller canvas, within
+	 * bounds (set through a `style:` directive, which the CSP admits). There is no pan or zoom: a
+	 * bounded glance does not need one, and a camera would take the wheel from the page it sits in.
+	 *
+	 * Edges between one pair share a line, with every relation in its tooltip and in the list. An
+	 * edge joining a node to itself has no line, and is named beneath the drawing.
 	 *
 	 * The marks are not links: an SVG anchor is not the anchor the shell follows. Every node is in
-	 * the list beneath, and a node with a `ref` is a link there. A mark's name and kind, and an
-	 * edge's relation, are its tooltip.
+	 * the list beneath, and a node with a `ref` is a link there. The legend pairs each tint with
+	 * its kind, so colour never names a node alone.
 	 */
 	import Bounded from '../Bounded.svelte';
 	import type { RegionStateName } from '../RegionState.svelte';
 	import ResourceRef from '../ResourceRef.svelte';
-	import { edgeGeometry, frame, nodeRadius, placeCaptions, settle, type GraphLayout } from './graph';
+	import {
+		edgeGeometry,
+		frame,
+		type GraphLayout,
+		nodeRadius,
+		pairEnds,
+		pairKind,
+		placeCaptions,
+		settle
+	} from './graph';
+	import './tints.css';
 
 	let {
 		total,
@@ -69,31 +83,61 @@
 	} = $props();
 
 	const byId = $derived(new Map(nodes.map((n) => [n.id, n])));
+	const nameOf = (id: string) => byId.get(id)?.label ?? id;
 	const settled = $derived(settle(nodes, edges, layout));
 	const marks = $derived(
-		settled.nodes.map((p) => ({ ...p, node: byId.get(p.id) as GraphNode, r: nodeRadius(p.degree) }))
+		settled.nodes.map((p) => ({
+			...p,
+			node: byId.get(p.id) as GraphNode,
+			r: nodeRadius(p.degree)
+		}))
 	);
 	const captions = $derived(
-		placeCaptions(marks.map((m) => ({ id: m.id, x: m.x, y: m.y, degree: m.degree, label: m.node.label })))
+		placeCaptions(
+			marks.map((m) => ({ id: m.id, x: m.x, y: m.y, degree: m.degree, label: m.node.label }))
+		)
 	);
 	const box = $derived(frame(settled.nodes, captions));
 	const viewBox = $derived(`${box.x1} ${box.y1} ${box.x2 - box.x1} ${box.y2 - box.y1}`);
+	// A larger drawing gets a taller canvas, within bounds, so its marks and captions stay legible.
+	const height = $derived(`${Math.min(40, Math.max(20, ((box.y2 - box.y1) * 0.75) / 16))}rem`);
 	const unconnected = $derived(settled.unconnected.map((id) => byId.get(id) as GraphNode));
+
+	/** Each kind of node the drawing shows, with its tint: the word beside the colour. */
+	const legend = $derived(
+		[...new Map(
+			marks
+				.filter((m) => m.node.kind)
+				.map((m) => [`${m.node.tint ?? 'none'}|${m.node.kind}`, m.node])
+		).values()]
+	);
+
+	/** A relation, as read from one end: which way it points, what it is, and the other node. */
+	const phrase = (edge: GraphEdge, from: 'source' | 'target') => {
+		const other = nameOf(from === 'source' ? edge.target : edge.source);
+		const direction = edge.direction ?? 'forward';
+		const arrow =
+			direction === 'none' ? '—' : (direction === 'forward') === (from === 'source') ? '→' : '←';
+		return `${arrow} ${edge.label ?? 'joined'}: ${other}`;
+	};
 
 	/** Who a drawn node is joined to, in words, for the list beneath. */
 	const joins = $derived.by(() => {
 		const out = new Map<string, string[]>();
-		for (const e of settled.edges) {
-			const relation = e.edge.label ?? 'joined to';
-			out.set(e.source.id, [...(out.get(e.source.id) ?? []), `${relation} ${byId.get(e.target.id)?.label}`]);
-			out.set(e.target.id, [...(out.get(e.target.id) ?? []), `${relation} (from) ${byId.get(e.source.id)?.label}`]);
-		}
+		const add = (id: string, text: string) => out.set(id, [...(out.get(id) ?? []), text]);
+		for (const pair of settled.edges)
+			for (const { edge } of pair.edges) {
+				add(edge.source, phrase(edge, 'source'));
+				add(edge.target, phrase(edge, 'target'));
+			}
 		return out;
 	});
 
 	const tooltip = (n: GraphNode) => (n.kind ? `${n.label} · ${n.kind}` : n.label);
+	const relations = (pair: (typeof settled.edges)[number]) =>
+		pair.edges.map(({ edge }) => phrase(edge, 'source').replace(/^\S+ /, '')).join('\n');
 	const described = $derived(
-		`${label}: ${marks.length} connected by ${settled.edges.length} edges` +
+		`${label}: ${marks.length} connected by ${settled.edges.length} lines` +
 			(unconnected.length ? `; ${unconnected.length} not connected, listed beneath` : '')
 	);
 </script>
@@ -101,12 +145,18 @@
 <Bounded {total} shown={nodes.length} {scope} {label} {state}>
 	<figure class="graph">
 		{#if marks.length > 0}
-			<svg {viewBox} preserveAspectRatio="xMidYMid meet" role="img" aria-label={described}>
-				<!-- Edges first, so a mark is never hidden under a stroke. -->
-				{#each settled.edges as e, i (i)}
-					{@const g = edgeGeometry(e.source, e.target, e.edge.direction ?? 'forward')}
-					<g class="edge" data-kind={e.edge.kind ?? 'link'}>
-						<title>{e.edge.label ?? 'joined'}</title>
+			<svg
+				{viewBox}
+				preserveAspectRatio="xMidYMid meet"
+				role="img"
+				aria-label={described}
+				style:height
+			>
+				<!-- Lines first, so a mark is never hidden under a stroke. -->
+				{#each settled.edges as pair, i (i)}
+					{@const g = edgeGeometry(pair.source, pair.target, pairEnds(pair.edges))}
+					<g class="edge" data-kind={pairKind(pair.edges)}>
+						<title>{relations(pair)}</title>
 						<line x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2} />
 						{#each g.heads as d (d)}
 							<path class="head" {d} />
@@ -130,8 +180,29 @@
 					{/each}
 				</g>
 			</svg>
-		{:else}
-			<p class="nothing">Nothing here is connected to anything else shown, so there is no shape to draw.</p>
+			{#if legend.length > 0}
+				<figcaption class="legend">
+					{#each legend as n (`${n.tint ?? 'none'}|${n.kind}`)}
+						<span class="entry">
+							<span class="dot" data-tint={n.tint ?? 'none'} aria-hidden="true"></span>
+							<span class="kind">{n.kind}</span>
+						</span>
+					{/each}
+				</figcaption>
+			{/if}
+		{:else if unconnected.length > 0}
+			<p class="nothing">
+				Nothing here is connected to anything else shown, so there is no shape to draw.
+			</p>
+		{/if}
+
+		{#if settled.selfJoined.length > 0}
+			<p class="caption">
+				{settled.selfJoined.length === 1
+					? '1 edge joins a node to itself, so it has no line:'
+					: `${settled.selfJoined.length} edges join a node to itself, so they have no line:`}
+				{settled.selfJoined.map((e) => `${nameOf(e.source)} (${e.label ?? 'joined'})`).join('; ')}
+			</p>
 		{/if}
 
 		{#if unconnected.length > 0}
@@ -143,7 +214,11 @@
 					{#each unconnected as n (n.id)}
 						<li>
 							<span class="dot" data-tint={n.tint ?? 'none'} aria-hidden="true"></span>
-							{#if n.ref}<ResourceRef id={n.ref} titleHint={n.label} />{:else}<span class="name">{n.label}</span>{/if}
+							{#if n.ref}
+								<ResourceRef id={n.ref} titleHint={n.label} />
+							{:else}
+								<span class="name">{n.label}</span>
+							{/if}
 							{#if n.kind}<span class="kind">{n.kind}</span>{/if}
 						</li>
 					{/each}
@@ -158,7 +233,11 @@
 					{#each marks as m (m.id)}
 						<li>
 							<span class="dot" data-tint={m.node.tint ?? 'none'} aria-hidden="true"></span>
-							{#if m.node.ref}<ResourceRef id={m.node.ref} titleHint={m.node.label} />{:else}<span class="name">{m.node.label}</span>{/if}
+							{#if m.node.ref}
+								<ResourceRef id={m.node.ref} titleHint={m.node.label} />
+							{:else}
+								<span class="name">{m.node.label}</span>
+							{/if}
 							{#if m.node.kind}<span class="kind">{m.node.kind}</span>{/if}
 							<span class="joins">{(joins.get(m.id) ?? []).join('; ')}</span>
 						</li>
@@ -177,31 +256,23 @@
 	svg {
 		display: block;
 		width: 100%;
-		height: 20rem;
 	}
-	/* A node's colour is its role: one custom property, set by the tint, read by mark and dot. */
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.3rem 0.9rem;
+		margin-top: 0.3rem;
+	}
+	.entry {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35rem;
+	}
+	/* A node's colour is its role, read from the shared tint mapping (tints.css); a node with no
+	   tint is neutral. One custom property, read by the mark and every dot. */
 	[data-tint] {
-		--node: var(--tp-text-subtle);
+		--node: var(--tint, var(--tp-text-subtle));
 	}
-	[data-tint='doctype-research'] { --node: var(--tp-doctype-research); }
-	[data-tint='doctype-task'] { --node: var(--tp-doctype-task); }
-	[data-tint='doctype-session'] { --node: var(--tp-doctype-session); }
-	[data-tint='doctype-concept'] { --node: var(--tp-doctype-concept); }
-	[data-tint='doctype-goal'] { --node: var(--tp-doctype-goal); }
-	[data-tint='doctype-decision'] { --node: var(--tp-doctype-decision); }
-	[data-tint='doctype-memory'] { --node: var(--tp-doctype-memory); }
-	[data-tint='cat-1'] { --node: var(--tp-cat-1); }
-	[data-tint='cat-2'] { --node: var(--tp-cat-2); }
-	[data-tint='cat-3'] { --node: var(--tp-cat-3); }
-	[data-tint='cat-4'] { --node: var(--tp-cat-4); }
-	[data-tint='cat-5'] { --node: var(--tp-cat-5); }
-	[data-tint='cat-6'] { --node: var(--tp-cat-6); }
-	[data-tint='cat-7'] { --node: var(--tp-cat-7); }
-	[data-tint='cat-8'] { --node: var(--tp-cat-8); }
-	[data-tint='notice'] { --node: var(--tp-notice); }
-	[data-tint='success'] { --node: var(--tp-success); }
-	[data-tint='danger'] { --node: var(--tp-danger); }
-	[data-tint='pending'] { --node: var(--tp-pending); }
 
 	.mark {
 		fill: var(--node);
