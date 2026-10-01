@@ -218,7 +218,7 @@ mod tests {
         assert_eq!(keys.len(), roster.len(), "entry keys are distinct");
     }
 
-    /// The five preset rows the task names, with the launch each doc states.
+    /// The preset rows the roster names, with the launch each doc states.
     #[test]
     fn the_common_agents_are_preset() {
         let roster = roster();
@@ -240,6 +240,8 @@ mod tests {
             by_key("claude").command,
             "npx -y @agentclientprotocol/claude-agent-acp"
         );
+        assert_eq!(by_key("antigravity").binary, "agy");
+        assert_eq!(by_key("antigravity").command, "npx -y agy-acp");
     }
 
     fn entry(binary: &str) -> RosterEntry {

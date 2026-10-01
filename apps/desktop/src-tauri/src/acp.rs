@@ -910,6 +910,14 @@ mod tests {
         AcpAgent::new(AcpAgentConfig::new("npx").arg("-y").arg(CLAUDE_AGENT_ACP))
     }
 
+    /// Antigravity CLI's ACP adapter, pinned: the witnesses run `agy-acp` (which
+    /// wraps `agy` on $PATH) at a version chosen on purpose.
+    const AGY_AGENT_ACP: &str = "agy-acp@0.5.2";
+
+    fn agy_witness_agent() -> AcpAgent {
+        AcpAgent::new(AcpAgentConfig::new("npx").arg("-y").arg(AGY_AGENT_ACP))
+    }
+
     /// The model the opencode witnesses run. opencode's own default is a
     /// small free model, which judges the model more than the desktop; the
     /// witnesses select a capable one the session declares.
@@ -1780,6 +1788,28 @@ whole. Change nothing outside it, and write nothing else inside it.";
             silent_ask_sink(),
         )
         .await;
+        assert!(!info.session_id.is_empty(), "agent should create a session");
+
+        let stop_reason = prompt(&commands, "Reply with exactly: OK").await;
+        assert_eq!(stop_reason, "end_turn", "the turn should end normally");
+
+        let chunks = streamed_chunks(&recorded);
+        assert!(
+            chunks.concat().to_uppercase().contains("OK"),
+            "the agent's streamed answer should reply OK, got: {chunks:?}"
+        );
+    }
+
+    /// Witness for Google Antigravity CLI: the npm adapter `agy-acp`, which wraps
+    /// `agy` on $PATH, answers initialize and one prompt through the same conversation
+    /// path. Requires `agy` CLI on this machine. Run locally:
+    /// `cargo test -p desktop --lib -- --ignored agy_answers_a_prompt`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "requires npx and agy on PATH"]
+    async fn agy_answers_a_prompt() {
+        let (commands, recorded, info) =
+            start_test_conversation(agy_witness_agent(), AskBoard::default(), silent_ask_sink())
+                .await;
         assert!(!info.session_id.is_empty(), "agent should create a session");
 
         let stop_reason = prompt(&commands, "Reply with exactly: OK").await;

@@ -7,8 +7,8 @@
 # launch command by hand.
 #
 # `binary` is the name probed on $PATH. `command` is the launch command the store receives,
-# parsed the way the ACP crate parses command strings. Adapter rows probe the runner that
-# fetches them (`npx`), not the agent itself — their `binary` is never the agent's word.
+# parsed the way the ACP crate parses command strings. Self-contained adapters probe their runner
+# (`npx`); adapters wrapping an installed CLI probe that CLI's binary directly (`agy`).
 
 [[agents]]
 key = "opencode"
@@ -44,3 +44,10 @@ label = "Claude Agent"
 binary = "npx"
 command = "npx -y @agentclientprotocol/claude-agent-acp"
 # https://github.com/agentclientprotocol/claude-agent-acp — the ACP adapter for the Claude Agent SDK
+
+[[agents]]
+key = "antigravity"
+label = "Antigravity CLI"
+binary = "agy"
+command = "npx -y agy-acp"
+# https://github.com/shindgew/agy-acp — ACP adapter wrapping the Google Antigravity CLI (agy)
