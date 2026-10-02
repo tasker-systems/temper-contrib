@@ -29,6 +29,7 @@ Exits non-zero, naming what failed, when either half does not hold.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -43,6 +44,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.options import ArgOptions
+from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.support.ui import WebDriverWait
 
 APP = Path(__file__).resolve().parent.parent
@@ -226,9 +228,13 @@ def main() -> int:
 
     driver_proc = subprocess.Popen(
         ["tauri-driver", "--port", str(DRIVER_PORT)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        # The app is spawned by tauri-driver and its words flow through here: a session
+        # that never answers is diagnosed by what the app said on its way out, so keep
+        # both channels.
+        stdout=open("tauri-driver.log", "w"),
+        stderr=subprocess.STDOUT,
     )
+    os.environ.setdefault("RUST_BACKTRACE", "1")
     failures: list[str] = []
     report: dict = {}
     try:
@@ -236,8 +242,17 @@ def main() -> int:
         options = ArgOptions()
         options.set_capability("browserName", "wry")
         options.set_capability("tauri:options", {"application": str(binary)})
-        driver = webdriver.Remote(f"http://127.0.0.1:{DRIVER_PORT}", options=options)
-        driver.set_script_timeout(20)
+        # A session's first WebView under a software renderer is slow — fontconfig, llvmpipe,
+        # the whole first boot — and the client's default read timeout is shorter than that
+        # boot on a small runner. Give it the boot's real cost.
+        client = ClientConfig(remote_server_addr=f"http://127.0.0.1:{DRIVER_PORT}", timeout=300)
+        driver = webdriver.Remote(
+            command_executor=client.remote_server_addr, options=options, client_config=client
+        )
+        # The catalog step walks computed styles over every element of every specimen — the
+        # graph example alone carries 200 nodes and 600 edges. A 20s budget predates that
+        # page; the step's real cost is over a minute on a slow machine.
+        driver.set_script_timeout(120)
         try:
             WebDriverWait(driver, 20).until(
                 lambda d: d.find_elements(By.CSS_SELECTOR, 'header a[href="/"]')
@@ -468,6 +483,21 @@ def main() -> int:
     finally:
         driver_proc.terminate()
         driver_proc.wait(timeout=10)
+        # What the app said on its way out — or while hanging — is the diagnosis a named
+        # timeout still lacks. Alive-at-teardown is recorded beside it: a hang and a crash
+        # name different suspects.
+        tail = Path("tauri-driver.log")
+        if tail.exists() and tail.stat().st_size > 0:
+            print("\ntauri-driver and app output (tail):", file=sys.stderr)
+            sys.stderr.write(tail.read_text(errors="replace")[-4000:] + "\n")
+        alive = subprocess.run(["pgrep", "-af", binary.name], capture_output=True, text=True)
+        if alive.stdout.strip():
+            print(f"the app was still running at teardown:\n{alive.stdout}", file=sys.stderr)
+        # Whether the WebView's own processes exist names the missing layer: absent, the
+        # WebView never launched; present, it launched and its automation channel is what
+        # never connected.
+        webkit = subprocess.run(["pgrep", "-af", "WebKit|WPE"], capture_output=True, text=True)
+        print(f"webkit processes at teardown:\n{webkit.stdout or '(none)'}", file=sys.stderr)
 
     print(json.dumps(report, indent=2))
     if failures:

@@ -215,14 +215,33 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          if [ "$EVENT" != "pull_request" ]; then
-            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          # PARKED: the witness session does not answer on the runner — the followup task in
+          # temper carries the evidence and the next probe. It runs on the weekly schedule
+          # and manual dispatch only. To un-park, make this condition `pull_request` again.
+          if [ "$EVENT" != "schedule" ] && [ "$EVENT" != "workflow_dispatch" ]; then
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch --no-tags --depth=1 origin main
-          if git diff --name-only "origin/main...HEAD" | grep -qE '^apps/desktop/|^\.github/workflows/ci\.yml$'; then
+          # The checkout's refspec is scoped to the PR's ref, so main must be named onto its
+          # tracking ref explicitly — fetched bare, `origin/main` never comes into existence
+          # and the diff below would fatal into a silent "not relevant".
+          git fetch --quiet --no-tags --depth=1 origin "main:refs/remotes/origin/main"
+          # A direct tree diff of main against the merge ref: no merge-base, so a shallow
+          # graph cannot turn into a decision by accident.
+          if ! git diff --name-only "origin/main" HEAD > /tmp/witness-diff.txt 2>/tmp/witness-diff.err; then
+            echo "::error::the witness gate could not diff against main: $(cat /tmp/witness-diff.err)"
+            exit 1
+          fi
+          # A diff of nothing decides nothing; an undecidable gate refuses rather than exclude.
+          if [ ! -s /tmp/witness-diff.txt ]; then
+            echo "::error::the witness gate diffed against main and saw no changed files"
+            exit 1
+          fi
+          if grep -qE '^apps/desktop/|^\.github/workflows/ci\.yml$' /tmp/witness-diff.txt; then
+            echo "witness gate: desktop changes — the witness runs"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
           else
+            echo "witness gate: nothing the witness guards — skipped"
             echo "desktop=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -246,8 +265,19 @@ jobs:
       - name: Install Tauri prerequisites, WebKitWebDriver and Xvfb
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
+          # dbus: WebKitGTK's automation engages over the session bus — without one the
+          # session is created and no command ever answers. The image also restricts
+          # unprivileged user namespaces (bwrap cannot set up its uid map), which stops the
+          # WebView's sandboxed processes from ever launching; the witness needs them, so
+          # the job lifts the restriction on its own runner.
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb dbus
+          echo "apparmor_restrict_unprivileged_userns: $(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || echo 'n/a')"
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          bwrap --ro-bind / / --proc /proc --dev /dev true && echo "bwrap: ok" || echo "bwrap: still failed"
 
+      # The cache must not cross runner images: artifacts built by one image's rustc are
+      # useless to another, and a shared key restores fingerprints cargo trusts while the
+      # crates they name are missing (E0463, no dependency lines in the log).
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
@@ -267,7 +297,9 @@ jobs:
       - name: Build and witness
         run: |
           bun run tauri build --debug --no-bundle
-          xvfb-run -a uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+          # G_MESSAGES_DEBUG carries WebKitWebDriver's own words into the captured log —
+          # what the driver said while the session was not answering.
+          G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
         working-directory: apps/desktop
 
   ci-success:

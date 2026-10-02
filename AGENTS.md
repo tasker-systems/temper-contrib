@@ -17,6 +17,7 @@ plugins/<pkg>/               # self-contained plugin packages
 themes/                      # theme contract (contract/theme.schema.json) + data-only themes
   <theme>/theme.json         # source of truth; theme.css beside it is generated
 apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src/, Rust core in src-tauri/)
+docker/                      # local Linux environments matching CI jobs (see docker/*/README.md)
 Makefile.toml                # cargo-make: `check`, `test`, `fix`, `setup` across every package
 githooks/                    # selective pre-commit, pre-push test suites (core.hooksPath)
 tools/setup-claude-web.sh    # cloud-session SessionStart hook: toolchain + hooks
