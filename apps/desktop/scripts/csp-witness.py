@@ -462,7 +462,9 @@ def main() -> int:
         finally:
             driver.quit()
     except WebDriverException as e:
-        failures.append(f"webdriver: {e.msg}")
+        # A session that dies before its first command answers carries an empty message;
+        # the class and the raw error are what name it then.
+        failures.append(f"webdriver: {type(e).__name__}: {e.msg!r}")
     finally:
         driver_proc.terminate()
         driver_proc.wait(timeout=10)
