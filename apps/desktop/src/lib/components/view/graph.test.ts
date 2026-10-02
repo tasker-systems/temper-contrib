@@ -123,11 +123,12 @@ describe('the graph geometry', () => {
 		expect(stroke({ edgeKind: 'leads_to' }).dash).toBe('7 4');
 		expect(stroke({ edgeKind: 'express' }).dash).toBe('1 4');
 		expect(stroke({ edgeKind: 'near' }).dash).toBe('4 4');
-		// Weight draws as width, clamped; absent, the unweighted width is stated, not defaulted.
+		// Weight spans the schema's 0..1 across the width's 1..5; absent, the unweighted width
+		// is stated, not defaulted.
 		expect(stroke({}).width).toBe(UNWEIGHTED_WIDTH);
-		expect(stroke({ weight: 0.2 }).width).toBe(1);
-		expect(stroke({ weight: 3 }).width).toBe(3);
-		expect(stroke({ weight: 9 }).width).toBe(5);
+		expect(stroke({ weight: 0 }).width).toBe(1);
+		expect(stroke({ weight: 0.2 }).width).toBe(1.8);
+		expect(stroke({ weight: 1 }).width).toBe(5);
 		// Arrowheads follow polarity; a `near` relation heads neither end.
 		expect(stroke({})).toMatchObject({ atSource: false, atTarget: true });
 		expect(stroke({ polarity: 'inverse' })).toMatchObject({ atSource: true, atTarget: false });
@@ -136,7 +137,7 @@ describe('the graph geometry', () => {
 
 	it('draws a pair of dashing edges dashed, and never thinner than its heaviest relation', () => {
 		const dashed = pairStroke([
-			{ edge: { edgeKind: 'leads_to' as const, weight: 3 } },
+			{ edge: { edgeKind: 'leads_to' as const, weight: 0.5 } },
 			{ edge: { edgeKind: 'near' as const } }
 		]);
 		expect(dashed.dash).toBe('7 4');

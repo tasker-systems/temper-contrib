@@ -276,7 +276,7 @@ describe('the graph through TemperView', () => {
 		// The label dashes first: a `derived_from` line dashes whatever its kind.
 		const derived = container.querySelector('.edge[data-role="derived"] line');
 		expect(derived?.getAttribute('stroke-dasharray')).toBe('7 4');
-		expect(derived?.getAttribute('stroke-width')).toBe('1');
+		expect(derived?.getAttribute('stroke-width')).toBe('3');
 		expect(container.querySelector('.edge[data-role="contradicts"] line')).not.toBeNull();
 		// A `near` relation dashes short and heads neither end, and draws unweighted, stated.
 		const near = [...container.querySelectorAll('svg .edge')].find(
@@ -284,11 +284,11 @@ describe('the graph through TemperView', () => {
 		);
 		expect(near?.querySelectorAll('.head')).toHaveLength(0);
 		expect(near?.querySelector('line')?.getAttribute('stroke-width')).toBe('1.4');
-		// A weighted relation draws at its clamped width, never at the unweighted one.
+		// A weighted relation draws at its weight's width, never at the unweighted one.
 		const weighted = [...container.querySelectorAll('svg .edge')].find(
 			(e) => e.querySelector('line')?.getAttribute('stroke-dasharray') === null
 		);
-		expect(weighted?.querySelector('line')?.getAttribute('stroke-width')).toBe('1');
+		expect(weighted?.querySelector('line')?.getAttribute('stroke-width')).toBe('3');
 	});
 
 	it('paints a node only through its role, and an untinted node neutral', () => {
@@ -397,7 +397,7 @@ describe('the graph through TemperView', () => {
 		};
 		const { container } = render(TemperView, { spec: one('Graph', props) });
 		expect(container.querySelector('svg')?.getAttribute('aria-label')).toBe(
-			'neighbourhood: 2 connected by 1 lines; reached from Mara within 2 hops'
+			'neighbourhood: 2 connected by 1 line; reached from Mara within 2 hops'
 		);
 		expect(container.textContent).toContain(
 			'All 2 reached from Mara within 2 hops; deeper not reported.'

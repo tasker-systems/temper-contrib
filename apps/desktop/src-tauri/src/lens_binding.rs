@@ -105,8 +105,7 @@ const STAGE_MAX: usize = 20;
 const HOME_MAX: usize = 120;
 const KIND_MAX: usize = 40;
 const EDGE_LABEL_MAX: usize = 40;
-/// The draw an entry read applies when asked with none — the server's default,
-/// stated in the arm as the k actually applied.
+/// The draw an entry read is asked with, stated in the arm as the k asked.
 const ENTRY_K: i64 = 130;
 
 /// The listing's sortable columns, and the field temper orders each by.
@@ -597,7 +596,6 @@ enum GraphRead {
     },
     Entry {
         context: String,
-        anchor: Uuid,
         answer: AtlasEntry,
     },
 }
@@ -625,16 +623,14 @@ async fn graph_read(
             let context = given(&listing.context)
                 .ok_or_else(|| "a graph read needs a context to enter".to_string())?;
             let anchor = context_anchor(&context, homes)?;
+            // The k the arm states is the k asked, by construction — not by
+            // convention with a server default.
             let answer = client
                 .graph()
-                .entry(&[anchor], None)
+                .entry(&[anchor], Some(ENTRY_K as i32))
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok(GraphRead::Entry {
-                context,
-                anchor,
-                answer,
-            })
+            Ok(GraphRead::Entry { context, answer })
         }
         LensSubject::Neighbourhood { id, depth } => {
             let seed = parse_ref(&id).ok_or_else(|| format!("{id} does not name a resource"))?;
@@ -766,7 +762,9 @@ fn cut_to_bounds(
         .take(cat.edges_max)
         .map(|e| (*e).clone())
         .collect();
-    let edges_cut = among.len().saturating_sub(drawn.len());
+    // Every edge not drawn is counted: those that fell past the cap among kept
+    // nodes, and those orphaned when an endpoint fell off the node cut.
+    let edges_cut = among.len().saturating_sub(drawn.len()) + (edges.len() - among.len());
     let cut = (nodes_cut > 0 || edges_cut > 0).then(|| Cut {
         nodes: (nodes_cut > 0).then_some(nodes_cut as i64),
         edges: (edges_cut > 0).then_some(edges_cut as i64),
@@ -848,14 +846,12 @@ fn graph_props(read: &GraphRead, homes: &HashMap<Uuid, String>) -> Value {
                 None,
             )
         }
-        GraphRead::Entry {
-            context,
-            anchor,
-            answer,
-        } => {
+        GraphRead::Entry { context, answer } => {
             let (nodes, edges, cut) = cut_to_bounds(&answer.nodes, &answer.edges);
             let arm = (!answer.nodes.is_empty()).then(|| Arm::Entry {
-                r#in: vec![anchor.to_string()],
+                // The ref the reader asked at — the context's words, not the
+                // bare anchor id the wire carried.
+                r#in: vec![context.clone()],
                 k: ENTRY_K,
             });
             (
@@ -1563,7 +1559,9 @@ mod tests {
         assert_eq!(props["total"], 250);
         assert_eq!(props["nodes"].as_array().unwrap().len(), 200);
         assert_eq!(props["edges"].as_array().unwrap().len(), 600);
-        assert_eq!(props["cut"], json!({ "nodes": 50, "edges": 100 }));
+        // 100 edges fell past the cap among kept nodes, 10 more were orphaned when their
+        // endpoints fell off the node cut — every edge not drawn is counted.
+        assert_eq!(props["cut"], json!({ "nodes": 50, "edges": 110 }));
         let drawn_ids: HashSet<String> = props["nodes"]
             .as_array()
             .unwrap()
@@ -1613,10 +1611,8 @@ mod tests {
             9,
             true,
         );
-        let anchor = uuid::Uuid::from_u128(777);
         let read = GraphRead::Entry {
             context: "+temper-dev/contrib".into(),
-            anchor,
             answer: a,
         };
         let props = graph_props(&read, &homes());
@@ -1627,7 +1623,7 @@ mod tests {
         assert_eq!(props["scope"], "the most-connected in +temper-dev/contrib");
         assert_eq!(
             props["arm"],
-            json!({ "read": "entry", "in": [anchor.to_string()], "k": 130 })
+            json!({ "read": "entry", "in": ["+temper-dev/contrib"], "k": 130 })
         );
         assert!(props.get("cut").is_none());
     }
@@ -1922,16 +1918,15 @@ mod tests {
             filled["elements"]["graph"]["props"]["arm"]["depth"]
         );
 
-        // The entry read for the same context.
+        // The entry read for the same context, asked at the k the arm states.
         let anchor = context_anchor(&context, &homes).expect("the witness context reads");
         let answer = client
             .graph()
-            .entry(&[anchor], None)
+            .entry(&[anchor], Some(ENTRY_K as i32))
             .await
             .expect("the entry read reads");
         let read = GraphRead::Entry {
             context: context.clone(),
-            anchor,
             answer,
         };
         let props = graph_props(&read, &homes);

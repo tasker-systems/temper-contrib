@@ -19,7 +19,9 @@ What it asserts, per theme:
 6. The graphs are anchored and grammared: every drawn node is either an SVG anchor naming its
    resource or a bare node (a specimen's vocabulary node carries no resource), never a third
    shape; every anchor names `/r/<resource>`; lines, arrowheads, captions and legend entries are
-   all drawn, so the colour assertion above covers them too.
+   all drawn, so the colour assertion above covers them too. This witness asserts presence and
+   anchoring, not the grammar's rules — which edge dashes, where an arrowhead lands — those
+   belong to the unit and component suites, which a regression there must flip.
 """
 
 from __future__ import annotations

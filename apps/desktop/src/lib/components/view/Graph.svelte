@@ -176,7 +176,8 @@
 	const relations = (pair: (typeof settled.edges)[number]) =>
 		pair.edges.map(({ edge }) => phrase(edge, 'source').replace(/^\S+ /, '')).join('\n');
 	const described = $derived(
-		`${label}: ${marks.length} connected by ${settled.edges.length} lines` +
+		`${label}: ${marks.length} connected by ${settled.edges.length} ` +
+			(settled.edges.length === 1 ? 'line' : 'lines') +
 			(arm ? `; ${graphStanding(arm, nameOf)}` : '') +
 			(unconnected.length ? `; ${unconnected.length} not connected, listed beneath` : '')
 	);

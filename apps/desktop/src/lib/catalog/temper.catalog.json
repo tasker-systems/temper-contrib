@@ -1396,10 +1396,10 @@
                   "in": {
                     "type": "array",
                     "minItems": 1,
-                    "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$" },
-                    "description": "The ids of the anchor nodes the entry read was asked at, as drawn."
+                    "items": { "type": "string", "pattern": "^([@+][a-z0-9][a-z0-9-]{0,63}/[a-z0-9][a-z0-9-]{0,119}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$", "maxLength": 200 },
+                    "description": "Where the entry read was asked: the anchor's ref in words (a context's decorated ref) or its bare id — a place, never a drawn node."
                   },
-                  "k": { "type": "integer", "minimum": 1, "description": "The draw limit the read applied." }
+                  "k": { "type": "integer", "minimum": 1, "description": "The draw the read was asked with." }
                 }
               }
             ]

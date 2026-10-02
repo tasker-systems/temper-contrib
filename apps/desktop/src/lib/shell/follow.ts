@@ -64,6 +64,9 @@ export function follow(event: MouseEvent, model: TabModel): void {
 	if (!href) return;
 	const url = new URL(href, window.location.href);
 	if (url.origin !== window.location.origin) {
+		// Refused before anything awaits: the webview must never navigate, and a preventDefault
+		// that waits on the server read can lose that race.
+		event.preventDefault();
 		void followExternal(event, url, model);
 		return;
 	}

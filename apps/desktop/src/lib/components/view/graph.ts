@@ -327,7 +327,9 @@ export function stroke(edge: Answered): Stroke {
 				: 'structural';
 	// The label dashes first: a `derived_from` line dashes whatever its kind.
 	const dash = edge.label === 'derived_from' ? '7 4' : KIND_DASH[kindOf(edge)];
-	const width = edge.weight == null ? UNWEIGHTED_WIDTH : Math.max(1, Math.min(5, edge.weight));
+	// Weight spans the schema's 0..1 across the width's 1..5, so differences show; absent, the
+	// unweighted width is stated, not defaulted to 1.
+	const width = edge.weight == null ? UNWEIGHTED_WIDTH : 1 + 4 * edge.weight;
 	// A `near` relation points both ways at once, so it heads neither end.
 	const headed = kindOf(edge) !== 'near';
 	const forward = (edge.polarity ?? 'forward') === 'forward';
