@@ -4,12 +4,15 @@
 	 * through TemperView. The core fills the props as a function of the read's answer and checks
 	 * the result; TemperView checks it again. Nothing between the read and the view composes it.
 	 *
-	 * Paging and sorting are view actions the bound component declares: each re-resolves the lens
-	 * from a new read. The view in hand stays drawn while the next one arrives, marked busy — a
-	 * page turn never blanks the table, and one that fails says so beside it, with a way to try
-	 * again. A read that failed and a view the core refused are told apart: a refusal had a read.
-	 * Where in the listing the reader is lives as long as the step; going back to it reads from the
-	 * first page again.
+	 * The read asks for the subject its binding names: a `resource-list` fills a Table from a
+	 * query's listing; a `graph` walks a neighbourhood — from a resource subject, or the one the
+	 * neighbourhood names — or takes a query's entry read at its context. Paging and sorting are
+	 * view actions the bound component declares (Graph declares none, so a graph is page-less).
+	 * The view in hand stays drawn while the next one arrives, marked busy — a page turn never
+	 * blanks the table, and one that fails says so beside it, with a way to try again. A read
+	 * that failed and a view the core refused are told apart: a refusal had a read. Where in the
+	 * listing the reader is lives as long as the step; going back to it reads from the first page
+	 * again.
 	 */
 	import { invoke } from '@tauri-apps/api/core';
 	import RegionState from '$lib/components/RegionState.svelte';
@@ -20,6 +23,12 @@
 
 	type Sort = { key: string; order: 'asc' | 'desc' };
 	type View = { offset: number; sort?: Sort };
+	/** The subject the core is asked for, as the binding read names it. */
+	type Ask = { kind: 'query'; context?: string; docType?: string; text?: string } | {
+		kind: 'neighbourhood';
+		id: string;
+		depth: number;
+	};
 
 	let { subject, lens }: LensProps = $props();
 
@@ -35,8 +44,33 @@
 
 	const bound = $derived(lens?.build.state === 'bound' ? lens.build : null);
 
+	/** What this binding asks the core for on this subject, or null when it shows none. */
+	const ask = $derived.by<Ask | null>(() => {
+		if (!bound) return null;
+		if (bound.binding.read === 'resource-list')
+			return subject.kind === 'query'
+				? {
+						kind: 'query',
+						context: subject.context,
+						docType: subject.docType,
+						text: subject.text
+					}
+				: null;
+		if (subject.kind === 'resource') return { kind: 'neighbourhood', id: subject.id, depth: 1 };
+		if (subject.kind === 'neighbourhood')
+			return { kind: 'neighbourhood', id: subject.id, depth: subject.depth };
+		if (subject.kind === 'query')
+			return {
+				kind: 'query',
+				context: subject.context,
+				docType: subject.docType,
+				text: subject.text
+			};
+		return null;
+	});
+
 	$effect(() => {
-		if (!bound || subject.kind !== 'query') return;
+		if (!bound || !ask) return;
 		const asked = { offset: view.offset, sort: view.sort };
 		void attempt;
 		let gone = false;
@@ -44,7 +78,7 @@
 		invoke<{ spec: unknown; refs: Resolution[] }>('lens_resolve', {
 			spec: bound.spec,
 			binding: bound.binding,
-			subject: { context: subject.context, docType: subject.docType, text: subject.text },
+			subject: ask,
 			view: asked
 		}).then(
 			(answer) => {
@@ -79,8 +113,14 @@
 <div class="page">
 	{#if !bound}
 		<RegionState state="failed" label="this lens" detail="it is not a bound lens" />
-	{:else if subject.kind !== 'query'}
-		<RegionState state="failed" label={`the ${lens?.name} lens`} detail="it shows a listing, and this is not one" />
+	{:else if !ask}
+		<RegionState
+			state="failed"
+			label={`the ${lens?.name} lens`}
+			detail={bound.binding.read === 'resource-list'
+				? 'it shows a listing, and this is not one'
+				: 'it shows a graph, and this is not one'}
+		/>
 	{:else if spec === null && failure && !failure.refused}
 		<RegionState state="failed" label={`the ${lens?.name}`} detail={failure.message} />
 	{:else if spec === null && !failure}

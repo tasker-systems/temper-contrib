@@ -1,5 +1,6 @@
 <script lang="ts" module>
 	import type { EdgeKind } from './graph';
+	import type { GraphArm, GraphBounds, GraphCut } from '../omission';
 	import type { Tint } from './Tag.svelte';
 
 	export type DocTypeRole =
@@ -55,11 +56,13 @@
 	 * Edges between one pair share a line, with every relation in its tooltip and in the list. An
 	 * edge joining a node to itself has no line, and is named beneath the drawing.
 	 *
-	 * The marks are not links: an SVG anchor is not the anchor the shell follows. Every node is in
-	 * the list beneath, and a node with a `ref` is a link there. The legend pairs each tint with
-	 * its kind, so colour never names a node alone.
+	 * A node with a `ref` opens as its resource: the mark and its caption are SVG anchors naming
+	 * it, and the shell follows them by address (`follow.ts` reads an anchor in the SVG namespace
+	 * as attributes). The list beneath keeps its resource links, and the legend pairs each tint
+	 * with its kind, so colour never names a node alone.
 	 */
 	import Bounded from '../Bounded.svelte';
+	import { graphStanding } from '../omission';
 	import type { RegionStateName } from '../RegionState.svelte';
 	import ResourceRef from '../ResourceRef.svelte';
 	import {
@@ -80,6 +83,9 @@
 		label,
 		state,
 		layout = 'force',
+		arm = null,
+		bounds = null,
+		cut = null,
 		nodes,
 		edges
 	}: {
@@ -88,6 +94,12 @@
 		label: string;
 		state: 'present' | RegionStateName;
 		layout?: GraphLayout;
+		/** Where the view was read from, as its read answers it: the walk or the entry. */
+		arm?: GraphArm | null;
+		/** What an entry read says it drew. */
+		bounds?: GraphBounds | null;
+		/** What the drawing's bounds clipped off the answer. */
+		cut?: GraphCut | null;
 		nodes: GraphNode[];
 		edges: GraphEdge[];
 	} = $props();
@@ -165,11 +177,13 @@
 		pair.edges.map(({ edge }) => phrase(edge, 'source').replace(/^\S+ /, '')).join('\n');
 	const described = $derived(
 		`${label}: ${marks.length} connected by ${settled.edges.length} lines` +
+			(arm ? `; ${graphStanding(arm, nameOf)}` : '') +
 			(unconnected.length ? `; ${unconnected.length} not connected, listed beneath` : '')
 	);
+	const omissions = $derived({ arm, bounds, cut });
 </script>
 
-<Bounded {total} shown={nodes.length} {scope} {label} {state}>
+<Bounded {total} shown={nodes.length} {scope} {label} {state} graph={omissions}>
 	<figure class="graph">
 		{#if marks.length > 0}
 			<svg
@@ -200,21 +214,39 @@
 				</g>
 			{/each}
 			{#each marks as m (m.id)}
-				<g class="node" data-tint={m.node.tint ?? 'none'}>
-					<title>{tooltip(m.node, m.degree)}</title>
+				{#if m.node.ref}
+					<a class="node" data-tint={m.node.tint ?? 'none'} href={`/r/${m.node.ref}`}>
+						<title>{tooltip(m.node, m.degree)}</title>
+						{#if m.node.core && layout === 'radial'}
+							<circle class="ring" cx={m.x} cy={m.y} r={m.r + 4} />
+						{/if}
+						<circle class="mark" cx={m.x} cy={m.y} r={m.r} />
+					</a>
+				{:else}
+					<g class="node" data-tint={m.node.tint ?? 'none'}>
+						<title>{tooltip(m.node, m.degree)}</title>
 						{#if m.node.core && layout === 'radial'}
 							<circle class="ring" cx={m.x} cy={m.y} r={m.r + 4} />
 						{/if}
 						<circle class="mark" cx={m.x} cy={m.y} r={m.r} />
 					</g>
-				{/each}
-				<!-- Captions last: a caption drawn between the node passes would be covered by a
-				     later mark, which is the collision placement exists to prevent. -->
-				<g class="captions" aria-hidden="true">
-					{#each captions as c (c.id)}
+				{/if}
+			{/each}
+			<!-- Captions last: a caption drawn between the node passes would be covered by a
+			     later mark, which is the collision placement exists to prevent. A caption whose
+			     node carries a ref is an anchor naming it, same address as its mark. -->
+			<g class="captions" aria-hidden="true">
+				{#each captions as c (c.id)}
+					{@const n = byId.get(c.id)}
+					{#if n?.ref}
+						<a href={`/r/${n.ref}`}>
+							<text x={c.x} y={c.y} text-anchor="middle">{c.text}</text>
+						</a>
+					{:else}
 						<text x={c.x} y={c.y} text-anchor="middle">{c.text}</text>
-					{/each}
-				</g>
+					{/if}
+				{/each}
+			</g>
 			</svg>
 			{#if legend.length > 0}
 				<figcaption class="legend">

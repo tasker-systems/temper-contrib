@@ -347,6 +347,72 @@ describe('the graph through TemperView', () => {
 		expect(jun?.querySelector('.joins')?.textContent).toBe('— sister of: Mara; ← writes to: Mara');
 	});
 
+	it('wraps every drawn mark and its caption in an anchor naming its resource', () => {
+		const a = '01a0f000-0000-7000-8000-00000000000a';
+		const b = '01a0f000-0000-7000-8000-00000000000b';
+		const props = {
+			total: 3,
+			scope: 'here',
+			label: 'family',
+			state: 'present',
+			nodes: [
+				{ id: 'mara', label: 'Mara', ref: a },
+				{ id: 'jun', label: 'Jun', ref: b },
+				{ id: 'lone', label: 'Lone' }
+			],
+			edges: [{ source: 'jun', target: 'mara', label: 'sister of' }]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		const hrefs = [...container.querySelectorAll('svg a')].map((el) => el.getAttribute('href'));
+		// One anchor per drawn mark and one per drawn caption; a node with no ref draws bare.
+		expect(hrefs).toHaveLength(4);
+		for (const href of hrefs) expect(href).toMatch(/^\/r\/[0-9a-f-]{36}$/);
+		expect(hrefs).toContain(`/r/${a}`);
+		expect(hrefs).toContain(`/r/${b}`);
+		for (const node of container.querySelectorAll('svg .node'))
+			expect(node.tagName.toLowerCase()).toBe('a');
+		for (const caption of container.querySelectorAll('svg .captions text'))
+			expect(caption.parentElement?.tagName.toLowerCase()).toBe('a');
+		// The list beneath keeps its ResourceRef rows for ref'd nodes, unchanged by the wrapping
+		// above; a node with no ref is still listed by name.
+		const listed = [...container.querySelectorAll('.listed li .ref')].map(
+			(el) => el.querySelector('.title')?.textContent
+		);
+		expect(listed).toHaveLength(2);
+		expect(container.querySelector('.unconnected .name')?.textContent).toBe('Lone');
+	});
+
+	it('says where a walk was read from, in its description and its omission sentence', () => {
+		const props = {
+			total: 2,
+			scope: 'reached from Mara within 2 hops',
+			label: 'neighbourhood',
+			state: 'present',
+			arm: { read: 'walk', from: ['mara'], depth: 2 },
+			nodes: [
+				{ id: 'mara', label: 'Mara', core: true },
+				{ id: 'jun', label: 'Jun' }
+			],
+			edges: [{ source: 'jun', target: 'mara' }]
+		};
+		const { container } = render(TemperView, { spec: one('Graph', props) });
+		expect(container.querySelector('svg')?.getAttribute('aria-label')).toBe(
+			'neighbourhood: 2 connected by 1 lines; reached from Mara within 2 hops'
+		);
+		expect(container.textContent).toContain(
+			'All 2 reached from Mara within 2 hops; deeper not reported.'
+		);
+	});
+
+	it('composes an entry read’s omissions in the read’s own terms', () => {
+		const { container } = render(TemperView, { spec: one('Graph', graph) });
+		expect(container.textContent).toContain(
+			'Drawn 600 of 780 eligible, the most-connected in this context at a draw of 600; ' +
+				'420 in scope not connected, not drawn; ' +
+				'400 nodes and 140 edges past the drawing’s bounds not drawn.'
+		);
+	});
+
 	it('says nothing about connection when it carries no nodes', () => {
 		const { arm: _arm, bounds: _bounds, cut: _cut, ...empty } = graph;
 		const props = { ...empty, nodes: [], edges: [] };
