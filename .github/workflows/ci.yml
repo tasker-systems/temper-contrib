@@ -219,10 +219,26 @@ jobs:
             echo "desktop=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          git fetch --no-tags --depth=1 origin main
-          if git diff --name-only "origin/main...HEAD" | grep -qE '^apps/desktop/|^\.github/workflows/ci\.yml$'; then
+          # The checkout's refspec is scoped to the PR's ref, so main must be named onto its
+          # tracking ref explicitly — fetched bare, `origin/main` never comes into existence
+          # and the diff below would fatal into a silent "not relevant".
+          git fetch --quiet --no-tags --depth=1 origin "main:refs/remotes/origin/main"
+          # A direct tree diff of main against the merge ref: no merge-base, so a shallow
+          # graph cannot turn into a decision by accident.
+          if ! git diff --name-only "origin/main" HEAD > /tmp/witness-diff.txt 2>/tmp/witness-diff.err; then
+            echo "::error::the witness gate could not diff against main: $(cat /tmp/witness-diff.err)"
+            exit 1
+          fi
+          # A diff of nothing decides nothing; an undecidable gate refuses rather than exclude.
+          if [ ! -s /tmp/witness-diff.txt ]; then
+            echo "::error::the witness gate diffed against main and saw no changed files"
+            exit 1
+          fi
+          if grep -qE '^apps/desktop/|^\.github/workflows/ci\.yml$' /tmp/witness-diff.txt; then
+            echo "witness gate: desktop changes — the witness runs"
             echo "desktop=true" >> "$GITHUB_OUTPUT"
           else
+            echo "witness gate: nothing the witness guards — skipped"
             echo "desktop=false" >> "$GITHUB_OUTPUT"
           fi
 
