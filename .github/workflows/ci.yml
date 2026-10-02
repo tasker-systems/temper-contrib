@@ -288,7 +288,14 @@ jobs:
       - name: Build and witness
         run: |
           bun run tauri build --debug --no-bundle
-          xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+          # WebKitGTK launches its WebView through a bubblewrap sandbox; where the runner
+          # refuses user namespaces the WebView never finishes launching and the session
+          # never answers. The probe names the restriction; the env var lifts the sandbox
+          # for this harness only — the shipped app keeps it for people.
+          echo "unprivileged_userns: $(cat /proc/sys/kernel/unprivileged_userns_clone 2>/dev/null || echo 'n/a')"
+          bwrap --ro-bind / / --proc /proc --dev /dev true && echo "bwrap: ok" || echo "bwrap: failed"
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 \
+            xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
         working-directory: apps/desktop
 
   ci-success:
