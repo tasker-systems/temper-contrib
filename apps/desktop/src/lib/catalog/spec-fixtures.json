@@ -4109,8 +4109,8 @@
 			}
 		},
 		{
-			"name": "a graph walk naming a seed it does not draw",
-			"ok": false,
+			"name": "a graph walk's arm names the seed it was asked at, drawn or not",
+			"ok": true,
 			"spec": {
 				"root": "g",
 				"elements": {
@@ -4124,7 +4124,7 @@
 							"arm": {
 								"read": "walk",
 								"from": [
-									"nowhere"
+									"019d4add-f49d-7c43-a87d-dda470e5dd9c"
 								],
 								"depth": 1
 							},
@@ -4152,8 +4152,8 @@
 			}
 		},
 		{
-			"name": "a graph entry naming an anchor it does not draw",
-			"ok": false,
+			"name": "a graph entry's arm names the anchor, a place never drawn as a node",
+			"ok": true,
 			"spec": {
 				"root": "g",
 				"elements": {
@@ -4167,7 +4167,7 @@
 							"arm": {
 								"read": "entry",
 								"in": [
-									"nowhere"
+									"01a0c426-681f-7a90-9382-64288ef57082"
 								],
 								"k": 130
 							},

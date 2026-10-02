@@ -534,7 +534,7 @@
         "label": "neighbourhood",
         "state": "present",
         "layout": "radial",
-        "arm": { "read": "entry", "in": ["goal"], "k": 600 },
+        "arm": { "read": "entry", "in": ["01a0c426-681f-7a90-9382-64288ef57082"], "k": 600 },
         "bounds": { "drawn": 600, "eligible": 780, "inScope": 1200, "truncated": true },
         "cut": { "nodes": 400, "edges": 140 },
         "nodes": [
@@ -1370,7 +1370,7 @@
             "description": "force (the default) lets structure place nodes; radial settles `core` nodes at the centre and rings the rest."
           },
           "arm": {
-            "description": "Where the view was read from: a walk from seeds within a depth, or an entry read anchored at nodes with the k applied.",
+            "description": "Where the view was read from: a walk from seed resources within a depth, or an entry read anchored at a place (a context or cogmap id, never a drawn node) with the k applied. The arm names what the read was asked at — those ids need not be among the nodes drawn.",
             "oneOf": [
               {
                 "type": "object",
@@ -1554,8 +1554,6 @@
         { "unique": "nodes/*/id" },
         { "values": "edges/*/source", "in": "nodes/*/id" },
         { "values": "edges/*/target", "in": "nodes/*/id" },
-        { "values": "arm/from/*", "in": "nodes/*/id" },
-        { "values": "arm/in/*", "in": "nodes/*/id" },
         { "drawn": "bounds", "cut": "cut", "nodes": "nodes", "nodesAt": 200, "edges": "edges", "edgesAt": 600 }
       ]
     }
