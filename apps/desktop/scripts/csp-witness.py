@@ -29,6 +29,7 @@ Exits non-zero, naming what failed, when either half does not hold.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -227,8 +228,11 @@ def main() -> int:
     driver_proc = subprocess.Popen(
         ["tauri-driver", "--port", str(DRIVER_PORT)],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        # The app is spawned by tauri-driver and its stderr flows through here: a session
+        # that never answers is diagnosed by what the app said on its way out, so keep it.
+        stderr=open("tauri-driver.log", "w"),
     )
+    os.environ.setdefault("RUST_BACKTRACE", "1")
     failures: list[str] = []
     report: dict = {}
     try:
@@ -468,6 +472,16 @@ def main() -> int:
     finally:
         driver_proc.terminate()
         driver_proc.wait(timeout=10)
+        # What the app said on its way out — or while hanging — is the diagnosis a named
+        # timeout still lacks. Alive-at-teardown is recorded beside it: a hang and a crash
+        # name different suspects.
+        tail = Path("tauri-driver.log")
+        if tail.exists() and tail.stat().st_size > 0:
+            print("\ntauri-driver and app output (tail):", file=sys.stderr)
+            sys.stderr.write(tail.read_text(errors="replace")[-4000:] + "\n")
+        alive = subprocess.run(["pgrep", "-af", binary.name], capture_output=True, text=True)
+        if alive.stdout.strip():
+            print(f"the app was still running at teardown:\n{alive.stdout}", file=sys.stderr)
 
     print(json.dumps(report, indent=2))
     if failures:
