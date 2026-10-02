@@ -294,7 +294,9 @@ jobs:
       - name: Build and witness
         run: |
           bun run tauri build --debug --no-bundle
-          xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+          # G_MESSAGES_DEBUG carries WebKit's own automation-channel words into the captured
+          # stderr — what the session said while it was not answering.
+          G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
         working-directory: apps/desktop
 
   ci-success:

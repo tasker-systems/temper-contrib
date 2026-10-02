@@ -485,6 +485,11 @@ def main() -> int:
         alive = subprocess.run(["pgrep", "-af", binary.name], capture_output=True, text=True)
         if alive.stdout.strip():
             print(f"the app was still running at teardown:\n{alive.stdout}", file=sys.stderr)
+        # Whether the WebView's own processes exist names the missing layer: absent, the
+        # WebView never launched; present, it launched and its automation channel is what
+        # never connected.
+        webkit = subprocess.run(["pgrep", "-af", "WebKit|WPE"], capture_output=True, text=True)
+        print(f"webkit processes at teardown:\n{webkit.stdout or '(none)'}", file=sys.stderr)
 
     print(json.dumps(report, indent=2))
     if failures:
