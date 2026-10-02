@@ -16,6 +16,10 @@ What it asserts, per theme:
    order, the pager, facet counts and list cells — so the second assertion covers them too. The
    catalog lens hands it the view-action handlers a host would. Every header and cell stays a
    table cell: a component's style that reaches one breaks the columns, and only layout shows it.
+6. The graphs are anchored and grammared: every drawn node is either an SVG anchor naming its
+   resource or a bare node (a specimen's vocabulary node carries no resource), never a third
+   shape; every anchor names `/r/<resource>`; lines, arrowheads, captions and legend entries are
+   all drawn, so the colour assertion above covers them too.
 """
 
 from __future__ import annotations
@@ -124,6 +128,14 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
     // A cell a component style turned into something else leaves the table's layout.
     cellsNotCells: [...page.querySelectorAll('[data-component="Table"] th, [data-component="Table"] td')]
       .filter((c) => getComputedStyle(c).display !== 'table-cell').map(label),
+    graphParts: Object.fromEntries(Object.entries({
+      marks: 'svg .node .mark', anchored: 'svg a.node[href]', bare: 'svg g.node .mark',
+      lines: 'svg .edge line', heads: 'svg .edge .head', captions: 'svg .captions text',
+      captionAnchors: 'svg .captions a[href]', legend: '.legend .entry'
+    }).map(([k, sel]) => [k, page.querySelectorAll(`[data-component="Graph"] ${sel}`).length])),
+    // An anchor that names anything but its resource is a lie about where a click lands.
+    strayAnchors: [...page.querySelectorAll('[data-component="Graph"] svg a[href]')]
+      .filter((a) => !a.getAttribute('href').startsWith('/r/')).length,
     offenders: offenders.slice(0, 40),
     offenderCount: offenders.length
   });
@@ -168,6 +180,29 @@ def witness_catalog(driver, open_catalog) -> tuple[list[dict], list[str]]:
                 failures.append(f"{where}: a graph carries ids another could answer for")
             if not all(r["nodesPainted"].values()):
                 failures.append(f"{where}: nodes not painted with their roles {r['nodesPainted']}")
+            gp = r["graphParts"]
+            missing_graph = [
+                k for k in ("marks", "lines", "heads", "captions", "legend") if not gp[k]
+            ]
+            if missing_graph:
+                failures.append(f"{where}: the graphs drew no {', '.join(missing_graph)}")
+            if gp["anchored"] + gp["bare"] != gp["marks"] or gp["anchored"] + gp["bare"] == 0:
+                failures.append(
+                    f"{where}: {gp['marks']} marks but {gp['anchored']} anchored + {gp['bare']} bare"
+                )
+            if not gp["anchored"]:
+                failures.append(
+                    f"{where}: no drawn node is an anchor naming its resource "
+                    f"(the catalog's example models a core fill, and every one of its nodes is a resource)"
+                )
+            if gp["captionAnchors"] > gp["captions"]:
+                failures.append(
+                    f"{where}: {gp['captionAnchors']} caption anchors over {gp['captions']} captions"
+                )
+            if r["strayAnchors"]:
+                failures.append(
+                    f"{where}: {r['strayAnchors']} anchors name something but a resource"
+                )
             missing = [k for k, n in r["tableParts"].items() if not n]
             if missing:
                 failures.append(f"{where}: the table drew no {', '.join(missing)}")
