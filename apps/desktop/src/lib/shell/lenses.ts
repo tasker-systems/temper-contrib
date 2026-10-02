@@ -43,7 +43,7 @@ export interface LensProps {
 }
 
 /** Which element of a bound lens's spec a read fills, and which read. */
-export type LensBinding = { element: string; read: 'resource-list' };
+export type LensBinding = { element: string; read: 'resource-list' | 'graph' };
 
 type LensModule = Promise<{ default: Component<LensProps> }>;
 

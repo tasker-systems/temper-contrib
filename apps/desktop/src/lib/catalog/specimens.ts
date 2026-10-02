@@ -83,7 +83,7 @@ function twoGraphs(): Specimen['spec'] {
 			{ id: 'aunt', label: 'An aunt, never named', kind: 'character', tint: 'cat-1' }
 		],
 		edges: [
-			{ source: 'mara', target: 'jun', label: 'sister of', direction: 'none' },
+			{ source: 'mara', target: 'jun', label: 'sister of', edgeKind: 'near' },
 			{ source: 'mara', target: 'harbour', label: 'lives at' },
 			{ source: 'storm', target: 'harbour', label: 'set at' },
 			{ source: 'jun', target: 'letter', label: 'writes' }

@@ -274,20 +274,77 @@ export function edgeGeometry(
 	return { x1, y1, x2, y2, heads };
 }
 
-type Directed = {
-	direction?: 'forward' | 'inverse' | 'none';
-	kind?: 'link' | 'derived' | 'contradicts';
+export type EdgeKind = 'contains' | 'leads_to' | 'express' | 'near';
+
+/**
+ * An edge that carries what the answer holds of its relation. The drawing grammar reads only
+ * these fields (ported from temper-ui's graph palette): colour by label, dash by label then
+ * kind, width by weight, arrowheads by polarity with none for `near`.
+ */
+export interface Answered {
+	/** The relation, as the corpus names it. */
+	label?: string;
+	edgeKind?: EdgeKind;
+	polarity?: 'forward' | 'inverse';
+	/**
+	 * The relation's strength, drawn as the line's width. Absent draws the unweighted width,
+	 * stated — never defaulted to 1, which is a real weight and would render a corpus whose
+	 * every edge happened to be weak as genuinely, uniformly thin.
+	 */
+	weight?: number;
+}
+
+export type StrokeRole = 'structural' | 'derived' | 'contradicts';
+
+/** An edge with no `edgeKind` draws as the structural default: solid, headed by its polarity. */
+const kindOf = (edge: Answered): EdgeKind => edge.edgeKind ?? 'contains';
+
+const KIND_DASH: Record<EdgeKind, string | null> = {
+	contains: null,
+	leads_to: '7 4',
+	express: '1 4',
+	near: '4 4'
 };
 
+/** Stroke for an edge whose weight is absent. Deliberately not 1 — see {@link Answered}. */
+export const UNWEIGHTED_WIDTH = 1.4;
+
+/** How one edge draws: its role (a `--tp-*` role in the component), dash, width, and heads. */
+export interface Stroke {
+	role: StrokeRole;
+	dash: string | null;
+	width: number;
+	atSource: boolean;
+	atTarget: boolean;
+}
+
+export function stroke(edge: Answered): Stroke {
+	const role =
+		edge.label === 'contradicts'
+			? 'contradicts'
+			: edge.label === 'derived_from'
+				? 'derived'
+				: 'structural';
+	// The label dashes first: a `derived_from` line dashes whatever its kind.
+	const dash = edge.label === 'derived_from' ? '7 4' : KIND_DASH[kindOf(edge)];
+	// Weight spans the schema's 0..1 across the width's 1..5, so differences show; absent, the
+	// unweighted width is stated, not defaulted to 1.
+	const width = edge.weight == null ? UNWEIGHTED_WIDTH : 1 + 4 * edge.weight;
+	// A `near` relation points both ways at once, so it heads neither end.
+	const headed = kindOf(edge) !== 'near';
+	const forward = (edge.polarity ?? 'forward') === 'forward';
+	return { role, dash, width, atSource: headed && !forward, atTarget: headed && forward };
+}
+
 /** Where a pair's arrowheads go: at each end some edge between them points to. */
-export function pairEnds<E extends Directed>(
+export function pairEnds<E extends Answered>(
 	edges: { edge: E; reversed: boolean }[]
 ): { atSource: boolean; atTarget: boolean } {
 	const ends = { atSource: false, atTarget: false };
 	for (const { edge, reversed } of edges) {
-		const direction = edge.direction ?? 'forward';
-		if (direction === 'none') continue;
-		if ((direction === 'forward') !== reversed) ends.atTarget = true;
+		const s = stroke(edge);
+		if (!s.atSource && !s.atTarget) continue;
+		if (s.atTarget !== reversed) ends.atTarget = true;
 		else ends.atSource = true;
 	}
 	return ends;
@@ -295,12 +352,19 @@ export function pairEnds<E extends Directed>(
 
 /**
  * How a pair's line is drawn when its edges differ: a contradiction is never hidden behind a
- * plain link, and a line is dashed as derived only when every edge on it is derived.
+ * plainer relation, a line dashes only when every edge on it dashes — with the dash the first
+ * dashing edge names — and it is never thinner than the heaviest relation on it.
  */
-export function pairKind<E extends Directed>(
+export function pairStroke<E extends Answered>(
 	edges: { edge: E }[]
-): 'link' | 'derived' | 'contradicts' {
-	const kinds = edges.map(({ edge }) => edge.kind ?? 'link');
-	if (kinds.includes('contradicts')) return 'contradicts';
-	return kinds.every((k) => k === 'derived') ? 'derived' : 'link';
+): { role: StrokeRole; dash: string | null; width: number } {
+	const strokes = edges.map(({ edge }) => stroke(edge));
+	const role = strokes.some((s) => s.role === 'contradicts')
+		? 'contradicts'
+		: strokes.every((s) => s.role === 'derived')
+			? 'derived'
+			: 'structural';
+	const dash = strokes.every((s) => s.dash) ? strokes[0].dash : null;
+	const width = Math.max(...strokes.map((s) => s.width));
+	return { role, dash, width };
 }

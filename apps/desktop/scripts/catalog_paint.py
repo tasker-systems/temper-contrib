@@ -16,6 +16,12 @@ What it asserts, per theme:
    order, the pager, facet counts and list cells — so the second assertion covers them too. The
    catalog lens hands it the view-action handlers a host would. Every header and cell stays a
    table cell: a component's style that reaches one breaks the columns, and only layout shows it.
+6. The graphs are anchored and grammared: every drawn node is either an SVG anchor naming its
+   resource or a bare node (a specimen's vocabulary node carries no resource), never a third
+   shape; every anchor names `/r/<resource>`; lines, arrowheads, captions and legend entries are
+   all drawn, so the colour assertion above covers them too. This witness asserts presence and
+   anchoring, not the grammar's rules — which edge dashes, where an arrowhead lands — those
+   belong to the unit and component suites, which a regression there must flip.
 """
 
 from __future__ import annotations
@@ -35,9 +41,12 @@ PAINT = """
 const done = arguments[arguments.length - 1];
 const theme = arguments[0];
 document.documentElement.dataset.theme = theme;
-// Two frames: the theme's rules apply, then LayerChart's effects settle.
-// An error thrown in the callback would never call done, and read as a timeout: name it instead.
-requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
+// Settle on timers, never on frames: a requestAnimationFrame never fires in an occluded
+// WKWebView, which would hang this probe whenever the app's window is behind another — and
+// read as a timeout, naming nothing. Two short ticks let the theme's rules apply and
+// LayerChart's effects settle. An error thrown in the callback would never call done, and
+// read as a timeout: name it instead.
+setTimeout(() => setTimeout(() => { try {
   const page = document.querySelector('.tab-body:not([hidden]) .page');
   if (!page) return done({ error: 'no catalog page in the active tab' });
 
@@ -65,6 +74,9 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
     const value = getComputedStyle(probe).color;
     if (value !== SENTINEL) (roles[value] ??= []).push(name);
   }
+  probe.style.setProperty('color', 'var(--tp-text)');
+  const textComputed = getComputedStyle(probe).color;
+  const themeAttr = document.documentElement.dataset.theme;
   holder.remove();
 
   const transparent = (v) => !v || v === 'none' || v === 'transparent' || /rgba\\(.*,\\s*0\\)$/.test(v)
@@ -124,10 +136,20 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
     // A cell a component style turned into something else leaves the table's layout.
     cellsNotCells: [...page.querySelectorAll('[data-component="Table"] th, [data-component="Table"] td')]
       .filter((c) => getComputedStyle(c).display !== 'table-cell').map(label),
+    graphParts: Object.fromEntries(Object.entries({
+      marks: 'svg .node .mark', anchored: 'svg a.node[href]', bare: 'svg g.node .mark',
+      lines: 'svg .edge line', heads: 'svg .edge .head', captions: 'svg .captions text',
+      captionAnchors: 'svg .captions a[href]', legend: '.legend .entry'
+    }).map(([k, sel]) => [k, page.querySelectorAll(`[data-component="Graph"] ${sel}`).length])),
+    // An anchor that names anything but its resource is a lie about where a click lands.
+    strayAnchors: [...page.querySelectorAll('[data-component="Graph"] svg a[href]')]
+      .filter((a) => !a.getAttribute('href').startsWith('/r/')).length,
     offenders: offenders.slice(0, 40),
-    offenderCount: offenders.length
+    offenderCount: offenders.length,
+    themeAttr: themeAttr,
+    textComputed: textComputed
   });
-} catch (e) { done({ error: `the paint probe threw: ${e}` }); } }, 300)));
+} catch (e) { done({ error: `the paint probe threw: ${e}` }); } }, 1500), 300);
 """
 
 
@@ -168,6 +190,29 @@ def witness_catalog(driver, open_catalog) -> tuple[list[dict], list[str]]:
                 failures.append(f"{where}: a graph carries ids another could answer for")
             if not all(r["nodesPainted"].values()):
                 failures.append(f"{where}: nodes not painted with their roles {r['nodesPainted']}")
+            gp = r["graphParts"]
+            missing_graph = [
+                k for k in ("marks", "lines", "heads", "captions", "legend") if not gp[k]
+            ]
+            if missing_graph:
+                failures.append(f"{where}: the graphs drew no {', '.join(missing_graph)}")
+            if gp["anchored"] + gp["bare"] != gp["marks"] or gp["anchored"] + gp["bare"] == 0:
+                failures.append(
+                    f"{where}: {gp['marks']} marks but {gp['anchored']} anchored + {gp['bare']} bare"
+                )
+            if not gp["anchored"]:
+                failures.append(
+                    f"{where}: no drawn node is an anchor naming its resource "
+                    f"(the catalog's example models a core fill, and every one of its nodes is a resource)"
+                )
+            if gp["captionAnchors"] > gp["captions"]:
+                failures.append(
+                    f"{where}: {gp['captionAnchors']} caption anchors over {gp['captions']} captions"
+                )
+            if r["strayAnchors"]:
+                failures.append(
+                    f"{where}: {r['strayAnchors']} anchors name something but a resource"
+                )
             missing = [k for k, n in r["tableParts"].items() if not n]
             if missing:
                 failures.append(f"{where}: the table drew no {', '.join(missing)}")
