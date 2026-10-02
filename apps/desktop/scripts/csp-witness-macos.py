@@ -133,7 +133,10 @@ def main() -> int:
         options = ArgOptions()
         options.set_capability("browserName", "webkit")
         driver = webdriver.Remote(f"http://127.0.0.1:{PORT}", options=options)
-        driver.set_script_timeout(20)
+        # The catalog paint probe walks computed styles over every element of every specimen —
+        # the graph example alone carries 200 nodes and 600 edges — twice, once per theme. A
+        # 20s budget predates that page and times out on it; the step's real cost is minutes.
+        driver.set_script_timeout(120)
         try:
             WebDriverWait(driver, 20).until(
                 lambda d: d.find_elements(By.CSS_SELECTOR, 'header a[href="/"]')

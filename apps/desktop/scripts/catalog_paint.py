@@ -41,9 +41,12 @@ PAINT = """
 const done = arguments[arguments.length - 1];
 const theme = arguments[0];
 document.documentElement.dataset.theme = theme;
-// Two frames: the theme's rules apply, then LayerChart's effects settle.
-// An error thrown in the callback would never call done, and read as a timeout: name it instead.
-requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
+// Settle on timers, never on frames: a requestAnimationFrame never fires in an occluded
+// WKWebView, which would hang this probe whenever the app's window is behind another — and
+// read as a timeout, naming nothing. Two short ticks let the theme's rules apply and
+// LayerChart's effects settle. An error thrown in the callback would never call done, and
+// read as a timeout: name it instead.
+setTimeout(() => setTimeout(() => { try {
   const page = document.querySelector('.tab-body:not([hidden]) .page');
   if (!page) return done({ error: 'no catalog page in the active tab' });
 
@@ -71,6 +74,9 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
     const value = getComputedStyle(probe).color;
     if (value !== SENTINEL) (roles[value] ??= []).push(name);
   }
+  probe.style.setProperty('color', 'var(--tp-text)');
+  const textComputed = getComputedStyle(probe).color;
+  const themeAttr = document.documentElement.dataset.theme;
   holder.remove();
 
   const transparent = (v) => !v || v === 'none' || v === 'transparent' || /rgba\\(.*,\\s*0\\)$/.test(v)
@@ -139,9 +145,11 @@ requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => { try {
     strayAnchors: [...page.querySelectorAll('[data-component="Graph"] svg a[href]')]
       .filter((a) => !a.getAttribute('href').startsWith('/r/')).length,
     offenders: offenders.slice(0, 40),
-    offenderCount: offenders.length
+    offenderCount: offenders.length,
+    themeAttr: themeAttr,
+    textComputed: textComputed
   });
-} catch (e) { done({ error: `the paint probe threw: ${e}` }); } }, 300)));
+} catch (e) { done({ error: `the paint probe threw: ${e}` }); } }, 1500), 300);
 """
 
 
