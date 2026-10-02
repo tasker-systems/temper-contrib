@@ -241,7 +241,10 @@ def main() -> int:
         options.set_capability("browserName", "wry")
         options.set_capability("tauri:options", {"application": str(binary)})
         driver = webdriver.Remote(f"http://127.0.0.1:{DRIVER_PORT}", options=options)
-        driver.set_script_timeout(20)
+        # The catalog step walks computed styles over every element of every specimen — the
+        # graph example alone carries 200 nodes and 600 edges. A 20s budget predates that
+        # page; the step's real cost is over a minute on a slow machine.
+        driver.set_script_timeout(120)
         try:
             WebDriverWait(driver, 20).until(
                 lambda d: d.find_elements(By.CSS_SELECTOR, 'header a[href="/"]')

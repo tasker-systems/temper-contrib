@@ -246,9 +246,7 @@ jobs:
     name: Desktop CSP witness (production build in WebKitGTK)
     needs: witness-gate
     if: needs.witness-gate.outputs.desktop == 'true'
-    # Pinned off ubuntu-latest: the witness session went from green to a driver command that
-    # never answers across the image roll — held here until the engine difference is named.
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
@@ -274,7 +272,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
-          key: ubuntu-22-04
 
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked
