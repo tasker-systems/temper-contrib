@@ -227,10 +227,11 @@ def main() -> int:
 
     driver_proc = subprocess.Popen(
         ["tauri-driver", "--port", str(DRIVER_PORT)],
-        stdout=subprocess.DEVNULL,
-        # The app is spawned by tauri-driver and its stderr flows through here: a session
-        # that never answers is diagnosed by what the app said on its way out, so keep it.
-        stderr=open("tauri-driver.log", "w"),
+        # The app is spawned by tauri-driver and its words flow through here: a session
+        # that never answers is diagnosed by what the app said on its way out, so keep
+        # both channels.
+        stdout=open("tauri-driver.log", "w"),
+        stderr=subprocess.STDOUT,
     )
     os.environ.setdefault("RUST_BACKTRACE", "1")
     failures: list[str] = []
