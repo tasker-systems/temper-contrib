@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A weekly full-battery run on main: the drift a diff-based gate cannot see — runner image,
+  # WebKitGTK, tauri-driver — shows up here, named by the job that moved.
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -194,8 +199,37 @@ jobs:
       - name: Workflows (actionlint)
         run: actionlint
 
+  witness-gate:
+    name: CSP witness gate (what the diff can move)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      desktop: ${{ steps.gate.outputs.desktop }}
+    # Everything on main — pushes and the weekly run — witnesses; a PR pays for the
+    # witness only when its diff can move what the witness guards: the app (its config,
+    # its code, its install surface) or the witness's own scripts.
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin main
+          if git diff --name-only "origin/main...HEAD" | grep -qE '^apps/desktop/|^\.github/workflows/ci\.yml$'; then
+            echo "desktop=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
+          fi
+
   csp-witness:
     name: Desktop CSP witness (production build in WebKitGTK)
+    needs: witness-gate
+    if: needs.witness-gate.outputs.desktop == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -239,15 +273,21 @@ jobs:
   ci-success:
     name: CI Success
     if: always()
-    needs: [verify, themes, desktop, hygiene, csp-witness]
+    needs: [verify, themes, desktop, hygiene, witness-gate, csp-witness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Every job succeeded
+      - name: Every job succeeded; a skipped job was gated off
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
+          GATED: ${{ needs.witness-gate.outputs.desktop }}
         run: |
-          echo "job results: $RESULTS"
+          echo "job results: $RESULTS (witness gate: $GATED)"
+          # A skip is legitimate only when the path gate excluded the witness; every other
+          # non-success fails the fan-in.
           for r in $RESULTS; do
-            [ "$r" = "success" ] || { echo "::error::a required job finished '$r'"; exit 1; }
+            [ "$r" = "success" ] && continue
+            if [ "$r" = "skipped" ] && [ "$GATED" = "false" ]; then continue; fi
+            echo "::error::a required job finished '$r' (witness gate: $GATED)"
+            exit 1
           done
