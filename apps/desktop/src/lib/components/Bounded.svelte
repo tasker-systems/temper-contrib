@@ -2,11 +2,13 @@
 	/**
 	 * The envelope every bounded view shares: it says what it omits. The omission sentence is
 	 * composed from `total`, `shown`, `scope` and, for a page, `page` (`omission.ts`), so no author
-	 * words it out of step with the numbers. When the view is not present, or present with nothing to stand for, its state
-	 * renders through RegionState and its content does not.
+	 * words it out of step with the numbers. A graph view hands its read to `graph`, and its
+	 * omissions are composed in the read's own terms instead. When the view is not present, or
+	 * present with nothing to stand for, its state renders through RegionState and its content does
+	 * not.
 	 */
 	import type { Snippet } from 'svelte';
-	import { omissionSentence, type Page } from './omission';
+	import { graphSentence, omissionSentence, type GraphOmissions, type Page } from './omission';
 	import RegionState, { type RegionStateName } from './RegionState.svelte';
 
 	let {
@@ -18,6 +20,7 @@
 		page,
 		more,
 		onmore,
+		graph,
 		children
 	}: {
 		total: number;
@@ -29,11 +32,15 @@
 		page?: Page | null;
 		more?: { step: number } | null;
 		onmore?: () => void;
+		/** When the view is a graph read: the read its omissions are composed from. */
+		graph?: GraphOmissions | null;
 		children?: Snippet;
 	} = $props();
 
 	const omitted = $derived(Math.max(0, total - shown));
-	const sentence = $derived(omissionSentence(total, shown, scope, page));
+	const sentence = $derived(
+		graph ? graphSentence(total, shown, scope, graph) : omissionSentence(total, shown, scope, page)
+	);
 </script>
 
 {#if state === 'present' && total === 0}

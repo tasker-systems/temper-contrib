@@ -44,6 +44,31 @@ function clickOn(
 	anchor.href = anchorHref;
 	anchor.textContent = 'a link';
 	document.body.append(anchor);
+	return { event: dispatch(type, mods, anchor).event, anchor };
+}
+
+/** An SVG anchor with a text inside it — the shape a graph's drawn mark takes. */
+function svgClickOn(
+	anchorHref: string,
+	type: 'click' | 'auxclick' = 'click',
+	mods = {}
+): { event: MouseEvent; anchor: SVGAElement } {
+	const anchor = document.createElementNS('http://www.w3.org/2000/svg', 'a');
+	anchor.setAttribute('href', anchorHref);
+	const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+	text.textContent = 'a mark';
+	anchor.append(text);
+	document.body.append(anchor);
+	// The click lands on what was pointed at — the caption inside the anchor — and the shell
+	// walks `closest` from there, exactly as a pointer would.
+	return { event: dispatch(type, mods, text).event, anchor };
+}
+
+function dispatch(
+	type: 'click' | 'auxclick',
+	mods: Record<string, unknown>,
+	on: Element
+): { event: MouseEvent } {
 	const init: MouseEventInit = {
 		button: type === 'auxclick' ? 1 : 0,
 		bubbles: true,
@@ -52,8 +77,8 @@ function clickOn(
 	};
 	const event = new MouseEvent(type, init);
 	// jsdom does not set target from dispatchEvent's init; anchor.click() would navigate.
-	anchor.dispatchEvent(event);
-	return { event, anchor };
+	on.dispatchEvent(event);
+	return { event };
 }
 
 describe("the shell's link follower", () => {
@@ -148,5 +173,48 @@ describe("the shell's link follower", () => {
 			expect(invokes.some((i) => i.cmd === 'plugin:opener|open_url')).toBe(true)
 		);
 		expect(invokes.some((i) => i.cmd === 'temper_connection_status')).toBe(false);
+	});
+
+	it('follows a plain click on an in-app HTML anchor in place', () => {
+		const { model, opened } = fakeModel();
+		const uuid = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
+		// jsdom resolves an HTML anchor's `.href` against its own base, not the mock below, so the
+		// in-app address is named in full; the app's own origin is what a real document resolves to.
+		follow(clickOn(`http://tauri.localhost/r/${uuid}`).event, model);
+		expect(opened).toHaveLength(1);
+		expect((opened[0].subject as { kind: string; id: string }).kind).toBe('resource');
+		expect((opened[0].subject as { kind: string; id: string }).id).toBe(uuid);
+		expect(opened[0].where).toBe('here');
+	});
+
+	it('follows an SVG anchor in place on a plain click', () => {
+		const { model, opened } = fakeModel();
+		const uuid = '01a0f000-0000-7000-8000-00000000000a';
+		follow(svgClickOn(`/r/${uuid}`).event, model);
+		expect(opened).toHaveLength(1);
+		expect((opened[0].subject as { kind: string; id: string }).kind).toBe('resource');
+		expect((opened[0].subject as { kind: string; id: string }).id).toBe(uuid);
+		expect(opened[0].where).toBe('here');
+	});
+
+	it('a ⌘-click on an SVG anchor opens a new tab, and a middle click too', () => {
+		const { model, opened } = fakeModel();
+		const uuid = '01a0f000-0000-7000-8000-00000000000a';
+		follow(svgClickOn(`/r/${uuid}`, 'click', { metaKey: true }).event, model);
+		follow(svgClickOn(`/r/${uuid}`, 'auxclick').event, model);
+		expect(opened).toHaveLength(2);
+		expect(opened.every((o) => o.where === 'new')).toBe(true);
+	});
+
+	it('an SVG anchor to a foreign origin is left to the browser, the webview never navigating', async () => {
+		const { model, opened } = fakeModel();
+		follow(svgClickOn('https://example.com/article').event, model);
+		await vi.waitFor(() =>
+			expect(invokes.some((i) => i.cmd === 'plugin:opener|open_url')).toBe(true)
+		);
+		expect(invokes.find((i) => i.cmd === 'plugin:opener|open_url')?.args).toEqual({
+			url: 'https://example.com/article'
+		});
+		expect(opened).toHaveLength(0);
 	});
 });

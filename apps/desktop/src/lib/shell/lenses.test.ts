@@ -71,11 +71,11 @@ describe('resolving a lens', () => {
 		expect(resolveLens(resource, 'task', null, [core, workflows('unbuilt')])?.lens.id).toBe(
 			'core/document'
 		);
-		// ...a context opens on the bound table, not the unbuilt shape lens...
+		// ...and a context opens on the bound table by default, not the unbuilt shape lens...
 		const table = resolveLens(context, null, null, [core]);
 		expect(table?.lens.id).toBe('core/table');
 		expect(table?.lens.build.state).toBe('bound');
-		// ...and a neighbourhood, which only the unbuilt graph lens accepts, opens on it.
+		// ...while the neighbourhood, which only the graph lens accepts, opens on it.
 		const graph = resolveLens(
 			{ kind: 'neighbourhood', id: resource.id as string, depth: 1 },
 			null,
@@ -83,7 +83,21 @@ describe('resolving a lens', () => {
 			[core]
 		);
 		expect(graph?.lens.id).toBe('core/graph');
-		expect(graph?.lens.build.state).toBe('unbuilt');
+		expect(graph?.lens.build.state).toBe('bound');
+	});
+
+	it('the graph lens takes a neighbourhood, a resource, or a query that names a context', () => {
+		const asked = (subject: Subject) =>
+			resolveLens(subject, null, 'core/graph', [core])?.lens.id ?? null;
+		expect(asked({ kind: 'neighbourhood', id: resource.id as string, depth: 1 })).toBe(
+			'core/graph'
+		);
+		expect(asked(resource)).toBe('core/graph');
+		expect(asked(context)).toBe('core/graph');
+		// A query that names no context is not the graph lens's to show — the table stays.
+		const docTypeOnly = resolveLens({ kind: 'query', docType: 'task' }, null, 'core/graph', [core]);
+		expect(docTypeOnly?.lens.id).toBe('core/table');
+		expect(docTypeOnly?.reason).toBe('default');
 	});
 });
 
@@ -93,7 +107,12 @@ describe('the lens switcher', () => {
 			'core/document',
 			'core/graph'
 		]);
-		expect(lensesFor(context, null, [core]).map((l) => l.id)).toEqual(['core/table', 'core/shape']);
+		// A context is seen through the table by default, and the switcher offers the graph too.
+		expect(lensesFor(context, null, [core]).map((l) => l.id)).toEqual([
+			'core/table',
+			'core/graph',
+			'core/shape'
+		]);
 	});
 
 	it('never offers a place lens — a place has one way of being seen', () => {

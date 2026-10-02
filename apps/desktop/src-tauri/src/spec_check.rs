@@ -330,6 +330,67 @@ fn declared_errors(spec: &Value) -> Vec<String> {
                         ));
                     }
                 }
+            } else if let Some(path) = check.get("drawn").and_then(Value::as_str) {
+                if prop("state").and_then(Value::as_str) != Some("present") {
+                    continue;
+                }
+                let array = |name: &str| {
+                    check
+                        .get(name)
+                        .and_then(Value::as_str)
+                        .and_then(prop)
+                        .and_then(Value::as_array)
+                };
+                let cut = check
+                    .get("cut")
+                    .and_then(Value::as_str)
+                    .and_then(prop)
+                    .filter(|p| p.is_object());
+                match cut {
+                    None => {
+                        let Some(bounds) = prop(path).filter(|p| p.is_object()) else {
+                            continue;
+                        };
+                        let (Some(drawn), Some(nodes)) =
+                            (bounds.get("drawn").and_then(Value::as_f64), array("nodes"))
+                        else {
+                            continue;
+                        };
+                        if drawn != nodes.len() as f64 {
+                            errors.push(format!(
+                                "elements/{key}: says it draws {drawn} but carries {} nodes",
+                                nodes.len()
+                            ));
+                        }
+                    }
+                    Some(cut) => {
+                        let at = |field: &str| {
+                            check.get(field).and_then(Value::as_f64).unwrap_or(f64::NAN)
+                        };
+                        if cut.get("nodes").is_some() {
+                            if let Some(nodes) =
+                                array("nodes").filter(|n| n.len() as f64 != at("nodesAt"))
+                            {
+                                errors.push(format!(
+                                    "elements/{key}: cut draws {} of {} nodes",
+                                    nodes.len(),
+                                    at("nodesAt")
+                                ));
+                            }
+                        }
+                        if cut.get("edges").is_some() {
+                            if let Some(edges) =
+                                array("edges").filter(|e| e.len() as f64 != at("edgesAt"))
+                            {
+                                errors.push(format!(
+                                    "elements/{key}: cut draws {} of {} edges",
+                                    edges.len(),
+                                    at("edgesAt")
+                                ));
+                            }
+                        }
+                    }
+                }
             } else if let Some(types) = check.get("children").and_then(Value::as_array) {
                 let bound = |field: &str| check.get(field).and_then(Value::as_u64).unwrap_or(0);
                 let (min, max) = (bound("min"), bound("max"));

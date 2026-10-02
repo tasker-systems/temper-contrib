@@ -132,6 +132,36 @@ function boundTable(args?: Record<string, unknown>) {
 	return { spec, refs: [] };
 }
 
+/** What the core answers a bound graph with: the lens's spec, its element filled — a small walk. */
+function boundGraph(args?: Record<string, unknown>) {
+	const spec = structuredClone(args?.spec) as {
+		elements: Record<string, { props: Record<string, unknown> }>;
+	};
+	const binding = args?.binding as { element: string };
+	const props = {
+		total: 2,
+		scope: `reached from ${A} within 1 hops`,
+		label: 'neighbourhood',
+		state: 'present',
+		nodes: [
+			{ id: A, label: 'Build the document room', ref: A },
+			{ id: B, label: 'The desktop hub', ref: B }
+		],
+		edges: [
+			{
+				source: A,
+				target: B,
+				label: 'advances',
+				edgeKind: 'leads_to',
+				polarity: 'forward',
+				weight: 0.5
+			}
+		]
+	};
+	spec.elements[binding.element].props = props;
+	return { spec, refs: [] };
+}
+
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
@@ -164,7 +194,11 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 				failNextResolve = false;
 				return Promise.reject('temper did not answer');
 			}
-			return Promise.resolve(boundTable(args));
+			return Promise.resolve(
+				(args?.binding as { read?: string } | undefined)?.read === 'graph'
+					? boundGraph(args)
+					: boundTable(args)
+			);
 		case 'doc_connections':
 			return Promise.resolve({ state: 'present', data: { total: 0, edges: [] } });
 		case 'temper_resolve_refs':
@@ -412,19 +446,6 @@ describe('the shell', () => {
 		).toBe('true');
 	});
 
-	it('a lens that isn’t built yet is named, not guessed', async () => {
-		const { container } = render(Shell);
-		tabs.open({ kind: 'neighbourhood', id: A, depth: 1 }, { where: 'new' });
-		await waitFor(() =>
-			expect(activeBody(container)?.textContent).toContain(
-				'The graph lens isn’t built yet — it lands with the graph lens port.'
-			)
-		);
-		expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain(
-			'neighbourhood'
-		);
-	});
-
 	it('a context opens on the bound table, filled by the core, and pages and sorts through it', async () => {
 		const { container } = render(Shell);
 		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
@@ -494,7 +515,7 @@ describe('the shell', () => {
 		await waitFor(() => expect(activeBody(container)?.querySelector('h1')).toBeTruthy());
 		seen.push([reach(), reach()?.textContent ?? undefined]);
 		tabs.setLens(tabs.activeId, 'core/graph');
-		await waitFor(() => expect(activeBody(container)?.textContent).toContain('graph lens'));
+		await waitFor(() => expect(activeBody(container)?.querySelector('svg')).toBeTruthy());
 		seen.push([reach(), reach()?.textContent ?? undefined]);
 
 		expect(seen[0][0]).not.toBeNull();
@@ -512,9 +533,13 @@ describe('the shell', () => {
 		const strip = container.querySelector('nav[aria-label="This room"]') as HTMLElement;
 		expect(strip.textContent).toContain('through the lens of');
 
+		// The graph lens is bound: the switch lands on its read, the document never re-opened.
 		await fireEvent.click(button(strip, 'graph'));
-		await waitFor(() => expect(activeBody(container)?.textContent).toContain('graph lens'));
-		await fireEvent.click(button(activeBody(container), 'document · core'));
+		await waitFor(() => expect(activeBody(container)?.querySelector('svg')).toBeTruthy());
+		const graphReads = () => reads('lens_resolve').length;
+		const readsAtGraph = graphReads();
+		expect(readsAtGraph).toBeGreaterThan(0);
+		await fireEvent.click(button(strip, 'document · core'));
 		await waitFor(() => expect(activeBody(container)?.querySelector('h1')).toBeTruthy());
 		expect(reads('doc_open')).toHaveLength(1);
 	});

@@ -52,11 +52,21 @@ export function follow(event: MouseEvent, model: TabModel): void {
 	if (event.type === 'click' && event.button !== 0) return;
 	if (event.type === 'auxclick' && event.button !== 1) return;
 	const anchor = (event.target as Element | null)?.closest?.('a[href]');
-	if (!(anchor instanceof HTMLAnchorElement)) return;
-	if (anchor.target && anchor.target !== '_self') return;
+	if (!anchor) return;
+	// An anchor in the SVG namespace is not an HTMLAnchorElement, and its href and target are
+	// SVGAnimatedString — the HTML reads misfire — so it is read as attributes, which say the
+	// same thing. Every other anchor is the HTML one, read as it always was.
+	const svg = anchor.namespaceURI === 'http://www.w3.org/2000/svg';
+	const target = svg ? anchor.getAttribute('target') : (anchor as HTMLAnchorElement).target;
+	if (target && target !== '_self') return;
 	if (anchor.hasAttribute('download')) return;
-	const url = new URL(anchor.href, window.location.href);
+	const href = svg ? anchor.getAttribute('href') : (anchor as HTMLAnchorElement).href;
+	if (!href) return;
+	const url = new URL(href, window.location.href);
 	if (url.origin !== window.location.origin) {
+		// Refused before anything awaits: the webview must never navigate, and a preventDefault
+		// that waits on the server read can lose that race.
+		event.preventDefault();
 		void followExternal(event, url, model);
 		return;
 	}
