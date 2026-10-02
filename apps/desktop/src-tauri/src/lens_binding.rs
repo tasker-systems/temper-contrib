@@ -5,19 +5,28 @@
 //! between the read and the view. The filled spec passes the core's own check
 //! before it leaves, and the webview's gate again before it renders.
 //!
-//! One read is bound so far: `resource-list`, temper's resource listing,
-//! which fills a Table.
+//! Two reads are bound: `resource-list`, temper's resource listing, which
+//! fills a Table; and `graph`, temper's graph reads — a walk from one
+//! resource, or an entry read anchored at a context — which fill a Graph.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use temper_client::TemperClient;
+use temper_core::types::graph::{EdgeKind, Polarity};
+use temper_core::types::graph_atlas::{
+    clamp_traversal_depth, AtlasEdge, AtlasEntry, AtlasNode, AtlasSubgraph, NodeHome,
+};
 use temper_workflow::types::resource::{
     ResourceListParams, ResourceListResponse, ResourceSortField, SortOrder,
 };
+use uuid::Uuid;
 
+use crate::present_server::CATALOG_JSON;
 use crate::spec_check::check_spec;
-use crate::temper::{RefResolution, TemperState};
+use crate::temper::{parse_ref, RefResolution, TemperState};
 
 /// Which element of the lens's spec a read fills, and which read.
 #[derive(Debug, Deserialize)]
@@ -33,6 +42,20 @@ pub struct ListingSubject {
     pub context: Option<String>,
     pub doc_type: Option<String>,
     pub text: Option<String>,
+}
+
+/// What the lens is bound to, as the webview holds it: a query's narrowing,
+/// or the neighbourhood a graph read walks from.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum LensSubject {
+    #[serde(rename_all = "camelCase")]
+    Query {
+        #[serde(flatten)]
+        listing: ListingSubject,
+    },
+    #[serde(rename_all = "camelCase")]
+    Neighbourhood { id: String, depth: i32 },
 }
 
 /// Where the reader is in the listing: the page, and the order asked for.
@@ -74,6 +97,17 @@ const LABEL_MAX: usize = 60;
 /// How many of a page's fields are weighed for its columns, most often present
 /// first; the rest are counted as not shown without being read.
 const FIELD_CANDIDATES_MAX: usize = 32;
+/// A graph node's own words, cut to the catalog's maxima: the label a node is
+/// carried by, the excerpt beside it, the stage and home and edge label.
+const NODE_LABEL_MAX: usize = 120;
+const EXCERPT_MAX: usize = 200;
+const STAGE_MAX: usize = 20;
+const HOME_MAX: usize = 120;
+const KIND_MAX: usize = 40;
+const EDGE_LABEL_MAX: usize = 40;
+/// The draw an entry read applies when asked with none — the server's default,
+/// stated in the arm as the k actually applied.
+const ENTRY_K: i64 = 130;
 
 /// The listing's sortable columns, and the field temper orders each by.
 fn sort_field(key: &str) -> Option<ResourceSortField> {
@@ -519,6 +553,366 @@ pub fn table_props(
     serde_json::to_value(props).expect("table props serialize")
 }
 
+/// The Graph's bounds and doc-type tints, read from the same bundled catalog
+/// file the checks read: the numbers a view is held to are the catalog's,
+/// never restated, and a tint is only ever a role the catalog names.
+struct GraphCatalog {
+    nodes_max: usize,
+    edges_max: usize,
+    tints: HashSet<String>,
+}
+
+fn graph_catalog() -> &'static GraphCatalog {
+    static CATALOG: OnceLock<GraphCatalog> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        let catalog: Value =
+            serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
+        let graph = &catalog["components"]["Graph"]["props"]["properties"];
+        let tints = graph["nodes"]["items"]["properties"]["tint"]["enum"]
+            .as_array()
+            .expect("the catalog names the graph's tints")
+            .iter()
+            .map(|t| t.as_str().expect("a tint is a word").to_string())
+            .collect();
+        GraphCatalog {
+            nodes_max: graph["nodes"]["maxItems"]
+                .as_u64()
+                .expect("the catalog bounds the graph's nodes") as usize,
+            edges_max: graph["edges"]["maxItems"]
+                .as_u64()
+                .expect("the catalog bounds the graph's edges") as usize,
+            tints,
+        }
+    })
+}
+
+/// A graph read and what it was asked at — what `graph_props` fills from. The
+/// homes map is the one contexts read a resolve makes, passed in, so the props
+/// stay a function of the answer and the arm alone.
+enum GraphRead {
+    Walk {
+        seed: String,
+        depth: i32,
+        answer: AtlasSubgraph,
+    },
+    Entry {
+        context: String,
+        anchor: Uuid,
+        answer: AtlasEntry,
+    },
+}
+
+impl GraphRead {
+    /// How many nodes the answer stood for, before any cut.
+    fn answer_nodes_len(&self) -> usize {
+        match self {
+            GraphRead::Walk { answer, .. } => answer.nodes.len(),
+            GraphRead::Entry { answer, .. } => answer.nodes.len(),
+        }
+    }
+}
+
+/// The graph read a subject asks for: a neighbourhood walks from its resource,
+/// a query naming a context takes the entry read at that context. The walk's
+/// depth clamps through the traversal's own clamp — never restated here.
+async fn graph_read(
+    client: &TemperClient,
+    subject: LensSubject,
+    homes: &HashMap<Uuid, String>,
+) -> Result<GraphRead, String> {
+    match subject {
+        LensSubject::Query { listing } => {
+            let context = given(&listing.context)
+                .ok_or_else(|| "a graph read needs a context to enter".to_string())?;
+            let anchor = context_anchor(&context, homes)?;
+            let answer = client
+                .graph()
+                .entry(&[anchor], None)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(GraphRead::Entry {
+                context,
+                anchor,
+                answer,
+            })
+        }
+        LensSubject::Neighbourhood { id, depth } => {
+            let seed = parse_ref(&id).ok_or_else(|| format!("{id} does not name a resource"))?;
+            let depth = clamp_traversal_depth(depth);
+            let answer = client
+                .graph()
+                .traverse(&[seed], Some(depth))
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(GraphRead::Walk {
+                seed: seed.to_string(),
+                depth,
+                answer,
+            })
+        }
+    }
+}
+
+/// The context a ref names, from the words the one contexts read built —
+/// `{owner_ref}/{slug}` per row. A ref no row names is refused rather than
+/// walked without an anchor.
+fn context_anchor(named: &str, homes: &HashMap<Uuid, String>) -> Result<Uuid, String> {
+    homes
+        .iter()
+        .find(|(_, words)| words.as_str() == named)
+        .map(|(id, _)| *id)
+        .ok_or_else(|| format!("no context named {named} can be read"))
+}
+
+/// What the catalog's bounds clipped off the answer, each count said only
+/// when some were.
+#[derive(Debug, Serialize)]
+struct Cut {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    nodes: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    edges: Option<i64>,
+}
+
+/// What an entry read says it drew, verbatim.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Bounds {
+    drawn: i32,
+    eligible: i32,
+    in_scope: i32,
+    truncated: bool,
+}
+
+/// Where the view was read from.
+#[derive(Debug, Serialize)]
+#[serde(tag = "read", rename_all = "kebab-case")]
+enum Arm {
+    Walk { from: Vec<String>, depth: i32 },
+    Entry { r#in: Vec<String>, k: i64 },
+}
+
+/// One drawn node, as the catalog declares it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphNodeProps {
+    id: String,
+    label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tint: Option<String>,
+    r#ref: String,
+    corpus_degree: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    excerpt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    home: Option<String>,
+    home_kind: &'static str,
+}
+
+/// One drawn edge, as the catalog declares it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphEdgeProps {
+    source: String,
+    target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    label: Option<String>,
+    edge_kind: EdgeKind,
+    polarity: Polarity,
+    weight: f64,
+}
+
+/// A Graph's props, as the catalog declares them.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphProps {
+    total: i64,
+    scope: String,
+    label: &'static str,
+    state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    arm: Option<Arm>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bounds: Option<Bounds>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cut: Option<Cut>,
+    nodes: Vec<GraphNodeProps>,
+    edges: Vec<GraphEdgeProps>,
+}
+
+/// The answer cut to the catalog's bounds: the first nodes in answer order,
+/// then the edges among kept nodes, first edges — and what fell off, each
+/// count only when some did.
+fn cut_to_bounds(
+    nodes: &[AtlasNode],
+    edges: &[AtlasEdge],
+) -> (Vec<AtlasNode>, Vec<AtlasEdge>, Option<Cut>) {
+    let cat = graph_catalog();
+    let kept: Vec<AtlasNode> = nodes.iter().take(cat.nodes_max).cloned().collect();
+    let nodes_cut = nodes.len().saturating_sub(kept.len());
+    let kept_ids: HashSet<Uuid> = kept.iter().map(|n| n.id).collect();
+    let among: Vec<&AtlasEdge> = edges
+        .iter()
+        .filter(|e| kept_ids.contains(&e.source) && kept_ids.contains(&e.target))
+        .collect();
+    let drawn: Vec<AtlasEdge> = among
+        .iter()
+        .take(cat.edges_max)
+        .map(|e| (*e).clone())
+        .collect();
+    let edges_cut = among.len().saturating_sub(drawn.len());
+    let cut = (nodes_cut > 0 || edges_cut > 0).then(|| Cut {
+        nodes: (nodes_cut > 0).then_some(nodes_cut as i64),
+        edges: (edges_cut > 0).then_some(edges_cut as i64),
+    });
+    (kept, drawn, cut)
+}
+
+/// One node's props: the answer's own words, clipped to the catalog's maxima.
+/// The bare id names the node and is its ref; the home is the anchor's words
+/// when the one contexts read names it, else the anchor's bare id — a
+/// cogmap-homed node always falls back, the contexts read cannot name one.
+fn graph_node(node: &AtlasNode, homes: &HashMap<Uuid, String>) -> GraphNodeProps {
+    let tint = node
+        .doc_type
+        .as_deref()
+        .filter(|t| graph_catalog().tints.contains(&format!("doctype-{t}")))
+        .map(|t| format!("doctype-{t}"));
+    GraphNodeProps {
+        id: node.id.to_string(),
+        label: clip(&node.title, NODE_LABEL_MAX),
+        kind: node.doc_type.as_deref().map(|t| clip(t, KIND_MAX)),
+        tint,
+        r#ref: node.id.to_string(),
+        corpus_degree: node.degree,
+        excerpt: node.excerpt.as_deref().map(|e| clip(e, EXCERPT_MAX)),
+        stage: node.stage.as_deref().map(|s| clip(s, STAGE_MAX)),
+        updated: node
+            .updated
+            .map(|u| u.format("%Y-%m-%dT%H:%MZ").to_string()),
+        home: node.home_id.map(|id| {
+            let words = homes.get(&id).cloned().unwrap_or_else(|| id.to_string());
+            clip(&words, HOME_MAX)
+        }),
+        home_kind: match node.home {
+            NodeHome::Context => "context",
+            NodeHome::Cogmap => "cogmap",
+        },
+    }
+}
+
+fn graph_edge(edge: &AtlasEdge) -> GraphEdgeProps {
+    GraphEdgeProps {
+        source: edge.source.to_string(),
+        target: edge.target.to_string(),
+        label: edge.label.as_deref().map(|l| clip(l, EDGE_LABEL_MAX)),
+        edge_kind: edge.edge_kind,
+        polarity: edge.polarity,
+        weight: edge.weight,
+    }
+}
+
+/// A Graph's props from a graph read's answer — a function of the answer, the
+/// read it answers and the one contexts read, nothing else.
+///
+/// The nodes and edges are the answer's, cut to the catalog's bounds when the
+/// answer exceeds them. A walk says where it went and how deep; it carries no
+/// bounds — deeper was not reported, and there is no denominator. An entry
+/// read carries the bounds it was given. An answer that drew nothing names
+/// nothing it does not draw: no arm, no cut.
+fn graph_props(read: &GraphRead, homes: &HashMap<Uuid, String>) -> Value {
+    let total = read.answer_nodes_len();
+    let (scope, nodes, edges, cut, arm, bounds) = match read {
+        GraphRead::Walk {
+            seed,
+            depth,
+            answer,
+        } => {
+            let (nodes, edges, cut) = cut_to_bounds(&answer.nodes, &answer.edges);
+            let arm = (!answer.nodes.is_empty()).then(|| Arm::Walk {
+                from: vec![seed.clone()],
+                depth: *depth,
+            });
+            (
+                format!("reached from {seed} within {depth} hops"),
+                nodes,
+                edges,
+                cut,
+                arm,
+                None,
+            )
+        }
+        GraphRead::Entry {
+            context,
+            anchor,
+            answer,
+        } => {
+            let (nodes, edges, cut) = cut_to_bounds(&answer.nodes, &answer.edges);
+            let arm = (!answer.nodes.is_empty()).then(|| Arm::Entry {
+                r#in: vec![anchor.to_string()],
+                k: ENTRY_K,
+            });
+            (
+                format!("the most-connected in {context}"),
+                nodes,
+                edges,
+                cut,
+                arm,
+                Some(Bounds {
+                    drawn: answer.bounds.drawn,
+                    eligible: answer.bounds.eligible,
+                    in_scope: answer.bounds.in_scope,
+                    truncated: answer.bounds.truncated,
+                }),
+            )
+        }
+    };
+    let props = GraphProps {
+        total: total as i64,
+        scope: clip(&scope, SCOPE_MAX),
+        label: "neighbourhood",
+        state: if total > 0 { "present" } else { "empty" },
+        arm,
+        bounds,
+        cut,
+        nodes: nodes.iter().map(|n| graph_node(n, homes)).collect(),
+        edges: edges.iter().map(graph_edge).collect(),
+    };
+    serde_json::to_value(props).expect("graph props serialize")
+}
+
+/// What the read said each drawn node is, in the shape a reference resolves
+/// to: the nodes are drawn with bare ids, and the read already answered for
+/// them, so the webview resolves them from this answer rather than reading
+/// each again. A node without a doc type fills the empty string, never a
+/// guessed type name.
+fn node_resolutions(read: &GraphRead, homes: &HashMap<Uuid, String>) -> Vec<RefResolution> {
+    let (answer_nodes, answer_edges) = match read {
+        GraphRead::Walk { answer, .. } => (&answer.nodes, &answer.edges),
+        GraphRead::Entry { answer, .. } => (&answer.nodes, &answer.edges),
+    };
+    let (nodes, _, _) = cut_to_bounds(answer_nodes, answer_edges);
+    nodes
+        .iter()
+        .map(|n| RefResolution::Resolved {
+            id: n.id.to_string(),
+            title: n.title.clone(),
+            doc_type: n.doc_type.clone().unwrap_or_default(),
+            context_ref: (n.home == NodeHome::Context)
+                .then_some(n.home_id)
+                .flatten()
+                .and_then(|id| homes.get(&id).cloned()),
+            decorated_ref: n.id.to_string(),
+        })
+        .collect()
+}
+
 /// Whether the binding names a Table in the spec — asked before any read, so
 /// a binding that cannot be filled costs nothing.
 fn bound_table(spec: &Value, binding: &Binding) -> Result<(), String> {
@@ -535,9 +929,29 @@ fn bound_table(spec: &Value, binding: &Binding) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the binding names a Graph in the spec — asked before any read, so
+/// a binding that cannot be filled costs nothing.
+fn bound_graph(spec: &Value, binding: &Binding) -> Result<(), String> {
+    let element = spec
+        .get("elements")
+        .and_then(|e| e.get(&binding.element))
+        .ok_or_else(|| format!("the lens's spec has no element {}", binding.element))?;
+    if element.get("type").and_then(Value::as_str) != Some("Graph") {
+        return Err(format!(
+            "a {} read fills a Graph, and {} is not one",
+            binding.read, binding.element
+        ));
+    }
+    Ok(())
+}
+
 /// The lens's spec with its bound element filled from the answer, checked.
 pub fn fill(spec: &Value, binding: &Binding, props: Value) -> Result<Value, String> {
-    bound_table(spec, binding)?;
+    match binding.read.as_str() {
+        "resource-list" => bound_table(spec, binding)?,
+        "graph" => bound_graph(spec, binding)?,
+        _ => return Err(format!("no read named {} can be bound", binding.read)),
+    }
     let mut spec = spec.clone();
     spec["elements"][&binding.element]["props"] = props;
     check_spec(&spec)
@@ -584,42 +998,66 @@ pub async fn lens_resolve(
     state: tauri::State<'_, TemperState>,
     spec: Value,
     binding: Binding,
-    subject: ListingSubject,
+    subject: LensSubject,
     view: ViewState,
 ) -> Result<Resolved, String> {
-    if binding.read != "resource-list" {
-        return Err(format!("no read named {} can be bound", binding.read));
-    }
-    bound_table(&spec, &binding)?;
-    let mut params = listing_params(&subject, &view)?;
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
-    let mut answer = client
-        .resources()
-        .list_meta(&params)
-        .await
-        .map_err(|e| e.to_string())?;
-    // The listing shrank since the page was asked for, and it now starts past the end:
-    // show its last page rather than a page that says it holds rows it does not.
-    if let Some(last) = last_page_offset(&answer) {
-        params.offset = Some(last);
-        answer = client
-            .resources()
-            .list_meta(&params)
-            .await
-            .map_err(|e| e.to_string())?;
+    match binding.read.as_str() {
+        "resource-list" => {
+            bound_table(&spec, &binding)?;
+            let listing = match subject {
+                LensSubject::Query { listing } => listing,
+                LensSubject::Neighbourhood { .. } => {
+                    return Err("a listing is of a query, not a neighbourhood".to_string())
+                }
+            };
+            let mut params = listing_params(&listing, &view)?;
+            let mut answer = client
+                .resources()
+                .list_meta(&params)
+                .await
+                .map_err(|e| e.to_string())?;
+            // The listing shrank since the page was asked for, and it now starts past the end:
+            // show its last page rather than a page that says it holds rows it does not.
+            if let Some(last) = last_page_offset(&answer) {
+                params.offset = Some(last);
+                answer = client
+                    .resources()
+                    .list_meta(&params)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(Resolved {
+                spec: fill(&spec, &binding, table_props(&answer, &listing, &view))?,
+                refs: row_resolutions(&answer),
+            })
+        }
+        "graph" => {
+            bound_graph(&spec, &binding)?;
+            // One contexts read per resolve: it names the entry read's anchor
+            // and every home the answer's nodes are homed in.
+            let contexts = client.contexts().list().await.map_err(|e| e.to_string())?;
+            let homes: HashMap<Uuid, String> = contexts
+                .into_iter()
+                .map(|c| (c.id.0, format!("{}/{}", c.owner_ref, c.slug)))
+                .collect();
+            let read = graph_read(client, subject, &homes).await?;
+            Ok(Resolved {
+                spec: fill(&spec, &binding, graph_props(&read, &homes))?,
+                refs: node_resolutions(&read, &homes),
+            })
+        }
+        other => Err(format!("no read named {other} can be bound")),
     }
-    Ok(Resolved {
-        spec: fill(&spec, &binding, table_props(&answer, &subject, &view))?,
-        refs: row_resolutions(&answer),
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+    use temper_core::types::graph_atlas::EntryBounds;
 
     fn row(n: u32, doc_type: &str, meta: Value, managed: Value) -> Value {
         json!({
@@ -962,6 +1400,550 @@ mod tests {
         assert_eq!(tags.len(), 12);
         assert_eq!(tags[11], "+9 more");
         fill(&spec(), &binding(), props).expect("passes");
+    }
+
+    // ── graph ──
+
+    fn graph_spec() -> Value {
+        json!({ "root": "graph", "elements": { "graph": { "type": "Graph", "props": {}, "children": [] } } })
+    }
+
+    fn graph_binding() -> Binding {
+        Binding {
+            element: "graph".into(),
+            read: "graph".into(),
+        }
+    }
+
+    fn atlas_node(n: u32, title: &str, doc_type: Option<&str>) -> AtlasNode {
+        AtlasNode {
+            id: uuid::Uuid::from_u128(n as u128),
+            title: title.to_string(),
+            doc_type: doc_type.map(str::to_string),
+            home: NodeHome::Context,
+            degree: 3,
+            salience: None,
+            excerpt: None,
+            stage: None,
+            home_id: None,
+            updated: None,
+        }
+    }
+
+    fn atlas_edge(n: u32, source: u32, target: u32, label: Option<&str>, weight: f64) -> AtlasEdge {
+        AtlasEdge {
+            id: uuid::Uuid::from_u128(9_000 + n as u128),
+            source: uuid::Uuid::from_u128(source as u128),
+            target: uuid::Uuid::from_u128(target as u128),
+            edge_kind: EdgeKind::LeadsTo,
+            polarity: Polarity::Forward,
+            label: label.map(str::to_string),
+            weight,
+        }
+    }
+
+    fn walk_answer(nodes: Vec<AtlasNode>, edges: Vec<AtlasEdge>) -> AtlasSubgraph {
+        AtlasSubgraph { nodes, edges }
+    }
+
+    fn entry_answer(
+        nodes: Vec<AtlasNode>,
+        edges: Vec<AtlasEdge>,
+        drawn: i32,
+        eligible: i32,
+        in_scope: i32,
+        truncated: bool,
+    ) -> AtlasEntry {
+        AtlasEntry {
+            nodes,
+            edges,
+            bounds: EntryBounds {
+                drawn,
+                eligible,
+                in_scope,
+                truncated,
+            },
+        }
+    }
+
+    fn homes() -> HashMap<Uuid, String> {
+        HashMap::from([(
+            uuid::Uuid::from_u128(500),
+            "+temper-dev/contrib".to_string(),
+        )])
+    }
+
+    fn walk_from(seed: &str, depth: i32, answer: AtlasSubgraph) -> GraphRead {
+        GraphRead::Walk {
+            seed: seed.to_string(),
+            depth,
+            answer,
+        }
+    }
+
+    #[test]
+    fn the_same_answer_always_yields_the_same_graph_props() {
+        let a = walk_answer(
+            vec![
+                atlas_node(1, "Seed", Some("task")),
+                atlas_node(2, "Next", None),
+            ],
+            vec![atlas_edge(1, 1, 2, Some("then"), 0.5)],
+        );
+        let read = walk_from(&uuid::Uuid::from_u128(1).to_string(), 2, a);
+        assert_eq!(graph_props(&read, &homes()), graph_props(&read, &homes()));
+    }
+
+    #[test]
+    fn a_walk_names_its_seed_and_depth_and_carries_no_bounds() {
+        let a = walk_answer(
+            vec![
+                atlas_node(1, "Seed", Some("task")),
+                atlas_node(2, "Next", None),
+            ],
+            vec![atlas_edge(1, 1, 2, Some("then"), 0.5)],
+        );
+        let seed = uuid::Uuid::from_u128(1).to_string();
+        let read = walk_from(&seed, 3, a);
+        let props = graph_props(&read, &homes());
+        assert_eq!(props["total"], 2);
+        assert_eq!(props["state"], "present");
+        assert_eq!(props["label"], "neighbourhood");
+        assert_eq!(props["scope"], format!("reached from {seed} within 3 hops"));
+        assert_eq!(
+            props["arm"],
+            json!({ "read": "walk", "from": [seed], "depth": 3 })
+        );
+        assert!(props.get("bounds").is_none());
+        assert!(props.get("cut").is_none());
+        assert_eq!(props["nodes"][0]["kind"], "task");
+        assert_eq!(props["nodes"][0]["tint"], "doctype-task");
+        assert_eq!(props["nodes"][1]["tint"], serde_json::Value::Null);
+        assert_eq!(props["nodes"][0]["ref"], seed);
+        assert_eq!(props["nodes"][0]["corpusDegree"], 3);
+        assert_eq!(props["nodes"][0]["homeKind"], "context");
+        // No home id, no home words: the anchor is named by kind alone.
+        assert!(props["nodes"][0].get("home").is_none());
+        assert_eq!(
+            props["edges"][0],
+            json!({
+                "source": uuid::Uuid::from_u128(1).to_string(),
+                "target": uuid::Uuid::from_u128(2).to_string(),
+                "label": "then",
+                "edgeKind": "leads_to",
+                "polarity": "forward",
+                "weight": 0.5
+            })
+        );
+        fill(&graph_spec(), &graph_binding(), props).expect("the walk passes the check");
+    }
+
+    #[test]
+    fn a_cut_lands_exactly_at_the_catalogs_bounds_and_says_what_fell_off() {
+        let nodes: Vec<AtlasNode> = (1..=250)
+            .map(|n| atlas_node(n, &format!("Node {n}"), Some("task")))
+            .collect();
+        // 700 edges among the first 200 nodes, plus 10 whose far end fell off
+        // with the node cut: the drawn edges may only reach kept nodes.
+        let mut edges: Vec<AtlasEdge> = (0..700)
+            .map(|i| {
+                atlas_edge(
+                    i as u32,
+                    (i % 200 + 1) as u32,
+                    ((i + 1) % 200 + 1) as u32,
+                    None,
+                    1.0,
+                )
+            })
+            .collect();
+        edges.extend((0..10).map(|i| atlas_edge(700 + i, 1, 201 + i, None, 1.0)));
+        let seed = uuid::Uuid::from_u128(1).to_string();
+        let read = walk_from(&seed, 1, walk_answer(nodes, edges));
+        let props = graph_props(&read, &homes());
+        assert_eq!(props["total"], 250);
+        assert_eq!(props["nodes"].as_array().unwrap().len(), 200);
+        assert_eq!(props["edges"].as_array().unwrap().len(), 600);
+        assert_eq!(props["cut"], json!({ "nodes": 50, "edges": 100 }));
+        let drawn_ids: HashSet<String> = props["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["id"].as_str().unwrap().to_string())
+            .collect();
+        for e in props["edges"].as_array().unwrap() {
+            assert!(drawn_ids.contains(e["source"].as_str().unwrap()));
+            assert!(drawn_ids.contains(e["target"].as_str().unwrap()));
+        }
+        fill(&graph_spec(), &graph_binding(), props).expect("the cut view passes the check");
+    }
+
+    #[test]
+    fn a_cut_of_edges_alone_says_edges_alone() {
+        let nodes: Vec<AtlasNode> = (1..=10).map(|n| atlas_node(n, "N", None)).collect();
+        let edges: Vec<AtlasEdge> = (0..700)
+            .map(|i| {
+                atlas_edge(
+                    i as u32,
+                    (i % 10 + 1) as u32,
+                    ((i + 1) % 10 + 1) as u32,
+                    None,
+                    1.0,
+                )
+            })
+            .collect();
+        let seed = uuid::Uuid::from_u128(1).to_string();
+        let read = walk_from(&seed, 1, walk_answer(nodes, edges));
+        let props = graph_props(&read, &homes());
+        assert_eq!(props["nodes"].as_array().unwrap().len(), 10);
+        assert_eq!(props["edges"].as_array().unwrap().len(), 600);
+        assert_eq!(props["cut"], json!({ "edges": 100 }));
+        fill(&graph_spec(), &graph_binding(), props).expect("passes");
+    }
+
+    #[test]
+    fn an_entry_read_carries_the_bounds_it_was_given_and_the_k_applied() {
+        let a = entry_answer(
+            vec![
+                atlas_node(1, "Top", Some("goal")),
+                atlas_node(2, "Next", None),
+            ],
+            vec![atlas_edge(1, 1, 2, None, 0.25)],
+            2,
+            5,
+            9,
+            true,
+        );
+        let anchor = uuid::Uuid::from_u128(777);
+        let read = GraphRead::Entry {
+            context: "+temper-dev/contrib".into(),
+            anchor,
+            answer: a,
+        };
+        let props = graph_props(&read, &homes());
+        assert_eq!(
+            props["bounds"],
+            json!({ "drawn": 2, "eligible": 5, "inScope": 9, "truncated": true })
+        );
+        assert_eq!(props["scope"], "the most-connected in +temper-dev/contrib");
+        assert_eq!(
+            props["arm"],
+            json!({ "read": "entry", "in": [anchor.to_string()], "k": 130 })
+        );
+        assert!(props.get("cut").is_none());
+    }
+
+    #[test]
+    fn an_empty_walk_says_so_and_names_nothing_it_does_not_draw() {
+        let read = walk_from(
+            &uuid::Uuid::from_u128(1).to_string(),
+            2,
+            walk_answer(vec![], vec![]),
+        );
+        let props = graph_props(&read, &homes());
+        assert_eq!(props["total"], 0);
+        assert_eq!(props["state"], "empty");
+        assert!(props.get("arm").is_none());
+        assert!(props.get("cut").is_none());
+        assert_eq!(props["nodes"].as_array().unwrap().len(), 0);
+        fill(&graph_spec(), &graph_binding(), props).expect("the empty view passes the check");
+    }
+
+    #[test]
+    fn odd_answer_data_never_refuses_the_graphs_own_view() {
+        let long = "x".repeat(300);
+        let mut n = atlas_node(1, &long, Some(&"t".repeat(90)));
+        n.excerpt = Some(long.clone());
+        n.stage = Some("s".repeat(90));
+        n.home = NodeHome::Cogmap;
+        n.home_id = Some(uuid::Uuid::from_u128(999));
+        n.degree = 0;
+        let a = walk_answer(vec![n], vec![]);
+        let seed = uuid::Uuid::from_u128(1).to_string();
+        let props = graph_props(&walk_from(&seed, 1, a), &homes());
+        let node = &props["nodes"][0];
+        assert_eq!(node["label"].as_str().unwrap().chars().count(), 120);
+        assert!(node["label"].as_str().unwrap().ends_with('…'));
+        // A type the catalog does not tint is said as kind and carries no tint.
+        assert_eq!(node["kind"].as_str().unwrap().chars().count(), 40);
+        assert!(node.get("tint").is_none() || node["tint"].is_null());
+        assert_eq!(node["stage"].as_str().unwrap().chars().count(), 20);
+        // A home no context names falls back to the anchor's bare id.
+        assert_eq!(node["home"], uuid::Uuid::from_u128(999).to_string());
+        assert_eq!(node["homeKind"], "cogmap");
+        fill(&graph_spec(), &graph_binding(), props).expect("odd data still passes");
+    }
+
+    #[test]
+    fn an_out_of_range_weight_is_refused_not_clamped() {
+        let a = walk_answer(
+            vec![atlas_node(1, "Seed", None), atlas_node(2, "Next", None)],
+            vec![atlas_edge(1, 1, 2, None, 7.5)],
+        );
+        let seed = uuid::Uuid::from_u128(1).to_string();
+        let props = graph_props(&walk_from(&seed, 1, a), &homes());
+        assert_eq!(props["edges"][0]["weight"], 7.5);
+        assert!(fill(&graph_spec(), &graph_binding(), props).is_err());
+    }
+
+    #[test]
+    fn the_graphs_nodes_prime_their_references() {
+        let mut context_homed = atlas_node(1, "Home", Some("task"));
+        context_homed.home_id = Some(uuid::Uuid::from_u128(500));
+        let mut cogmap_homed = atlas_node(2, "Away", None);
+        cogmap_homed.home = NodeHome::Cogmap;
+        cogmap_homed.home_id = Some(uuid::Uuid::from_u128(999));
+        let read = walk_from(
+            &uuid::Uuid::from_u128(1).to_string(),
+            1,
+            walk_answer(vec![context_homed, cogmap_homed], vec![]),
+        );
+        let refs = node_resolutions(&read, &homes());
+        assert_eq!(refs.len(), 2);
+        assert_eq!(
+            refs[0],
+            RefResolution::Resolved {
+                id: uuid::Uuid::from_u128(1).to_string(),
+                title: "Home".into(),
+                doc_type: "task".into(),
+                context_ref: Some("+temper-dev/contrib".into()),
+                decorated_ref: uuid::Uuid::from_u128(1).to_string(),
+            }
+        );
+        // A node without a doc type fills the empty string, never a guess; a
+        // cogmap home names no context.
+        assert!(
+            matches!(&refs[1], RefResolution::Resolved { doc_type, context_ref, .. }
+            if doc_type.is_empty() && context_ref.is_none())
+        );
+    }
+
+    #[test]
+    fn a_query_subject_naming_an_unknown_context_is_refused() {
+        let err = context_anchor("nope/nope", &homes()).unwrap_err();
+        assert!(err.contains("nope/nope"));
+        let anchor =
+            context_anchor("+temper-dev/contrib", &homes()).expect("the named context reads");
+        assert_eq!(anchor, uuid::Uuid::from_u128(500));
+    }
+
+    #[test]
+    fn a_graph_read_fills_only_a_graph_and_a_listing_only_a_table() {
+        let a = walk_answer(
+            vec![atlas_node(1, "Seed", None), atlas_node(2, "Next", None)],
+            vec![atlas_edge(1, 1, 2, None, 0.5)],
+        );
+        let props = graph_props(
+            &walk_from(&uuid::Uuid::from_u128(1).to_string(), 1, a),
+            &homes(),
+        );
+        fill(&graph_spec(), &graph_binding(), props.clone()).expect("the graph fills a Graph");
+        // A listing read fills a Table, and the graph element is not one.
+        let listing_on_graph = Binding {
+            element: "graph".into(),
+            read: "resource-list".into(),
+        };
+        let err = fill(&graph_spec(), &listing_on_graph, props).unwrap_err();
+        assert!(err.contains("a resource-list read fills a Table"));
+        let table = table_props(
+            &answer(tasks(1), 1, 0, 50),
+            &context_subject(),
+            &ViewState::default(),
+        );
+        let graph_on_table = Binding {
+            element: "table".into(),
+            read: "graph".into(),
+        };
+        let err = fill(&spec(), &graph_on_table, table).unwrap_err();
+        assert!(err.contains("a graph read fills a Graph"));
+        // No read at all by that name, refused before anything is filled.
+        let unknown = Binding {
+            element: "graph".into(),
+            read: "junk".into(),
+        };
+        let err = fill(&graph_spec(), &unknown, json!({})).unwrap_err();
+        assert!(err.contains("no read named junk can be bound"));
+    }
+
+    #[test]
+    fn the_subjects_the_webview_sends_deserialize_to_their_variants() {
+        let query: LensSubject = serde_json::from_value(json!({
+            "kind": "query", "context": "+temper-dev/contrib", "docType": "task"
+        }))
+        .expect("a query subject deserializes");
+        assert!(matches!(query, LensSubject::Query { ref listing }
+            if listing.context.as_deref() == Some("+temper-dev/contrib")
+                && listing.doc_type.as_deref() == Some("task")));
+        let walk: LensSubject = serde_json::from_value(json!({
+            "kind": "neighbourhood", "id": uuid::Uuid::from_u128(1).to_string(), "depth": 1
+        }))
+        .expect("a neighbourhood subject deserializes");
+        assert!(
+            matches!(walk, LensSubject::Neighbourhood { ref id, depth: 1 }
+            if *id == uuid::Uuid::from_u128(1).to_string())
+        );
+    }
+
+    /// The evidence a live graph answer settles: counts, cut, bounds, the
+    /// weights and doc types observed, and how the homes resolved.
+    fn print_graph_evidence(name: &str, read: &GraphRead, props: &Value) {
+        let (answer_nodes, answer_edges) = match read {
+            GraphRead::Walk { answer, .. } => (answer.nodes.len(), answer.edges.len()),
+            GraphRead::Entry { answer, .. } => (answer.nodes.len(), answer.edges.len()),
+        };
+        let drawn_nodes = props["nodes"].as_array().map_or(0, Vec::len);
+        let drawn_edges = props["edges"].as_array().map_or(0, Vec::len);
+        let mut weights: Vec<f64> = props["edges"]
+            .as_array()
+            .map(|es| {
+                es.iter()
+                    .filter_map(|e| e["weight"].as_f64())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        weights.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        weights.dedup();
+        let range = match (weights.first(), weights.last()) {
+            (Some(lo), Some(hi)) => format!("{lo}..{hi}"),
+            _ => "none".to_string(),
+        };
+        let mut kinds: Vec<String> = props["nodes"]
+            .as_array()
+            .map(|ns| {
+                ns.iter()
+                    .filter_map(|n| n["kind"].as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        kinds.sort();
+        kinds.dedup();
+        let mut homes_words = 0;
+        let mut homes_bare_context = 0;
+        let mut homes_bare_cogmap = 0;
+        for n in props["nodes"].as_array().map_or(&[][..], Vec::as_slice) {
+            let id = n["id"].as_str().unwrap_or_default();
+            let home = n["home"].as_str().unwrap_or_default();
+            if home.is_empty() {
+                continue;
+            }
+            if home == id {
+                if n["homeKind"] == "cogmap" {
+                    homes_bare_cogmap += 1;
+                } else {
+                    homes_bare_context += 1;
+                }
+            } else {
+                homes_words += 1;
+            }
+        }
+        eprintln!(
+            "{name}: answer {answer_nodes} nodes / {answer_edges} edges, drawn {drawn_nodes} / \
+             {drawn_edges}, cut {}, bounds {}, weights distinct [{}] range {range}, doc types \
+             {kinds:?}, homes by words {homes_words}, bare context {homes_bare_context}, bare \
+             cogmap {homes_bare_cogmap}, arm {}",
+            props.get("cut").map_or("none", |_| "fired"),
+            props
+                .get("bounds")
+                .map_or_else(|| "none".to_string(), Value::to_string),
+            if weights.len() > 20 {
+                format!("{:?} +{} more", &weights[..20], weights.len() - 20)
+            } else {
+                format!("{weights:?}")
+            },
+            props
+                .get("arm")
+                .map_or("none".to_string(), Value::to_string),
+        );
+    }
+
+    /// The bound graph from live reads: a walk from a real resource of
+    /// `TEMPER_WITNESS_CONTEXT`, then the entry read for that context. Each
+    /// filled view passes the core's check; the cut and the bounds are printed
+    /// with what the answers held — the walk asks depth 9 so the arm shows the
+    /// clamp applied.
+    /// Run locally: `TEMPER_WITNESS_CONTEXT=+team/slug WITNESS_DUMP=/tmp/graph-witness \
+    ///   cargo test -p desktop -- --ignored a_live_graph`
+    #[tokio::test]
+    #[ignore = "requires temper credentials, network, and TEMPER_WITNESS_CONTEXT"]
+    async fn a_live_graph_fills_a_graph_the_check_admits() {
+        let state = TemperState::connect();
+        let client = state
+            .client()
+            .expect("machine temper credentials should resolve to a client");
+        let context = std::env::var("TEMPER_WITNESS_CONTEXT")
+            .expect("set TEMPER_WITNESS_CONTEXT to a context ref you can read");
+        // One contexts read, shared: the entry's anchor and every home's words.
+        let contexts = client.contexts().list().await.expect("contexts list");
+        let homes: HashMap<Uuid, String> = contexts
+            .iter()
+            .map(|c| (c.id.0, format!("{}/{}", c.owner_ref, c.slug)))
+            .collect();
+
+        // The walk: from a real resource of the context, named by a listing.
+        let subject = ListingSubject {
+            context: Some(context.clone()),
+            ..Default::default()
+        };
+        let listing = client
+            .resources()
+            .list_meta(&listing_params(&subject, &ViewState::default()).unwrap())
+            .await
+            .expect("the listing reads");
+        let seed = listing
+            .rows
+            .first()
+            .expect("the context holds a resource to walk from")
+            .id
+            .0;
+        let requested = 9;
+        let depth = clamp_traversal_depth(requested);
+        let answer = client
+            .graph()
+            .traverse(&[seed], Some(depth))
+            .await
+            .expect("the walk reads");
+        let read = GraphRead::Walk {
+            seed: seed.to_string(),
+            depth,
+            answer,
+        };
+        let props = graph_props(&read, &homes);
+        print_graph_evidence("walk", &read, &props);
+        if let Ok(dir) = std::env::var("WITNESS_DUMP") {
+            std::fs::write(
+                format!("{dir}/props-walk.json"),
+                serde_json::to_string_pretty(&props).unwrap(),
+            )
+            .unwrap();
+        }
+        let filled = fill(&graph_spec(), &graph_binding(), props).unwrap_or_else(|e| panic!("{e}"));
+        eprintln!(
+            "walk: requested depth {requested}, arm carries depth {}",
+            filled["elements"]["graph"]["props"]["arm"]["depth"]
+        );
+
+        // The entry read for the same context.
+        let anchor = context_anchor(&context, &homes).expect("the witness context reads");
+        let answer = client
+            .graph()
+            .entry(&[anchor], None)
+            .await
+            .expect("the entry read reads");
+        let read = GraphRead::Entry {
+            context: context.clone(),
+            anchor,
+            answer,
+        };
+        let props = graph_props(&read, &homes);
+        print_graph_evidence("entry", &read, &props);
+        if let Ok(dir) = std::env::var("WITNESS_DUMP") {
+            std::fs::write(
+                format!("{dir}/props-entry.json"),
+                serde_json::to_string_pretty(&props).unwrap(),
+            )
+            .unwrap();
+        }
+        fill(&graph_spec(), &graph_binding(), props).unwrap_or_else(|e| panic!("{e}"));
     }
 
     /// The bound table from a live listing: a context's resources, then one doc type within
