@@ -4,7 +4,9 @@
  * The table and graph lenses are bound: a Table filled by the core from a resource listing, and a
  * Graph filled from a graph read — a walk from one resource, or an entry read anchored at a
  * context. The shape and search lenses are named and not built: each lands with its own port, and
- * until then a tab opened on one says so.
+ * until then a tab opened on one says so. Core's vocabulary is the base create vocabulary:
+ * temper's plain doctypes with no opinionated defaults — the arm that keeps creation working
+ * where no plugin governs.
  */
 import type { Contribution } from '../lenses';
 
@@ -148,6 +150,19 @@ export const core: Contribution = {
 			source: 'recent'
 		}
 	],
-	vocabularies: [],
+	vocabularies: [
+		{
+			id: 'create',
+			base: true,
+			doctypes: [
+				{ doctype: 'task' },
+				{ doctype: 'goal' },
+				{ doctype: 'session' },
+				{ doctype: 'research' },
+				{ doctype: 'concept' },
+				{ doctype: 'decision' }
+			]
+		}
+	],
 	skills: []
 };
