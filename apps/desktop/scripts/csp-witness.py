@@ -44,6 +44,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.options import ArgOptions
+from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.support.ui import WebDriverWait
 
 APP = Path(__file__).resolve().parent.parent
@@ -241,7 +242,13 @@ def main() -> int:
         options = ArgOptions()
         options.set_capability("browserName", "wry")
         options.set_capability("tauri:options", {"application": str(binary)})
-        driver = webdriver.Remote(f"http://127.0.0.1:{DRIVER_PORT}", options=options)
+        # A session's first WebView under a software renderer is slow — fontconfig, llvmpipe,
+        # the whole first boot — and the client's default read timeout is shorter than that
+        # boot on a small runner. Give it the boot's real cost.
+        client = ClientConfig(remote_server_addr=f"http://127.0.0.1:{DRIVER_PORT}", timeout=300)
+        driver = webdriver.Remote(
+            command_executor=client.remote_server_addr, options=options, client_config=client
+        )
         # The catalog step walks computed styles over every element of every specimen — the
         # graph example alone carries 200 nodes and 600 edges. A 20s budget predates that
         # page; the step's real cost is over a minute on a slow machine.
