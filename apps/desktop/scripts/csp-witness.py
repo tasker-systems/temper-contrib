@@ -383,10 +383,16 @@ def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
             step("switched back")
 
             # A lens switch, to one that is not built yet.
+            print(f"[witness {tag}] graph lens: finding the trigger", file=sys.stderr, flush=True)
             driver.find_element(
                 By.XPATH,
                 '//nav[@aria-label="This room"]//button[starts-with(normalize-space(), "graph")]',
             ).click()
+            print(
+                f"[witness {tag}] graph lens: trigger clicked — the mount is on the app now",
+                file=sys.stderr,
+                flush=True,
+            )
             WebDriverWait(driver, 10).until(active_text("graph lens"))
             step("switched lens")
 
