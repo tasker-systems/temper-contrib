@@ -1,10 +1,6 @@
 /**
- * Every contribution the app ships, in registration order. All are enabled in this build — core,
- * and temper-workflows as the default-enabled workflow plugin — and the left panel's foot names
- * them. Enabling and disabling is the package-boundary build's.
+ * The shell's contributions, held reactively: core first, then the plugin packages loaded
+ * beside the app, and one sentence per package the loader refused. The holder reads its
+ * packages through the plugin loader; enabling and disabling is the package-boundary build's.
  */
-import type { Contribution } from '../lenses';
-import { core } from './core';
-import { temperWorkflows } from './temper-workflows';
-
-export const enabled: readonly Contribution[] = [core, temperWorkflows];
+export { shellContributions } from './contributions.svelte';

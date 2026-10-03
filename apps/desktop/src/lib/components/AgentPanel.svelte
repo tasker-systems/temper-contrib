@@ -3,7 +3,7 @@
 	import { askLabel } from '$lib/agent/reducers';
 	import RegionState from '$lib/components/RegionState.svelte';
 	import Transcript from '$lib/components/Transcript.svelte';
-	import { enabled } from '$lib/shell/contributions';
+	import { shellContributions } from '$lib/shell/contributions';
 	import { lensById } from '$lib/shell/lenses';
 	import { stepTitle, tabs } from '$lib/shell/tabs.svelte';
 
@@ -18,7 +18,7 @@
 	/** The room in view: what the agent is shown with the next prompt, or why nothing is. */
 	const inViewStep = $derived(tabs.current(tabs.active));
 	const inViewLens = $derived(
-		inViewStep.lens ? (lensById(inViewStep.lens, enabled)?.name ?? inViewStep.lens) : ''
+		inViewStep.lens ? (lensById(inViewStep.lens, shellContributions.enabled)?.name ?? inViewStep.lens) : ''
 	);
 	const inViewShared = $derived(inViewStep.subject.kind === 'resource');
 

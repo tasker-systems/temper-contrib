@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { core } from './contributions/core';
-import { temperWorkflows } from './contributions/temper-workflows';
+import { loadContributions } from './contributions/packages';
+import { pluginManifestText } from './contributions/plugin-fixture';
 import { type Contribution, createMenu, homeSections, lensesFor, resolveLens } from './lenses';
 import type { Subject } from './subjects';
+
+/** temper-workflows, as the loader now answers for it — the packages' shape, loaded. */
+const temperWorkflows: Contribution = loadContributions([
+	{
+		name: 'temper-workflows',
+		files: [{ path: 'plugin.json', text: pluginManifestText() }]
+	}
+]).contributions[0];
 
 const resource: Subject = { kind: 'resource', id: '01a0e020-a6d7-7420-b924-68f5e89f354b' };
 const context: Subject = { kind: 'query', context: '+temper-dev/contrib' };

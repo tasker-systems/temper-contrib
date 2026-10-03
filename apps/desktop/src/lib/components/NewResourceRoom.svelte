@@ -18,7 +18,7 @@
 	import RegionState from '$lib/components/RegionState.svelte';
 	import type { DocCreated, MetaSaved } from '$lib/document';
 	import { temperViews } from '$lib/temper-views.svelte';
-	import { enabled } from '$lib/shell/contributions';
+	import { shellContributions } from '$lib/shell/contributions';
 	import { createMenu, type CreateOption, type TabHandle } from '$lib/shell/lenses';
 
 	let { tab, context }: { tab: TabHandle; context?: string } = $props();
@@ -42,7 +42,7 @@
 	let rideAlongError = $state('');
 
 	/** The create menu, the doctypes the enabled contributions offer. */
-	const menu = $derived(createMenu(enabled, today()));
+	const menu = $derived(createMenu(shellContributions.enabled, today()));
 	/** The chosen doctype — the menu's first unless a choice was made. */
 	const chosen = $derived(doctype ?? menu[0]?.doctype ?? null);
 
@@ -78,7 +78,7 @@
 	/** The caches that list resources, re-read so the created one is there when looked for. */
 	async function refreshCaches(): Promise<void> {
 		const reads: Promise<void>[] = [temperViews.refreshRecent()];
-		for (const group of enabled) {
+		for (const group of shellContributions.enabled) {
 			for (const way of group.waysIn) {
 				if (way.source === 'list') {
 					reads.push(temperViews.refreshList(`${group.plugin}/${way.id}`, way.filter));
@@ -94,7 +94,7 @@
 		createError = '';
 		try {
 			// The defaults are asked with the create-time date, not the room's opening one.
-			const option: CreateOption | undefined = createMenu(enabled, today()).find(
+			const option: CreateOption | undefined = createMenu(shellContributions.enabled, today()).find(
 				(o) => o.doctype === chosen
 			);
 			const answer = await invoke<DocCreated>('doc_create', {

@@ -8,6 +8,7 @@
 	import favicon from '$lib/assets/favicon.svg';
 	import type { Snippet } from 'svelte';
 	import { initHubWriter } from '$lib/shell/hub-writer';
+	import { shellContributions } from '$lib/shell/contributions';
 	import Shell from '$lib/shell/Shell.svelte';
 	import { temperViews } from '$lib/temper-views.svelte';
 	import { themeStore } from '$lib/theme-store.svelte';
@@ -21,6 +22,10 @@
 	themeStore.init();
 	temperViews.init();
 	initHubWriter();
+	// The packages the desktop ships beside itself are read before the shell renders, so home's
+	// sections and the ways-in panel are seen whole at first sight; a scan that cannot answer
+	// leaves core standing alone.
+	void shellContributions.settled();
 
 	$effect(() => {
 		document.documentElement.dataset.theme = themeStore.active;
@@ -31,5 +36,7 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<Shell />
+{#if shellContributions.ready}
+	<Shell />
+{/if}
 {@render children?.()}

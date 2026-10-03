@@ -9,20 +9,20 @@
 	 * claiming there is nothing, when nothing has been read.
 	 */
 	import { untrack } from 'svelte';
-	import { enabled } from '../contributions';
+	import { shellContributions } from '../contributions';
 	import { homeSections, lensComponent, type LensProps } from '../lenses';
 	import { HOME_TAB, tabs } from '../tabs.svelte';
 
 	let { subject, tab }: LensProps = $props();
 
-	const sections = homeSections(enabled);
+	const sections = $derived(homeSections(shellContributions.enabled));
 
 	let shown = $state(0);
 	$effect(() => {
 		if (tabs.activeId === HOME_TAB) untrack(() => (shown += 1));
 	});
 
-	const loaders = new Map(sections.map(({ lens }) => [lens.id, lensComponent(lens)]));
+	const loaders = $derived(new Map(sections.map(({ lens }) => [lens.id, lensComponent(lens)])));
 </script>
 
 <div class="home">

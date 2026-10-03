@@ -19,17 +19,17 @@
 		type TemperRecentPage,
 		temperViews
 	} from '$lib/temper-views.svelte';
-	import { enabled } from './contributions';
+	import { shellContributions } from './contributions';
 	import type { WayInDecl } from './lenses';
 	import { shellPanels } from './panels.svelte';
 	import { contextHref } from './subjects';
 
 	const v = temperViews;
-	const groups = enabled.filter((c) => c.waysIn.length > 0);
+	const groups = $derived(shellContributions.enabled.filter((c) => c.waysIn.length > 0));
 	const listKey = (plugin: string, way: WayInDecl) => `${plugin}/${way.id}`;
 
 	// One read per list, on first show. The recent-work and context reads are shared with home.
-	for (const group of groups) {
+	for (const group of shellContributions.enabled) {
 		for (const way of group.waysIn) {
 			if (way.source === 'list') void v.refreshList(listKey(group.plugin, way), way.filter);
 		}
@@ -138,7 +138,10 @@
 		{/each}
 	</div>
 	<p class="foot">
-		{enabled.length} plugins enabled · {enabled.map((c) => c.plugin).join(', ')}
+		{shellContributions.enabled.length} plugins enabled · {shellContributions.enabled.map((c) => c.plugin).join(', ')}
+		{#each shellContributions.refusals as refusal (refusal)}
+			<span> · {refusal}</span>
+		{/each}
 		{#if cachedAt !== null}
 			<span class="t-slot-cacheAge">· from cache, {ageWords(cachedAt)}</span>
 		{/if}

@@ -13,7 +13,7 @@
 	import ResourceRef from '$lib/components/ResourceRef.svelte';
 	import { getRefResolver, type Resolution } from '$lib/refs';
 	import { ageWords } from '$lib/temper-views.svelte';
-	import { enabled } from '../../contributions';
+	import { shellContributions } from '../../contributions';
 	import { homeReads, type RecentWorkEntry } from '../../home-reads.svelte';
 	import { type LensProps, lensById } from '../../lenses';
 	import { tabs } from '../../tabs.svelte';
@@ -47,7 +47,7 @@
 		});
 	});
 
-	const lensName = (entry: RecentWorkEntry) => lensById(entry.room, enabled)?.name ?? entry.room;
+	const lensName = (entry: RecentWorkEntry) => lensById(entry.room, shellContributions.enabled)?.name ?? entry.room;
 
 	/** Where and when, in words: the lens, how long ago, and the device when it isn't this one. */
 	function whereWhen(entry: RecentWorkEntry): string {

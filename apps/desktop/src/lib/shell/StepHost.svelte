@@ -10,7 +10,7 @@
 	import { untrack } from 'svelte';
 	import RegionState from '$lib/components/RegionState.svelte';
 	import type { DocOpened } from '$lib/document';
-	import { enabled } from './contributions';
+	import { shellContributions } from './contributions';
 	import { built, type LensDecl, lensComponent, lensesFor, resolveLens } from './lenses';
 	import { type Step, stepTitle, tabs } from './tabs.svelte';
 	import UnbuiltLens from './UnbuiltLens.svelte';
@@ -37,7 +37,7 @@
 	const arriving = $derived(subject.kind === 'resource' && opened === undefined);
 	const docType = $derived(opened?.state === 'opened' ? opened.docType : null);
 	const resolution = $derived(
-		arriving ? null : resolveLens(subject, docType, step.lens, enabled)
+		arriving ? null : resolveLens(subject, docType, step.lens, shellContributions.enabled)
 	);
 
 	const ref = $derived(opened?.state === 'opened' ? opened.decoratedRef : null);
@@ -57,7 +57,7 @@
 
 	const lens = $derived(resolution?.lens ?? null);
 	const loading = $derived(lens ? lensComponent(lens) : null);
-	const alternatives = $derived(lensesFor(subject, docType, enabled).filter(built));
+	const alternatives = $derived(lensesFor(subject, docType, shellContributions.enabled).filter(built));
 </script>
 
 {#if arriving}

@@ -9,7 +9,7 @@
 	 * plugin. Choosing one keeps the subject and the trail.
 	 */
 	import type { Snippet } from 'svelte';
-	import { enabled } from './contributions';
+	import { shellContributions } from './contributions';
 	import { lensesFor } from './lenses';
 	import { HOME_TAB, stepTitle, tabs } from './tabs.svelte';
 
@@ -20,7 +20,7 @@
 	const step = $derived(tabs.current(tab));
 	const previous = $derived(tab.cursor > 0 ? tab.steps[tab.cursor - 1] : null);
 	const next = $derived(tab.cursor < tab.steps.length - 1 ? tab.steps[tab.cursor + 1] : null);
-	const options = $derived(lensesFor(step.subject, step.docType, enabled));
+	const options = $derived(lensesFor(step.subject, step.docType, shellContributions.enabled));
 </script>
 
 {#if tab.id !== HOME_TAB}

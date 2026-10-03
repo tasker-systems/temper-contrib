@@ -14,6 +14,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
+import { shellContributions } from './contributions';
+import { core } from './contributions/core';
+import { pluginPackages } from './contributions/plugin-fixture';
 import { homeReads } from './home-reads.svelte';
 import { shellPanels } from './panels.svelte';
 import Shell from './Shell.svelte';
@@ -166,6 +169,8 @@ function boundGraph(args?: Record<string, unknown>) {
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
+		case 'plugin_packages':
+			return Promise.resolve(pluginPackages());
 		case 'hub_recent_work':
 			return Promise.resolve(hubView);
 		case 'temper_recent_work':
@@ -293,6 +298,9 @@ describe('the shell', () => {
 		await import('./lenses/DocumentLens.svelte');
 		await import('./lenses/BoundLens.svelte');
 		await import('$lib/markdown/sanitize');
+		vi.mocked(invoke).mockImplementation(routeInvoke as never);
+		shellContributions.init();
+		await vi.waitFor(() => expect(shellContributions.ready).toBe(true));
 	});
 
 	beforeEach(() => {
@@ -926,6 +934,27 @@ describe('the shell', () => {
 			{ docType: 'task', stage: 'in-progress' },
 			{ docType: 'session' }
 		]);
+	});
+
+	it('the foot names a package the loader refused, with its reason, and nothing half-loaded shows', async () => {
+		const enabled = shellContributions.enabled;
+		// core only: the absence assertion below is true by construction, not by the lazy
+		// mount of home's sections not having landed yet.
+		shellContributions.enabled = [core];
+		shellContributions.refusals = [
+			'refused the temper-workflows package: its plugin.json is not parseable JSON at plugin.json'
+		];
+		try {
+			shellPanels.setWaysOpen(true);
+			const { container } = render(Shell);
+			await waitFor(() =>
+				expect(container.textContent).toContain('refused the temper-workflows package')
+			);
+			expect(container.querySelector('[data-section="temper-workflows/home-handoff"]')).toBeNull();
+		} finally {
+			shellContributions.enabled = enabled;
+			shellContributions.refusals = [];
+		}
 	});
 
 	it('a ways-in entry opens its subject in a tab: from home, a new one', async () => {
