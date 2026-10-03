@@ -1,9 +1,10 @@
 /**
  * The command palette's model: what it offers, filtered locally over what the desktop already
- * holds. Four kinds of command — open (open and set-aside tabs, recent work, contexts, the
- * workflow entries), switch lens, start a session, and open settings or setup. Every section is
- * bounded and says what it omits. The palette does not search temper: search is a lens that is
- * not built yet, and the palette says so rather than pretending.
+ * holds. Five kinds of command — open (open and set-aside tabs, recent work, contexts, the
+ * workflow entries), switch lens, start a session, open settings or setup, and create a new
+ * resource where the room in view names a context. Every section is bounded and says what it
+ * omits. The palette does not search temper: search is a lens that is not built yet, and the
+ * palette says so rather than pretending.
  */
 import type { LensDecl } from './lenses';
 

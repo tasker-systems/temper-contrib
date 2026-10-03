@@ -79,6 +79,9 @@
 
 		const active = tabs.active;
 		const step = tabs.current(active);
+		// A create happens in a context: the command is offered only where the room in view
+		// names one — a query over a context — and is absent, never disabled-grey, elsewhere.
+		const context = step.subject.kind === 'query' ? step.subject.context : undefined;
 		const lenses: Command[] = lensesFor(step.subject, step.docType, enabled)
 			.filter((lens) => lens.id !== step.lens)
 			.map((lens) => ({
@@ -112,7 +115,18 @@
 				label: 'Open the view catalog',
 				from: 'core',
 				run: () => tabs.focusOrOpen({ kind: 'place', place: 'catalog' })
-			}
+			},
+			...(context
+				? [
+						{
+							id: 'new-resource',
+							label: 'New resource here',
+							from: 'core',
+							run: () =>
+								tabs.open({ kind: 'place', place: 'new-resource', context }, { where: 'here' })
+						}
+					]
+				: [])
 		];
 
 		return [

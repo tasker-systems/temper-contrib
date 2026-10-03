@@ -25,6 +25,7 @@ const handlers: Record<string, (event: { payload: unknown }) => void> = {};
 
 const A = '01a0e020-a6d7-7420-b924-68f5e89f354b';
 const B = '01a0e0b8-39a6-7c42-97a4-3c1380308dc7';
+const NEW = '01a0f100-0000-7000-8000-000000000001';
 
 const opened = (id: string): DocOpened => ({
 	state: 'opened',
@@ -248,6 +249,15 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 		}
 		case 'temper_contexts':
 			return Promise.resolve(contextsList);
+		case 'doc_create':
+			return Promise.resolve({
+				state: 'created',
+				id: NEW,
+				decoratedRef: `a-document-${NEW}`,
+				title: args?.title as string
+			});
+		case 'doc_save_meta':
+			return Promise.resolve({ state: 'saved' });
 		default:
 			return Promise.resolve(null);
 	}
@@ -1003,6 +1013,71 @@ describe('the shell', () => {
 		expect(tabs.activeId).toBe(settings);
 		expect(tabs.openCount).toBe(1);
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
+	});
+
+	it('the palette offers New resource here only when the room in view names a context', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		const offered = [...dialog.querySelectorAll('[role="option"]')].find((o) =>
+			o.textContent?.includes('New resource here')
+		);
+		expect(offered).toBeDefined();
+		await fireEvent.keyDown(dialog.querySelector('input') as Element, { key: 'Escape' });
+
+		// From a room that names no context the command is absent, never disabled-grey.
+		tabs.activate(HOME_TAB);
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const home = container.querySelector('[role="dialog"]') as HTMLElement;
+		expect(
+			[...home.querySelectorAll('[role="option"]')].filter((o) =>
+				o.textContent?.includes('New resource here')
+			)
+		).toHaveLength(0);
+	});
+
+	it('a create from the palette lands the tab on the created resource', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });
+
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		const command = [...dialog.querySelectorAll('[role="option"]')].find((o) =>
+			o.textContent?.includes('New resource here')
+		);
+		await fireEvent.click(command as Element);
+		// The create room is a step on the same trail, the context riding its subject.
+		expect(tabs.current(tabs.active).subject).toEqual({
+			kind: 'place',
+			place: 'new-resource',
+			context: '+temper-dev/contrib'
+		});
+
+		const body = () => activeBody(container);
+		await vi.waitFor(() => expect(body().querySelector('input')).toBeTruthy());
+		await fireEvent.input(body().querySelector('input') as Element, {
+			target: { value: 'A fresh task' }
+		});
+		const create = [...body().querySelectorAll('button')].find(
+			(b) => b.textContent === 'Create'
+		) as HTMLButtonElement;
+		await fireEvent.click(create);
+
+		await vi.waitFor(() =>
+			expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: NEW })
+		);
+		expect(reads('doc_create')).toHaveLength(1);
+		expect(reads('doc_create')[0].args).toEqual({
+			contextId: 'ctx-1',
+			docType: 'task',
+			title: 'A fresh task'
+		});
+		// The document room opened on the created id through the one door.
+		expect(reads('doc_open').some((c) => c.args?.id === NEW)).toBe(true);
+		// The trail keeps where the create came from.
+		expect(tabs.canBack(tabs.active)).toBe(true);
 	});
 
 	it('the palette switches the active tab’s lens, keeping its subject', async () => {

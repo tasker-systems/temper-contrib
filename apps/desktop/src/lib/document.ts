@@ -43,6 +43,13 @@ export type BodySaved =
 	| { state: 'unresolved'; reason: string }
 	| { state: 'failed'; message: string };
 
+/** What creating a document came to (src-tauri/src/document_create.rs): the work-record
+ * answer, or the refusal/failure with the idempotency key a retry reuses to converge. */
+export type DocCreated =
+	| { state: 'created'; id: string; decoratedRef: string; title: string }
+	| { state: 'refused'; reason: string; idempotencyKey: string }
+	| { state: 'failed'; message: string; idempotencyKey: string };
+
 export interface Connection {
 	edgeId: string;
 	direction: 'outgoing' | 'incoming' | string;
