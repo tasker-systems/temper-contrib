@@ -3,9 +3,11 @@
 // its `date` default through the metadata door after the create lands, then opens;
 // a refusal is one line, opens nothing, and leaves the form standing for an
 // immediate retry; a refused create is retried with its retained idempotency key
-// (even with the fields edited) and a created one starts fresh; a context temper
-// does not answer creates nothing and says so. `invoke` is mocked and records
-// every call.
+// (even with the fields edited) and a landing ends the room's create story; a
+// failure after the landing still opens the tab, says created, and never re-invites
+// the create; a converged retry whose type changed skips the defaults stamp and
+// says so; creates validate only against this session's reads. `invoke` is mocked
+// and records every call.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 
 import { invoke } from '@tauri-apps/api/core';
@@ -100,6 +102,12 @@ describe('the create room', () => {
 		});
 		expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'doc_save_meta')).toBe(false);
 		expect(opens).toEqual([{ subject: { kind: 'resource', id: NEW }, where: 'here' }]);
+		// After a landed create the caches re-read, so the resource is there when
+		// looked for — the recent list and every enabled list of resources.
+		expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'temper_recent_work')).toBe(true);
+		expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'temper_list_resources')).toBe(
+			true
+		);
 	});
 
 	it('creating a session saves its date default after the create, then opens it', async () => {
@@ -136,7 +144,7 @@ describe('the create room', () => {
 		);
 	});
 
-	it('a refused create is retried with its key, and a created one starts fresh', async () => {
+	it('a refused create is retried with its key, and the landing ends the room’s create story', async () => {
 		createAnswer = { state: 'refused', reason: 'forbidden', idempotencyKey: NEW };
 		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
 		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
@@ -171,17 +179,124 @@ describe('the create room', () => {
 			idempotencyKey: NEW
 		});
 		await vi.waitFor(() => expect(opens).toHaveLength(1));
-		// A created answer spends the key: the next create mints afresh, nothing retained.
-		await fillAndSubmit(container, 'Write the witness, revised');
-		await vi.waitFor(() =>
-			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(4)
+		// The landing ends this room's create story: the form is done, Create is gone,
+		// and no second create is invitable from it — the key it spent is not reachable
+		// again, and a next create mints afresh from a room opened anew.
+		expect([...container.querySelectorAll('button')].some((b) => b.textContent === 'Create')).toBe(
+			false
 		);
-		const [, freshArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[3];
-		expect(freshArgs).toEqual({
-			contextId: 'ctx-1',
-			docType: 'task',
-			title: 'Write the witness, revised'
-		});
+		expect(container.querySelector('input')).toBeNull();
+		expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(3);
+	});
+
+	it('a failed create renders its line, opens nothing, and a retry resends its key', async () => {
+		createAnswer = {
+			state: 'failed',
+			message: 'the connection was refused',
+			idempotencyKey: NEW
+		};
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
+		await fillAndSubmit(container, 'Write the witness');
+		await vi.waitFor(() =>
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+				'the connection was refused'
+			)
+		);
+		expect(opens).toEqual([]);
+		// The failed arm carries its key too: the retry converges instead of duplicating.
+		await fireEvent.click(
+			[...container.querySelectorAll('button')].find(
+				(b) => b.textContent === 'Create'
+			) as HTMLButtonElement
+		);
+		await vi.waitFor(() =>
+			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(2)
+		);
+		const [, retryArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[1];
+		expect(retryArgs).toMatchObject({ idempotencyKey: NEW });
+	});
+
+	it('a failure after the create lands still opens the tab, says created, and never re-invites the create', async () => {
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'doc_save_meta') return Promise.reject(new Error('the metadata door jammed'));
+			return routeInvoke(cmd);
+		}) as never);
+		await fillAndSubmit(container, 'A morning session', 'session');
+		// The landing stands: the tab opens on the created resource all the same.
+		await vi.waitFor(() =>
+			expect(opens).toEqual([{ subject: { kind: 'resource', id: NEW }, where: 'here' }])
+		);
+		// One honest line — created, with what failed to ride along — never "Not created".
+		expect(container.textContent).toContain('Created');
+		expect(container.textContent).toContain('the metadata door jammed');
+		expect(container.textContent).not.toContain('Not created');
+		// The form is done: no second create is invitable.
+		expect([...container.querySelectorAll('button')].some((b) => b.textContent === 'Create')).toBe(
+			false
+		);
+	});
+
+	it('a defaults save answering failed leaves the landing standing — the tab still opens', async () => {
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'doc_save_meta') {
+				return Promise.resolve({ state: 'failed', message: 'the write did not complete' });
+			}
+			return routeInvoke(cmd);
+		}) as never);
+		await fillAndSubmit(container, 'A morning session', 'session');
+		await vi.waitFor(() =>
+			expect(opens).toEqual([{ subject: { kind: 'resource', id: NEW }, where: 'here' }])
+		);
+		expect(container.textContent).toContain('the write did not complete');
+	});
+
+	it('a converged retry whose type changed skips the defaults stamp and says so', async () => {
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
+		createAnswer = { state: 'refused', reason: 'forbidden', idempotencyKey: NEW };
+		await fillAndSubmit(container, 'Write the witness');
+		await vi.waitFor(() =>
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain('forbidden')
+		);
+		// The person re-chooses the type and presses Create: the retained key converges on
+		// the earlier-committed task, and the session defaults would stamp one vocabulary's
+		// metadata over another's — the stamp is skipped, and the skip says so.
+		createAnswer = null;
+		await fillAndSubmit(container, 'Write the witness', 'session');
+		await vi.waitFor(() =>
+			expect(opens).toEqual([{ subject: { kind: 'resource', id: NEW }, where: 'here' }])
+		);
+		expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'doc_save_meta')).toBe(false);
+		expect(container.textContent).toContain('Created');
+		expect(container.textContent).toContain('task');
+	});
+
+	it('creates only on this session’s reads — a cache a failed re-read left behind never enables Create', async () => {
+		// Warm the store the way a previous session's cache would.
+		contexts = [NOTES];
+		await temperViews.refreshContexts();
+		expect(temperViews.contextsFresh).toBe(true);
+		// This session's re-read fails; the cache survives it, labeled stale.
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'temper_contexts') return Promise.reject(new Error('read failed'));
+			return routeInvoke(cmd);
+		}) as never);
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() =>
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain('read failed')
+		);
+		const input = container.querySelector('input') as HTMLInputElement;
+		await fireEvent.input(input, { target: { value: 'Write the witness' } });
+		const create = [...container.querySelectorAll('button')].find(
+			(b) => b.textContent === 'Create'
+		);
+		expect(create?.disabled).toBe(true);
+		expect(vi.mocked(invoke).mock.calls.some(([cmd]) => cmd === 'doc_create')).toBe(false);
 	});
 
 	it('a context temper does not answer creates nothing and says so', async () => {

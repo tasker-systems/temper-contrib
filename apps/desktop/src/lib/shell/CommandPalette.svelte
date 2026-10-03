@@ -80,8 +80,14 @@
 		const active = tabs.active;
 		const step = tabs.current(active);
 		// A create happens in a context: the command is offered only where the room in view
-		// names one — a query over a context — and is absent, never disabled-grey, elsewhere.
-		const context = step.subject.kind === 'query' ? step.subject.context : undefined;
+		// names one — a query over a context, or a resource whose own read named its context —
+		// and is absent, never disabled-grey, elsewhere.
+		const context =
+			step.subject.kind === 'query'
+				? step.subject.context
+				: step.subject.kind === 'resource'
+					? (step.context ?? undefined)
+					: undefined;
 		const lenses: Command[] = lensesFor(step.subject, step.docType, enabled)
 			.filter((lens) => lens.id !== step.lens)
 			.map((lens) => ({

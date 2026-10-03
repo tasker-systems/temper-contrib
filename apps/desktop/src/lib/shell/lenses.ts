@@ -116,7 +116,13 @@ export interface DocTypeDecl {
 export interface VocabularyDecl {
 	/** Unique within its plugin. */
 	id: string;
-	/** The base arm: it seeds the create menu, and a plugin's entry for a doctype wins it. */
+	/**
+	 * The base arm: it seeds the create menu, and a plugin's entry for a doctype wins it.
+	 * Only core's contributions legitimately set it — the menu's ordering is the merge
+	 * rule's input, and a plugin claiming the base arm would reorder that merge to its own
+	 * advantage. Making the flag structurally core-only (a separate contribution slot) was
+	 * considered and declined as disproportionate for a flag one contributor sets.
+	 */
 	base?: boolean;
 	doctypes: DocTypeDecl[];
 }

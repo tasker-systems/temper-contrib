@@ -44,6 +44,9 @@ export interface Step {
 	docType: string | null;
 	/** The decorated ref temper gave a resource, once read — what the agent is shown. */
 	ref: string | null;
+	/** The context the resource's own read named — what the palette's create command
+	 *  is offered in, the same way a query's subject names its own. */
+	context: string | null;
 }
 
 export interface Tab {
@@ -68,7 +71,8 @@ const homeStep = (): Step => ({
 	lens: 'core/home',
 	title: 'home',
 	docType: null,
-	ref: null
+	ref: null,
+	context: null
 });
 
 const homeTab = (): Tab => ({ id: HOME_TAB, steps: [homeStep()], cursor: 0, usedAt: 0 });
@@ -90,7 +94,8 @@ function readStep(raw: unknown): Step | null {
 		lens: text(s.lens),
 		title: text(s.title),
 		docType: text(s.docType),
-		ref: text(s.ref)
+		ref: text(s.ref),
+		context: text(s.context)
 	};
 }
 
@@ -197,7 +202,8 @@ export class TabModel {
 			lens: options.lens ?? null,
 			title: null,
 			docType: null,
-			ref: null
+			ref: null,
+			context: null
 		};
 
 		if (where === 'here') {
@@ -322,13 +328,20 @@ export class TabModel {
 		this.#save();
 	}
 
-	/** The host resolved a step's lens (and, for a resource, learned its doc type and ref). */
-	resolved(stepKey: string, lens: string, docType: string | null, ref: string | null = null): void {
+	/** The host resolved a step's lens (and, for a resource, learned its doc type, ref and context). */
+	resolved(
+		stepKey: string,
+		lens: string,
+		docType: string | null,
+		ref: string | null = null,
+		context: string | null = null
+	): void {
 		const step = this.#step(stepKey);
 		if (!step) return;
 		step.lens = lens;
 		if (docType) step.docType = docType;
 		if (ref) step.ref = ref;
+		if (context) step.context = context;
 		this.#save();
 	}
 

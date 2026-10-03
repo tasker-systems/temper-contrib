@@ -1038,6 +1038,37 @@ describe('the shell', () => {
 		).toHaveLength(0);
 	});
 
+	it('the palette offers New resource here on a resource tab, the resource’s own context riding', async () => {
+		const { container } = render(Shell);
+		tabs.open({ kind: 'resource', id: A }, { where: 'new' });
+		await waitFor(() => expect(activeBody(container)?.querySelector('h1')).toBeTruthy());
+
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const dialog = container.querySelector('[role="dialog"]') as HTMLElement;
+		const offered = [...dialog.querySelectorAll('[role="option"]')].find((o) =>
+			o.textContent?.includes('New resource here')
+		);
+		expect(offered).toBeDefined();
+		await fireEvent.click(offered as Element);
+		// The create room is a step on the same trail, the resource's own context —
+		// the one its opening read named — riding the place.
+		expect(tabs.current(tabs.active).subject).toEqual({
+			kind: 'place',
+			place: 'new-resource',
+			context: '+temper-dev/contrib'
+		});
+
+		// A subject with no context of its own never offers the command.
+		tabs.open({ kind: 'query', text: 'anything' }, { where: 'new' });
+		await fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+		const second = container.querySelector('[role="dialog"]') as HTMLElement;
+		expect(
+			[...second.querySelectorAll('[role="option"]')].filter((o) =>
+				o.textContent?.includes('New resource here')
+			)
+		).toHaveLength(0);
+	});
+
 	it('a create from the palette lands the tab on the created resource', async () => {
 		const { container } = render(Shell);
 		tabs.open({ kind: 'query', context: '+temper-dev/contrib' }, { where: 'new' });

@@ -24,7 +24,7 @@ use temper_core::types::resource_view::ResourceView;
 use temper_workflow::types::resource::ResourceCreateRequest;
 use uuid::Uuid;
 
-use crate::temper::{parse_ref, TemperState};
+use crate::temper::{parse_ref, unresolved_reason, TemperState};
 
 /// What creating a document came to. `Created` is the work-record answer shape;
 /// `Refused` is the server — or the local check — saying no, in one line naming
@@ -80,6 +80,18 @@ fn create_request(
     }
 }
 
+/// The title a create accepts: trimmed, never blank. The room is the caller,
+/// but the refusal is the command's, tested here without a client — the same
+/// local posture `doc_save_meta` holds its own title to and
+/// `temper_context_create` its context name.
+pub(crate) fn trimmed_title(title: &str) -> Result<String, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("a title is required".to_string());
+    }
+    Ok(title.to_string())
+}
+
 /// Creates the document and answers what came of it. `idempotency_key` is the
 /// caller's when it holds one from an earlier refused or failed answer, and a
 /// fresh mint when it does not.
@@ -91,13 +103,22 @@ pub(crate) async fn create_document<S: DocSink>(
     idempotency_key: Option<Uuid>,
 ) -> DocCreated {
     let idempotency_key = idempotency_key.unwrap_or_else(Uuid::new_v4);
+    let title = match trimmed_title(title) {
+        Ok(title) => title,
+        Err(reason) => {
+            return DocCreated::Refused {
+                reason,
+                idempotency_key,
+            }
+        }
+    };
     let Some(context_id) = parse_ref(context_ref) else {
         return DocCreated::Refused {
             reason: "not a context reference".into(),
             idempotency_key,
         };
     };
-    let request = create_request(context_id, doc_type, title, idempotency_key);
+    let request = create_request(context_id, doc_type, &title, idempotency_key);
     match sink.create(&request).await {
         Ok(view) => DocCreated::Created {
             id: view.id.0,
@@ -113,8 +134,13 @@ pub(crate) async fn create_document<S: DocSink>(
                     idempotency_key,
                 }
             } else {
+                // The client's refusals are worded like the rest of the app's
+                // (`unresolved_reason`), never the raw error — and the mapping
+                // keeps the composed, disclosure-safe sentences as they are.
                 DocCreated::Refused {
-                    reason: err.to_string(),
+                    reason: unresolved_reason(&err)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| err.to_string()),
                     idempotency_key,
                 }
             }
@@ -286,7 +312,7 @@ mod tests {
         assert_eq!(
             answer,
             DocCreated::Refused {
-                reason: "forbidden".into(),
+                reason: "not visible to you".into(),
                 idempotency_key: key(),
             }
         );
@@ -294,6 +320,43 @@ mod tests {
             sink.calls(),
             1,
             "the refusal came from the create call itself"
+        );
+    }
+
+    /// The bite: a blank title is refused before anything is sent — no sink
+    /// call at all — the same local posture `doc_save_meta` holds its own
+    /// title to and `temper_context_create` its context name.
+    #[tokio::test]
+    async fn a_blank_title_is_refused_locally_and_sends_nothing() {
+        let sink = Scripted::answering(Answer::Forbidden);
+        let answer = create_document(&sink, CONTEXT, "session", "   ", Some(key())).await;
+        assert_eq!(
+            answer,
+            DocCreated::Refused {
+                reason: "a title is required".into(),
+                idempotency_key: key(),
+            }
+        );
+        assert_eq!(sink.calls(), 0, "nothing went on the wire");
+    }
+
+    /// The bite: the title is sent trimmed — the room sends what its field
+    /// held, the command sends what a title is.
+    #[tokio::test]
+    async fn a_padded_title_is_sent_trimmed() {
+        let sink = Scripted::answering(Answer::Forbidden);
+        create_document(
+            &sink,
+            CONTEXT,
+            "session",
+            "  A fresh document  ",
+            Some(key()),
+        )
+        .await;
+        let [wire] = sink.sent().try_into().unwrap();
+        assert_eq!(
+            wire["title"], "A fresh document",
+            "the title rides trimmed, the five fields otherwise untouched"
         );
     }
 
