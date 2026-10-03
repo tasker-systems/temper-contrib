@@ -340,4 +340,78 @@ mod tests {
         );
         assert_eq!(sink.calls(), 0, "nothing went on the wire");
     }
+
+    /// Live witness for the whole create flow, against the real API: creates a
+    /// uniquely-named task in the person's context, opens it through the
+    /// document room's consistent open, saves one line of markdown through the
+    /// guarded save, and retires the resource. Ignored by default — it needs
+    /// the machine's temper credentials and network, and it performs a real
+    /// write in the person's configured context, cleaning up its own resource
+    /// afterwards. Run locally: `cargo test -p desktop -- --ignored
+    /// a_created_document_opens_and_saves_live`
+    #[tokio::test]
+    #[ignore = "requires temper credentials, network, and performs real writes"]
+    async fn a_created_document_opens_and_saves_live() {
+        let state = crate::temper::TemperState::connect();
+        let client = state
+            .client()
+            .expect("machine temper credentials should resolve to a client");
+        let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;
+        let context_id = crate::person_context::persons_context_id(client, context_name)
+            .await
+            .expect("the person's context should resolve");
+
+        let title = format!("desktop-create-witness-{}", Uuid::new_v4().simple());
+        let created = create_document(client, &context_id.to_string(), "task", &title, None).await;
+        let DocCreated::Created {
+            id,
+            decorated_ref,
+            title: created_title,
+        } = created
+        else {
+            panic!("expected Created, got {created:?}")
+        };
+        assert_eq!(created_title, title, "the create answers the title sent");
+        assert!(
+            !decorated_ref.is_empty(),
+            "the create answers a decorated address"
+        );
+
+        // The created document opens through the room's read path. A fresh
+        // body is an empty string, not an absence, and the server's pipeline
+        // has already filled the managed tier: a fresh task is in `backlog`
+        // before anyone touched it.
+        let opened = crate::document::open_consistent(client, id, crate::document::OPEN_ATTEMPTS)
+            .await
+            .expect("the created document opens");
+        assert_eq!(opened.markdown, "", "a fresh document has no body yet");
+        assert_eq!(
+            opened.view.managed_meta.stage.as_deref(),
+            Some("backlog"),
+            "the server's pipeline landed the fresh task in backlog"
+        );
+
+        // One line of markdown through the guarded save: it writes at the
+        // base the open recorded, and what lands is not that base any more.
+        let line = format!("{title}: one line of markdown from the witness");
+        let saved = crate::document_save::guarded_save(client, id, &opened.body_hash, line)
+            .await
+            .expect("the guarded save completes");
+        let crate::document_save::Guarded::Saved {
+            body_hash: Some(landed),
+        } = saved
+        else {
+            panic!("expected Saved, got {saved:?}")
+        };
+        assert_ne!(
+            landed, opened.body_hash,
+            "the write landed: the hash is no longer the base the open recorded"
+        );
+
+        client
+            .resources()
+            .delete(id, &Default::default())
+            .await
+            .expect("the witness cleans up after itself");
+    }
 }
