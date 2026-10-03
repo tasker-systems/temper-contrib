@@ -1,0 +1,60 @@
+{
+  "name": "temper-workflows",
+  "contributions": {
+    "lenses": [
+      {
+        "id": "temper-workflows/home-handoff",
+        "name": "latest handoff",
+        "accepts": { "kinds": ["place"], "places": ["home"] },
+        "build": { "state": "built", "component": "home-handoff" },
+        "pinned": { "home": 15 },
+        "group": "Resume"
+      },
+      {
+        "id": "temper-workflows/home-recent",
+        "name": "recently updated",
+        "accepts": { "kinds": ["place"], "places": ["home"] },
+        "build": { "state": "built", "component": "home-recent" },
+        "pinned": { "home": 25 },
+        "group": "Awaiting you"
+      }
+    ],
+    "waysIn": [
+      {
+        "id": "goals",
+        "label": "goals",
+        "scope": "active goals",
+        "source": "list",
+        "filter": { "docType": "goal", "status": "active" }
+      },
+      {
+        "id": "tasks",
+        "label": "in progress",
+        "scope": "tasks in progress",
+        "source": "list",
+        "filter": { "docType": "task", "stage": "in-progress" }
+      },
+      {
+        "id": "sessions",
+        "label": "sessions",
+        "scope": "sessions, most recent first",
+        "source": "list",
+        "filter": { "docType": "session" }
+      }
+    ],
+    "vocabularies": [
+      {
+        "id": "create",
+        "doctypes": [
+          { "doctype": "task" },
+          { "doctype": "goal" },
+          { "doctype": "session", "defaults": { "date": "today" } },
+          { "doctype": "research", "defaults": { "date": "today" } },
+          { "doctype": "concept" },
+          { "doctype": "decision" }
+        ]
+      }
+    ],
+    "skills": []
+  }
+}

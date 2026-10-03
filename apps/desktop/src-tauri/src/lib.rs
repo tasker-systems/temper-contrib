@@ -11,6 +11,9 @@ mod hub;
 mod hub_queue;
 mod lens_binding;
 mod person_context;
+// The plugin packages the desktop ships beside itself: scanned and read here, their
+// format owned by the shell's loader on the other side of the IPC.
+mod plugins;
 // The harness-fidelity probe is a test fixture, not an app surface: the only
 // caller is the witness. The real presentation server (Chunk 1's module)
 // replaces it, so the probe is compiled out of every non-test build.
@@ -93,6 +96,7 @@ pub fn run() {
             temper::temper_list_resources,
             temper::temper_context_shape,
             lens_binding::lens_resolve,
+            plugins::plugin_packages,
             work::temper_write_work_record,
             hub::hub_commit_recent_work,
             hub::hub_recent_work,

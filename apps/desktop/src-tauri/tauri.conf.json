@@ -38,7 +38,8 @@
     "active": true,
     "targets": "all",
     "resources": {
-      "../acp-adapter-staging": "acp-adapters"
+      "../acp-adapter-staging": "acp-adapters",
+      "../../../plugins/temper-workflows": "plugins/temper-workflows"
     },
     "icon": [
       "icons/32x32.png",
