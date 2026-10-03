@@ -10,6 +10,10 @@ const host = process.env.TAURI_DEV_HOST;
 // never copied: one source for every consumer. Vite resolves this against the project root.
 const themes = '../../themes';
 
+// The plugin packages live at the repository root (`plugins/`) too, read in place the same way:
+// the shell's witnesses take the loaded path through the manifest the desktop ships.
+const plugins = '../../plugins';
+
 // The dev server's Content-Security-Policy. The shipped policy lives in tauri.conf.json
 // (`app.security.csp`) and Tauri applies it to the bundled assets; under `tauri dev` on desktop the
 // webview loads this server directly, so Tauri applies no policy and `devCsp` would be inert.
@@ -72,7 +76,7 @@ export default defineConfig(async () => ({
 			ignored: ['**/src-tauri/**']
 		},
 		fs: {
-			allow: ['.', themes]
+			allow: ['.', themes, plugins]
 		}
 	},
 

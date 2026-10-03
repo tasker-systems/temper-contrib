@@ -6,7 +6,7 @@
 	 */
 	import { agentSession } from '$lib/agent/session.svelte';
 	import { temperViews } from '$lib/temper-views.svelte';
-	import { enabled } from './contributions';
+	import { shellContributions } from './contributions';
 	import { lensesFor } from './lenses';
 	import { type Command, filterSections, lensWords, type Section, SECTION_BOUND } from './palette';
 	import { shellPanels } from './panels.svelte';
@@ -56,7 +56,7 @@
 			const c = resourceCommand(row.id, row.title, `recent ${row.docType}`);
 			if (c) held.push(c);
 		}
-		for (const group of enabled) {
+		for (const group of shellContributions.enabled) {
 			for (const way of group.waysIn) {
 				if (way.source !== 'list') continue;
 				for (const row of temperViews.list(`${group.plugin}/${way.id}`).page?.rows ?? []) {
@@ -88,7 +88,7 @@
 				: step.subject.kind === 'resource'
 					? (step.context ?? undefined)
 					: undefined;
-		const lenses: Command[] = lensesFor(step.subject, step.docType, enabled)
+		const lenses: Command[] = lensesFor(step.subject, step.docType, shellContributions.enabled)
 			.filter((lens) => lens.id !== step.lens)
 			.map((lens) => ({
 				id: `lens:${lens.id}`,

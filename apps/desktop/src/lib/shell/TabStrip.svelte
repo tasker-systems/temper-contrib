@@ -4,11 +4,11 @@
 	 * through. Bounded, and it says so: the count sits at the strip's end, a tab set aside to make
 	 * room is listed there to reopen, and what a move did or refused is said beneath the strip.
 	 */
-	import { enabled } from './contributions';
+	import { shellContributions } from './contributions';
 	import { lensById } from './lenses';
 	import { HOME_TAB, stepTitle, TAB_BOUND, tabs } from './tabs.svelte';
 
-	const lensName = (id: string | null) => (id ? (lensById(id, enabled)?.name ?? id) : '');
+	const lensName = (id: string | null) => (id ? (lensById(id, shellContributions.enabled)?.name ?? id) : '');
 
 	let asideOpen = $state(false);
 	let asideRoot: HTMLDivElement | undefined = $state();

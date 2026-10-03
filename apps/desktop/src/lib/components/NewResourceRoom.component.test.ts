@@ -13,6 +13,8 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { shellContributions } from '$lib/shell/contributions';
+import { pluginPackages } from '$lib/shell/contributions/plugin-fixture';
 import type { TabHandle } from '$lib/shell/lenses';
 import { temperViews } from '$lib/temper-views.svelte';
 import Page from './NewResourceRoom.svelte';
@@ -39,6 +41,8 @@ const tab = {
 
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	switch (cmd) {
+		case 'plugin_packages':
+			return Promise.resolve(pluginPackages());
 		case 'temper_contexts':
 			return Promise.resolve(contexts);
 		case 'doc_create':
@@ -81,13 +85,15 @@ async function fillAndSubmit(
 }
 
 describe('the create room', () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		contexts = [NOTES];
 		createAnswer = null;
 		opens.length = 0;
 		temperViews.reset();
 		vi.mocked(invoke).mockClear();
 		vi.mocked(invoke).mockImplementation(routeInvoke as never);
+		shellContributions.init();
+		await vi.waitFor(() => expect(shellContributions.ready).toBe(true));
 	});
 
 	it('creating a task sends the context, the type and the title — and no metadata save', async () => {

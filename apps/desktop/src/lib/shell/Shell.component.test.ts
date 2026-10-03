@@ -14,6 +14,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
+import { shellContributions } from './contributions';
+import { pluginPackages } from './contributions/plugin-fixture';
 import { homeReads } from './home-reads.svelte';
 import { shellPanels } from './panels.svelte';
 import Shell from './Shell.svelte';
@@ -166,6 +168,8 @@ function boundGraph(args?: Record<string, unknown>) {
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	switch (cmd) {
+		case 'plugin_packages':
+			return Promise.resolve(pluginPackages());
 		case 'hub_recent_work':
 			return Promise.resolve(hubView);
 		case 'temper_recent_work':
@@ -293,6 +297,9 @@ describe('the shell', () => {
 		await import('./lenses/DocumentLens.svelte');
 		await import('./lenses/BoundLens.svelte');
 		await import('$lib/markdown/sanitize');
+		vi.mocked(invoke).mockImplementation(routeInvoke as never);
+		shellContributions.init();
+		await vi.waitFor(() => expect(shellContributions.ready).toBe(true));
 	});
 
 	beforeEach(() => {

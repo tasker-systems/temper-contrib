@@ -69,16 +69,27 @@ const lensShape = z.strictObject({
 	group: z.string().optional()
 });
 
-const wayInShape = z.strictObject({
-	id: z.string(),
-	label: z.string(),
-	scope: z.string(),
-	source: z.union([
-		z.strictObject({ source: z.literal('contexts') }),
-		z.strictObject({ source: z.literal('recent') }),
-		z.strictObject({ source: z.literal('list'), filter: filterShape })
-	])
-});
+const wayInShape = z.union([
+	z.strictObject({
+		id: z.string(),
+		label: z.string(),
+		scope: z.string(),
+		source: z.literal('contexts')
+	}),
+	z.strictObject({
+		id: z.string(),
+		label: z.string(),
+		scope: z.string(),
+		source: z.literal('recent')
+	}),
+	z.strictObject({
+		id: z.string(),
+		label: z.string(),
+		scope: z.string(),
+		source: z.literal('list'),
+		filter: filterShape
+	})
+]);
 
 const doctypeShape = z.strictObject({
 	doctype: z.string(),
@@ -195,18 +206,7 @@ function loadPackage(
 		}
 		lenses.push({ ...base, build: { state: 'built', component } });
 	}
-	const waysIn: WayInDecl[] = manifest.data.contributions.waysIn.map((way) => {
-		if (way.source.source !== 'list') {
-			return { id: way.id, label: way.label, scope: way.scope, source: way.source.source };
-		}
-		return {
-			id: way.id,
-			label: way.label,
-			scope: way.scope,
-			source: 'list' as const,
-			filter: way.source.filter
-		};
-	});
+	const waysIn: WayInDecl[] = manifest.data.contributions.waysIn;
 	contributions.push({
 		plugin,
 		lenses,
