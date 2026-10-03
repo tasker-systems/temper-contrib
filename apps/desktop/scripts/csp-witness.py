@@ -382,6 +382,18 @@ def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
                 failures.append("switching back to a tab remounted its room")
             step("switched back")
 
+            # Probe: hold the session idle and poke it, so a launch-timer kill fires
+            # wherever the drive is — separating a timed kill from the lens switch.
+            print(f"[witness {tag}] idling 30s, poking every 2s", file=sys.stderr, flush=True)
+            for poke in range(15):
+                time.sleep(2)
+                driver.execute_script("return 1")
+                print(
+                    f"[witness {tag}] idle poke {poke} ok (+{time.monotonic() - started:.1f}s)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
             # A lens switch, to one that is not built yet.
             print(f"[witness {tag}] graph lens: finding the trigger", file=sys.stderr, flush=True)
             driver.find_element(
