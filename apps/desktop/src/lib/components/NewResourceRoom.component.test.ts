@@ -2,8 +2,10 @@
 // title — and no metadata save, a task carries no defaults; a session create saves
 // its `date` default through the metadata door after the create lands, then opens;
 // a refusal is one line, opens nothing, and leaves the form standing for an
-// immediate retry; a context temper does not answer creates nothing and says so.
-// `invoke` is mocked and records every call.
+// immediate retry; a refused create is retried with its retained idempotency key
+// (even with the fields edited) and a created one starts fresh; a context temper
+// does not answer creates nothing and says so. `invoke` is mocked and records
+// every call.
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 
 import { invoke } from '@tauri-apps/api/core';
@@ -132,6 +134,54 @@ describe('the create room', () => {
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(2)
 		);
+	});
+
+	it('a refused create is retried with its key, and a created one starts fresh', async () => {
+		createAnswer = { state: 'refused', reason: 'forbidden', idempotencyKey: NEW };
+		const { container } = render(Page, { props: { tab, context: '@pete/notes' } });
+		await vi.waitFor(() => expect(container.textContent).toContain('notes — @pete/notes'));
+		await fillAndSubmit(container, 'Write the witness');
+		await vi.waitFor(() =>
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain('forbidden')
+		);
+		// The person edits the title and presses Create again — the retained key rides
+		// along: the server dedups on owner and key, and converging is the desired outcome.
+		await fillAndSubmit(container, 'Write the witness, revised');
+		await vi.waitFor(() =>
+			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(2)
+		);
+		const [, retryArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[1];
+		expect(retryArgs).toEqual({
+			contextId: 'ctx-1',
+			docType: 'task',
+			title: 'Write the witness, revised',
+			idempotencyKey: NEW
+		});
+		// The retry lands: the create that converges is the one carrying the key.
+		createAnswer = null;
+		await fillAndSubmit(container, 'Write the witness, revised');
+		await vi.waitFor(() =>
+			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(3)
+		);
+		const [, landedArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[2];
+		expect(landedArgs).toEqual({
+			contextId: 'ctx-1',
+			docType: 'task',
+			title: 'Write the witness, revised',
+			idempotencyKey: NEW
+		});
+		await vi.waitFor(() => expect(opens).toHaveLength(1));
+		// A created answer spends the key: the next create mints afresh, nothing retained.
+		await fillAndSubmit(container, 'Write the witness, revised');
+		await vi.waitFor(() =>
+			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(4)
+		);
+		const [, freshArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[3];
+		expect(freshArgs).toEqual({
+			contextId: 'ctx-1',
+			docType: 'task',
+			title: 'Write the witness, revised'
+		});
 	});
 
 	it('a context temper does not answer creates nothing and says so', async () => {

@@ -5,7 +5,8 @@
 //! server's shared pipeline fills the managed tier on receive (a task lands in
 //! `backlog`, a goal in `active`, the provenance trio, a slug from the title)
 //! and stamps the create `user-created`. What this sends is the title, the doc
-//! type and the context, plus a per-invocation idempotency key.
+//! type and the context, plus an idempotency key: the caller's when it holds
+//! one from an earlier answer, a fresh mint otherwise.
 //!
 //! The idempotency key is the retry story: the server dedups creates on
 //! `(owner, key)`, so a network error does not mean the write failed. The
@@ -79,14 +80,17 @@ fn create_request(
     }
 }
 
-/// Creates the document and answers what came of it.
+/// Creates the document and answers what came of it. `idempotency_key` is the
+/// caller's when it holds one from an earlier refused or failed answer, and a
+/// fresh mint when it does not.
 pub(crate) async fn create_document<S: DocSink>(
     sink: &S,
     context_ref: &str,
     doc_type: &str,
     title: &str,
-    idempotency_key: Uuid,
+    idempotency_key: Option<Uuid>,
 ) -> DocCreated {
+    let idempotency_key = idempotency_key.unwrap_or_else(Uuid::new_v4);
     let Some(context_id) = parse_ref(context_ref) else {
         return DocCreated::Refused {
             reason: "not a context reference".into(),
@@ -119,18 +123,20 @@ pub(crate) async fn create_document<S: DocSink>(
 }
 
 /// Creates a document: its title, doc type and context — nothing else. The
-/// body and the open tier ride later, guarded calls.
+/// body and the open tier ride later, guarded calls. `idempotencyKey` is a
+/// retry's retained key; absent, a fresh one is minted per invocation.
 #[tauri::command]
 pub async fn doc_create(
     state: tauri::State<'_, TemperState>,
     context_id: String,
     doc_type: String,
     title: String,
+    idempotency_key: Option<Uuid>,
 ) -> Result<DocCreated, String> {
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
-    Ok(create_document(client, &context_id, &doc_type, &title, Uuid::new_v4()).await)
+    Ok(create_document(client, &context_id, &doc_type, &title, idempotency_key).await)
 }
 
 #[cfg(test)]
@@ -172,6 +178,45 @@ mod tests {
         );
     }
 
+    /// The bite: a create invoked with a caller's key sends THAT key — the same
+    /// five-field body the minted case sends, with the caller's key in the key
+    /// slot. Nothing else about the wire body moves.
+    #[tokio::test]
+    async fn a_create_invoked_with_a_caller_key_sends_that_key() {
+        let sink = Scripted::answering(Answer::Forbidden);
+        create_document(&sink, CONTEXT, "session", "A fresh document", Some(key())).await;
+        assert_eq!(
+            sink.sent(),
+            vec![serde_json::json!({
+                "kb_context_id": CONTEXT,
+                "doc_type": "session",
+                "origin_uri": "",
+                "title": "A fresh document",
+                "idempotency_key": KEY,
+            })],
+            "the caller's key rides the five-field body and nothing else"
+        );
+    }
+
+    /// The bite: a create invoked without a key mints one — the same five-field
+    /// body, with a fresh key in the slot.
+    #[tokio::test]
+    async fn a_create_invoked_without_a_key_mints_one() {
+        let sink = Scripted::answering(Answer::Forbidden);
+        create_document(&sink, CONTEXT, "session", "A fresh document", None).await;
+        let [wire] = sink.sent().try_into().unwrap();
+        let body = wire.as_object().expect("the body is an object");
+        assert_eq!(body.len(), 5, "the five fields and nothing else");
+        let minted = body["idempotency_key"]
+            .as_str()
+            .expect("the key is a UUID string");
+        assert_ne!(
+            Uuid::parse_str(minted).expect("the minted key is a UUID"),
+            Uuid::nil(),
+            "the mint is a fresh key, not the absence of one"
+        );
+    }
+
     /// What the scripted sink answers.
     enum Answer {
         /// The server answered no: a permission refusal.
@@ -180,10 +225,12 @@ mod tests {
         Transport,
     }
 
-    /// Answers every create with the scripted outcome and counts what was asked.
+    /// Answers every create with the scripted outcome, counts what was asked and
+    /// keeps the wire body of everything that was sent.
     struct Scripted {
         answer: Answer,
         calls: Mutex<usize>,
+        sent: Mutex<Vec<serde_json::Value>>,
     }
 
     impl Scripted {
@@ -191,20 +238,29 @@ mod tests {
             Scripted {
                 answer,
                 calls: Mutex::new(0),
+                sent: Mutex::new(Vec::new()),
             }
         }
 
         fn calls(&self) -> usize {
             *self.calls.lock().unwrap()
         }
+
+        fn sent(&self) -> Vec<serde_json::Value> {
+            self.sent.lock().unwrap().clone()
+        }
     }
 
     impl DocSink for Scripted {
         async fn create(
             &self,
-            _request: &ResourceCreateRequest,
+            request: &ResourceCreateRequest,
         ) -> Result<ResourceView, ClientError> {
             *self.calls.lock().unwrap() += 1;
+            self.sent
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(request).unwrap());
             Err(match self.answer {
                 Answer::Forbidden => ClientError::Forbidden,
                 // A real transport error, not a lookalike: the connection to a
@@ -225,7 +281,8 @@ mod tests {
     #[tokio::test]
     async fn a_client_refusal_lands_in_the_refused_arm_with_its_key() {
         let sink = Scripted::answering(Answer::Forbidden);
-        let answer = create_document(&sink, CONTEXT, "session", "A fresh document", key()).await;
+        let answer =
+            create_document(&sink, CONTEXT, "session", "A fresh document", Some(key())).await;
         assert_eq!(
             answer,
             DocCreated::Refused {
@@ -246,7 +303,8 @@ mod tests {
     #[tokio::test]
     async fn a_transport_failure_lands_in_the_failed_arm_with_its_key() {
         let sink = Scripted::answering(Answer::Transport);
-        let answer = create_document(&sink, CONTEXT, "session", "A fresh document", key()).await;
+        let answer =
+            create_document(&sink, CONTEXT, "session", "A fresh document", Some(key())).await;
         let DocCreated::Failed {
             message,
             idempotency_key,
@@ -265,8 +323,14 @@ mod tests {
     #[tokio::test]
     async fn an_unusable_context_ref_is_refused_and_sends_nothing() {
         let sink = Scripted::answering(Answer::Forbidden);
-        let answer =
-            create_document(&sink, "not a context", "session", "A fresh document", key()).await;
+        let answer = create_document(
+            &sink,
+            "not a context",
+            "session",
+            "A fresh document",
+            Some(key()),
+        )
+        .await;
         assert_eq!(
             answer,
             DocCreated::Refused {

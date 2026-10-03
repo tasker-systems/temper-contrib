@@ -23,6 +23,9 @@
 	let title = $state('');
 	let submitting = $state(false);
 	let failure = $state('');
+	/** The key a refused or failed create echoed, held for this form's next submit — kept even
+	 * if the fields change: the server dedups on owner+key, and converging is the desired outcome. */
+	let retryKey = $state<string | null>(null);
 
 	/** The create menu, the doctypes the enabled contributions offer. */
 	const menu = $derived(createMenu(enabled, today()));
@@ -80,16 +83,19 @@
 			const answer = await invoke<DocCreated>('doc_create', {
 				contextId: resolved?.id,
 				docType: chosen,
-				title: title.trim()
+				title: title.trim(),
+				...(retryKey === null ? {} : { idempotencyKey: retryKey })
 			});
 			if (answer.state !== 'created') {
 				// The create did not land. The line names what failed; the form stands so
-				// Create can be pressed again at once. (The refused and failed answers carry
-				// the idempotency key a converging retry reuses — `doc_create` mints it and
-				// takes none from here, so the reuse itself is not yet sendable.)
+				// Create can be pressed again at once, resending the echoed key — the
+				// retry converges on whatever already committed instead of duplicating.
 				failure = answer.state === 'refused' ? answer.reason : answer.message;
+				retryKey = answer.idempotencyKey;
 				return;
 			}
+			// The create landed: its key is spent, the next create mints afresh.
+			retryKey = null;
 			if (option?.defaults) {
 				const saved = await invoke<MetaSaved>('doc_save_meta', {
 					id: answer.id,
