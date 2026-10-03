@@ -17,10 +17,20 @@ type Call = { cmd: string; args: Record<string, unknown> | undefined };
 const calls: Call[] = [];
 const handlers: Record<string, (event: { payload: unknown }) => void> = {};
 
+/** The `acp_start` answer's presentations field, threaded per-test and reset
+ *  in beforeEach: absent is the available arm — the answer every existing
+ *  test relied on, which is why none of them showed anything extra. */
+let acpStartPresentations: { state: 'unsupported'; reason: string } | undefined;
+
 function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
 	calls.push({ cmd, args });
 	if (cmd === 'acp_start') {
-		return Promise.resolve({ conversationId: 'c1', sessionId: 's1', agentInfo: {} });
+		return Promise.resolve({
+			conversationId: 'c1',
+			sessionId: 's1',
+			agentInfo: {},
+			...(acpStartPresentations ? { presentations: acpStartPresentations } : {})
+		});
 	}
 	if (cmd === 'settings_get') {
 		return Promise.resolve({
@@ -64,6 +74,7 @@ async function startConversation(): Promise<void> {
 describe('the agent panel', () => {
 	beforeEach(() => {
 		calls.length = 0;
+		acpStartPresentations = undefined;
 		vi.mocked(invoke).mockImplementation(routeInvoke as never);
 		vi.mocked(listen).mockImplementation(async (event, handler) => {
 			handlers[event as string] = handler as (e: { payload: unknown }) => void;
@@ -83,6 +94,9 @@ describe('the agent panel', () => {
 	it('starts a conversation and writes the work record when it closes', async () => {
 		render(AgentPanel);
 		await startConversation();
+		// An agent that can present (presentations absent from the answer)
+		// shows nothing extra.
+		expect(document.querySelector('p.t-strip.presents')).toBeNull();
 
 		const end = [...document.querySelectorAll('button')].find(
 			(b) => b.textContent === 'End conversation'
@@ -101,6 +115,26 @@ describe('the agent panel', () => {
 		expect(args.facts.openedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 		expect(args.facts.closedAt).toMatch(/^\d{2}-\d{2}T|^\d{4}-\d{2}-\d{2}T/);
 		expect(args.idempotencyKey).toBeTruthy();
+	});
+
+	// The core names the agent's own lack; the panel carries the words to the
+	// person, beside the reach line, while the conversation is engaged — the
+	// reason verbatim, never a paraphrase.
+	it('says in the core’s words when the agent cannot present', async () => {
+		const reason =
+			'the agent declared no MCP HTTP support, so the presentation server was not started for this conversation';
+		acpStartPresentations = { state: 'unsupported', reason };
+		render(AgentPanel);
+		await startConversation();
+
+		const notice = await vi.waitFor(() => {
+			const p = document.querySelector('p.t-strip.presents');
+			expect(p).not.toBeNull();
+			return p as HTMLElement;
+		});
+		expect(notice.textContent).toContain(`presentations · ${reason}`);
+		// Beside what the panel already says about the agent's reach.
+		expect(document.body.textContent).toContain('reach ·');
 	});
 
 	it('renders a permission ask with the agent’s declared options and answers as the chosen one', async () => {
