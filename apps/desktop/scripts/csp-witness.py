@@ -24,6 +24,13 @@ Production build, never the dev server: `tauri dev` runs under `devCsp`, which i
 Needs `tauri-driver` (cargo install tauri-driver) and, on Linux, `WebKitWebDriver`
 (webkit2gtk-driver) plus a display (xvfb-run). `cargo make desktop-csp-witness` runs all of it.
 Exits non-zero, naming what failed, when either half does not hold.
+
+The session is where the flake lives, not the assertions: a session sometimes never answers,
+or dies mid-drive. `WITNESS_ATTEMPTS` (default 3) bounds how often the witness retries an
+attempt whose drive never completed. A completed drive is final — its assertions are
+deterministic, so a retry can never re-roll a finished set of checks. Every attempt writes
+its own `tauri-driver-<n>.log`, and a hung attempt is censused (processes, session bus
+names) before teardown, while the answer to "what was alive" is still on the table.
 """
 
 from __future__ import annotations
@@ -219,24 +226,54 @@ def healthy(h: dict) -> list[str]:
     return problems
 
 
-def main() -> int:
-    binary = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_BINARY
-    if not binary.exists():
-        raise SystemExit(f"no build at {binary}; run: npx tauri build --debug --no-bundle")
-    if not shutil.which("tauri-driver"):
-        raise SystemExit("tauri-driver not on PATH; run: cargo install tauri-driver --locked")
+def census_at_hang(binary: Path, tag: str) -> None:
+    """What is alive at the moment the session stopped answering, recorded before any
+    teardown can take the answer apart — the post-teardown census cannot tell a process
+    that died on its own from one the teardown killed."""
+    print(f"\n[witness {tag}] census at hang:", file=sys.stderr, flush=True)
+    for pattern in (binary.name, "WebKit", "tauri-driver", "bwrap", "dbus-daemon", "Xvfb"):
+        found = subprocess.run(["pgrep", "-af", pattern], capture_output=True, text=True)
+        print(f"  {pattern}: {found.stdout.strip() or '(none)'}", file=sys.stderr, flush=True)
+    names = subprocess.run(
+        [
+            "gdbus",
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.DBus",
+            "--object-path",
+            "/org/freedesktop/DBus",
+            "--method",
+            "org.freedesktop.DBus.ListNames",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    print(
+        f"  session bus: {names.stdout.strip() or names.stderr.strip() or '(none)'}",
+        file=sys.stderr,
+        flush=True,
+    )
 
+
+def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
+    """One session, one drive. Returns the report when the drive completed — completed
+    drives are final, however their assertions came out — and None when the session
+    itself failed, which is the only thing a retry is for."""
+    tag = f"attempt {n}"
+    failures: list[str] = []
+    report: dict = {}
+    driver = None
     driver_proc = subprocess.Popen(
         ["tauri-driver", "--port", str(DRIVER_PORT)],
         # The app is spawned by tauri-driver and its words flow through here: a session
         # that never answers is diagnosed by what the app said on its way out, so keep
-        # both channels.
-        stdout=open("tauri-driver.log", "w"),
+        # both channels. One file per attempt — a retry must not overwrite the
+        # previous attempt's only words.
+        stdout=open(f"tauri-driver-{n}.log", "w"),
         stderr=subprocess.STDOUT,
     )
     os.environ.setdefault("RUST_BACKTRACE", "1")
-    failures: list[str] = []
-    report: dict = {}
     try:
         wait_for_port(DRIVER_PORT)
         options = ArgOptions()
@@ -249,6 +286,7 @@ def main() -> int:
         driver = webdriver.Remote(
             command_executor=client.remote_server_addr, options=options, client_config=client
         )
+        print(f"[witness {tag}] session created", file=sys.stderr, flush=True)
         # The catalog step walks computed styles over every element of every specimen — the
         # graph example alone carries 200 nodes and 600 edges. A 20s budget predates that
         # page; the step's real cost is over a minute on a slow machine.
@@ -277,12 +315,22 @@ def main() -> int:
             )
 
             steps = []
+            started = time.monotonic()
 
             def step(name: str) -> None:
                 health = driver.execute_async_script(HEALTH)
                 health["step"] = name
                 steps.append(health)
                 failures.extend(f"{name}: {p}" for p in healthy(health))
+                # The drive's trail on stderr as it happens: a report is only printed
+                # when the drive completes, so a death mid-drive leaves this as the
+                # only record of how far it got and how long each step took.
+                print(
+                    f"[witness {tag}] step {len(steps)}: {name}"
+                    f" (+{time.monotonic() - started:.1f}s)",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
             def tab_count(n: int):
                 return lambda d: len(d.find_elements(By.CSS_SELECTOR, '[role="tab"]')) == n
@@ -478,17 +526,21 @@ def main() -> int:
             driver.quit()
     except WebDriverException as e:
         # A session that dies before its first command answers carries an empty message;
-        # the class and the raw error are what name it then.
+        # the class and the raw error are what name it then. Census while everything is
+        # still standing — teardown is about to take the evidence apart.
         failures.append(f"webdriver: {type(e).__name__}: {e.msg!r}")
+        census_at_hang(binary, tag)
     finally:
+        if driver is not None:
+            driver.quit()
         driver_proc.terminate()
         driver_proc.wait(timeout=10)
         # What the app said on its way out — or while hanging — is the diagnosis a named
         # timeout still lacks. Alive-at-teardown is recorded beside it: a hang and a crash
         # name different suspects.
-        tail = Path("tauri-driver.log")
+        tail = Path(f"tauri-driver-{n}.log")
         if tail.exists() and tail.stat().st_size > 0:
-            print("\ntauri-driver and app output (tail):", file=sys.stderr)
+            print(f"\n[attempt {n}] tauri-driver and app output (tail):", file=sys.stderr)
             sys.stderr.write(tail.read_text(errors="replace")[-4000:] + "\n")
         alive = subprocess.run(["pgrep", "-af", binary.name], capture_output=True, text=True)
         if alive.stdout.strip():
@@ -499,6 +551,46 @@ def main() -> int:
         webkit = subprocess.run(["pgrep", "-af", "WebKit|WPE"], capture_output=True, text=True)
         print(f"webkit processes at teardown:\n{webkit.stdout or '(none)'}", file=sys.stderr)
 
+    return (report or None), failures
+
+
+def main() -> int:
+    binary = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_BINARY
+    if not binary.exists():
+        raise SystemExit(f"no build at {binary}; run: npx tauri build --debug --no-bundle")
+    if not shutil.which("tauri-driver"):
+        raise SystemExit("tauri-driver not on PATH; run: cargo install tauri-driver --locked")
+    attempts = int(os.environ.get("WITNESS_ATTEMPTS", "3"))
+
+    report: dict | None = None
+    failures: list[str] = []
+    for n in range(1, attempts + 1):
+        print(f"[witness] attempt {n}/{attempts}", file=sys.stderr, flush=True)
+        report, failures = run_attempt(binary, n)
+        if report is not None:
+            break
+        if n < attempts:
+            # A drive that died mid-flight can leave helpers holding the port or a dbus
+            # name; the next attempt starts from a clean process table. Scoped to the
+            # processes this witness and its driver own.
+            for pattern in (
+                str(binary),
+                "WebKitWebDriver",
+                "WebKitWebProcess",
+                "WebKitNetworkProcess",
+            ):
+                subprocess.run(["pkill", "-f", pattern], capture_output=True)
+            time.sleep(2)
+
+    if report is None:
+        print(
+            f"\nCSP witness FAILED: no drive completed in {attempts} attempts"
+            " — the session itself is what failed.",
+            *failures,
+            sep="\n  - ",
+            file=sys.stderr,
+        )
+        return 1
     print(json.dumps(report, indent=2))
     if failures:
         print("\nCSP witness FAILED:", *failures, sep="\n  - ", file=sys.stderr)

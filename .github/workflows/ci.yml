@@ -298,10 +298,11 @@ jobs:
         run: |
           bun run tauri build --debug --no-bundle
           # G_MESSAGES_DEBUG carries WebKitWebDriver's own words into the captured log —
-          # what the driver said while the session was not answering. WEBKIT_DEBUG=Process
-          # turns on WebKit's process-launch channel where the build carries it; a channel
-          # the build lacks refuses by name on stderr, which itself names what exists.
-          WEBKIT_DEBUG=Process G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+          # what the driver said while the session was not answering; RUST_LOG does the
+          # same for tauri-driver where it logs. The witness retries a session whose
+          # drive never completed (WITNESS_ATTEMPTS); a completed drive is final, so a
+          # retry never re-rolls a finished set of assertions.
+          RUST_LOG=debug WITNESS_ATTEMPTS=3 G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
         working-directory: apps/desktop
 
       # WebKit's helper processes can be killed by the kernel before WebKit can say why;
@@ -321,7 +322,7 @@ jobs:
       - name: Launch the app bare and census its webview processes
         if: always()
         run: |
-          WEBKIT_DEBUG=Process xvfb-run -a dbus-run-session -- scripts/witness-bare-launch.sh src-tauri/target/debug/desktop
+          xvfb-run -a dbus-run-session -- scripts/witness-bare-launch.sh src-tauri/target/debug/desktop
         working-directory: apps/desktop
 
   ci-success:
