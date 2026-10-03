@@ -1,5 +1,8 @@
 mod acp;
 mod adapters;
+// The desktop's own temper credential custody: keychain-backed, or a file
+// under TEMPER_DESKTOP_AUTH_STORE for dev and witness runs.
+pub mod auth_store;
 mod document;
 mod document_create;
 mod document_panel;
