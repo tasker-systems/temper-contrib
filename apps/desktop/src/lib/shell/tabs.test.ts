@@ -111,6 +111,15 @@ describe('the tab model', () => {
 		expect(tab.steps.map((s) => s.subject)).toEqual([doc(1), doc(2)]);
 	});
 
+	it('a resolved resource step keeps its context, and the trail restores it', () => {
+		model.open(doc(1), { where: 'new' });
+		const step = model.current(model.active);
+		model.resolved(step.key, 'core/document', 'task', 'a-document-1', '+temper-dev/contrib');
+		expect(model.current(model.active).context).toBe('+temper-dev/contrib');
+		const restored = new TabModel(storage);
+		expect(restored.current(restored.active).context).toBe('+temper-dev/contrib');
+	});
+
 	it('a thirteenth tab sets the least-recently-used one aside, and says which', () => {
 		for (let i = 0; i < TAB_BOUND; i++) {
 			clock += 1;

@@ -3,6 +3,7 @@ import { roomHref as resourceHref } from '$lib/document';
 import {
 	contextHref,
 	parseSubject,
+	placeHref,
 	subjectFromAddress,
 	subjectKey,
 	subjectWords
@@ -49,6 +50,45 @@ describe('reading an address back into a subject', () => {
 		const a = at(resourceHref(ID));
 		const b = at(resourceHref(`some-slug-${ID}`));
 		expect(a && b && subjectKey(a) === subjectKey(b)).toBe(true);
+	});
+});
+
+describe('the create place', () => {
+	it('reads the new-resource place, the context riding the address', () => {
+		expect(at('/new-resource?context=%2Bpete%2Fnotes')).toEqual({
+			kind: 'place',
+			place: 'new-resource',
+			context: '+pete/notes'
+		});
+		// Without a context the place still resolves — the room says what is missing.
+		expect(at('/new-resource')).toEqual({ kind: 'place', place: 'new-resource' });
+	});
+
+	it('keys a create room by its place and its context — two contexts are two rooms', () => {
+		const notes = at('/new-resource?context=%2Bpete%2Fnotes');
+		const work = at('/new-resource?context=%2Bpete%2Fwork');
+		expect(notes && work && subjectKey(notes) !== subjectKey(work)).toBe(true);
+		expect(notes && subjectKey(notes)).toBe('place:new-resource:+pete/notes');
+		// A place that names no context keys as it always did.
+		expect(subjectKey({ kind: 'place', place: 'settings' })).toBe('place:settings');
+	});
+
+	it('is called by its words, never its id', () => {
+		expect(subjectWords({ kind: 'place', place: 'new-resource' })).toBe('new resource');
+	});
+
+	it('round-trips through the store, and drops a context that is not a reference', () => {
+		const subject = { kind: 'place', place: 'new-resource', context: '+pete/notes' } as const;
+		expect(parseSubject(JSON.parse(JSON.stringify(subject)))).toEqual(subject);
+		expect(parseSubject({ kind: 'place', place: 'new-resource', context: 7 })).toEqual({
+			kind: 'place',
+			place: 'new-resource'
+		});
+	});
+
+	it('addresses the place, the context query-stringed when named', () => {
+		expect(placeHref('new-resource')).toBe('/new-resource');
+		expect(placeHref('new-resource', '+pete/notes')).toBe('/new-resource?context=%2Bpete%2Fnotes');
 	});
 });
 

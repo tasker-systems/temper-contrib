@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { core } from './contributions/core';
 import { temperWorkflows } from './contributions/temper-workflows';
-import { type Contribution, homeSections, lensesFor, resolveLens } from './lenses';
+import { type Contribution, createMenu, homeSections, lensesFor, resolveLens } from './lenses';
 import type { Subject } from './subjects';
 
 const resource: Subject = { kind: 'resource', id: '01a0e020-a6d7-7420-b924-68f5e89f354b' };
@@ -23,7 +23,16 @@ const workflows = (state: 'built' | 'unbuilt'): Contribution => ({
 		}
 	],
 	waysIn: [],
-	vocabularies: [],
+	vocabularies: [{ id: 'create', doctypes: [{ doctype: 'task' }] }],
+	skills: []
+});
+
+/** A plugin whose create vocabulary re-declares a base doctype with defaults of its own. */
+const opinionated = (doctype: string, open: Record<string, unknown>): Contribution => ({
+	plugin: 'practice',
+	lenses: [],
+	waysIn: [],
+	vocabularies: [{ id: 'create', doctypes: [{ doctype, defaults: () => open }] }],
 	skills: []
 });
 
@@ -162,5 +171,51 @@ describe("home's sections", () => {
 			lens: { id: 'core/home' }
 		});
 		expect(lensesFor(home, null, [core, temperWorkflows])).toEqual([]);
+	});
+});
+
+describe('the create menu', () => {
+	const today = '2026-10-02';
+
+	it('yields the six with temper-workflows’ defaults — a date for sessions and research, none for the rest', () => {
+		const menu = createMenu([core, temperWorkflows], today);
+		expect(menu.map((option) => option.doctype)).toEqual([
+			'task',
+			'goal',
+			'session',
+			'research',
+			'concept',
+			'decision'
+		]);
+		const defaults = new Map(menu.map((option) => [option.doctype, option.defaults]));
+		expect(defaults.get('session')).toEqual({ date: today });
+		expect(defaults.get('research')).toEqual({ date: today });
+		expect(defaults.get('task')).toBeUndefined();
+		expect(defaults.get('goal')).toBeUndefined();
+		expect(defaults.get('concept')).toBeUndefined();
+		expect(defaults.get('decision')).toBeUndefined();
+	});
+
+	it('with core alone, the base six with no defaults — creation works rather than nothing', () => {
+		const menu = createMenu([core], today);
+		expect(menu.map((option) => option.doctype)).toEqual([
+			'task',
+			'goal',
+			'session',
+			'research',
+			'concept',
+			'decision'
+		]);
+		expect(menu.every((option) => option.defaults === undefined)).toBe(true);
+	});
+
+	it('a doctype both core and a plugin declare appears once, with the plugin’s defaults', () => {
+		const menu = createMenu([core, opinionated('task', { date: today })], today);
+		const tasks = menu.filter((option) => option.doctype === 'task');
+		expect(tasks).toHaveLength(1);
+		expect(tasks[0].defaults).toEqual({ date: today });
+		// Still the six, and a doctype the plugin stayed silent on keeps the base's plain entry.
+		expect(menu).toHaveLength(6);
+		expect(menu.find((option) => option.doctype === 'goal')?.defaults).toBeUndefined();
 	});
 });

@@ -10,16 +10,26 @@
  */
 import { refId } from '$lib/document';
 
-export type Place = 'home' | 'settings' | 'setup' | 'catalog';
+export type Place = 'home' | 'settings' | 'setup' | 'catalog' | 'new-resource';
 
 export type Subject =
 	| { kind: 'resource'; id: string }
 	| { kind: 'query'; context?: string; docType?: string; text?: string }
 	| { kind: 'neighbourhood'; id: string; depth: 1 }
 	| { kind: 'presentation'; resource: string; artifact: string }
-	| { kind: 'place'; place: Place };
+	/** `context`, where the place is about one — the create room is opened for a named context. */
+	| { kind: 'place'; place: Place; context?: string };
 
-const PLACES: readonly Place[] = ['home', 'settings', 'setup', 'catalog'];
+const PLACES: readonly Place[] = ['home', 'settings', 'setup', 'catalog', 'new-resource'];
+
+/** What a place is called before anything has been read about it — never its id. */
+const PLACE_WORDS: Record<Place, string> = {
+	home: 'home',
+	settings: 'settings',
+	setup: 'setup',
+	catalog: 'catalog',
+	'new-resource': 'new resource'
+};
 
 /** One stable key per subject: two subjects are the same subject exactly when their keys match. */
 export function subjectKey(subject: Subject): string {
@@ -31,7 +41,9 @@ export function subjectKey(subject: Subject): string {
 		case 'presentation':
 			return `presentation:${subject.resource}:${subject.artifact}`;
 		case 'place':
-			return `place:${subject.place}`;
+			return subject.context
+				? `place:${subject.place}:${subject.context}`
+				: `place:${subject.place}`;
 		case 'query':
 			return `query:${subject.context ?? ''}|${subject.docType ?? ''}|${subject.text ?? ''}`;
 	}
@@ -47,7 +59,7 @@ export function subjectWords(subject: Subject): string {
 		case 'presentation':
 			return 'presented view';
 		case 'place':
-			return subject.place;
+			return PLACE_WORDS[subject.place];
 		case 'query':
 			return (
 				[subject.context, subject.docType, subject.text && `“${subject.text}”`]
@@ -62,9 +74,10 @@ export function contextHref(contextRef: string): string {
 	return `/q?context=${encodeURIComponent(contextRef)}`;
 }
 
-/** The address of one of core's places. Home is the root. */
-export function placeHref(place: Place): string {
-	return place === 'home' ? '/' : `/${place}`;
+/** The address of one of core's places. Home is the root; a context-riding place carries it. */
+export function placeHref(place: Place, context?: string): string {
+	if (place === 'home') return '/';
+	return context ? `/${place}?context=${encodeURIComponent(context)}` : `/${place}`;
 }
 
 /**
@@ -96,6 +109,13 @@ export function subjectFromAddress(pathname: string, search: URLSearchParams): S
 		return context || docType || text ? query : null;
 	}
 	const place = pathname.replace(/^\/|\/$/g, '');
+	if (place === 'new-resource') {
+		// The create place names its target context in the address, as a query names its own.
+		const subject: Subject = { kind: 'place', place: 'new-resource' };
+		const context = search.get('context');
+		if (context) subject.context = context;
+		return subject;
+	}
 	return (PLACES as readonly string[]).includes(place)
 		? { kind: 'place', place: place as Place }
 		: null;
@@ -115,10 +135,13 @@ export function parseSubject(raw: unknown): Subject | null {
 			return str(s.resource) && str(s.artifact)
 				? { kind: 'presentation', resource: s.resource, artifact: s.artifact }
 				: null;
-		case 'place':
-			return (PLACES as readonly unknown[]).includes(s.place)
-				? { kind: 'place', place: s.place as Place }
-				: null;
+		case 'place': {
+			if (!(PLACES as readonly unknown[]).includes(s.place)) return null;
+			const restored: Subject = { kind: 'place', place: s.place as Place };
+			// Only the create place names a context; a stray one on any other place is dropped.
+			if (s.place === 'new-resource' && str(s.context)) restored.context = s.context;
+			return restored;
+		}
 		case 'query': {
 			const query: Subject = { kind: 'query' };
 			if (str(s.context)) query.context = s.context;

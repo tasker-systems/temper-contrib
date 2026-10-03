@@ -41,15 +41,17 @@
 	);
 
 	const ref = $derived(opened?.state === 'opened' ? opened.decoratedRef : null);
+	const contextRef = $derived(opened?.state === 'opened' ? opened.contextRef : null);
 
 	$effect(() => {
 		if (!resolution) return;
 		if (
 			step.lens !== resolution.lens.id ||
 			(docType && step.docType !== docType) ||
-			(ref && step.ref !== ref)
+			(ref && step.ref !== ref) ||
+			(contextRef && step.context !== contextRef)
 		) {
-			tabs.resolved(stepKey, resolution.lens.id, docType, ref);
+			tabs.resolved(stepKey, resolution.lens.id, docType, ref, contextRef);
 		}
 	});
 

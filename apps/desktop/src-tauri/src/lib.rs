@@ -1,6 +1,7 @@
 mod acp;
 mod adapters;
 mod document;
+mod document_create;
 mod document_panel;
 mod document_save;
 mod hub;
@@ -79,6 +80,7 @@ pub fn run() {
             document_save::doc_save_body,
             document_save::doc_save_meta,
             document_save::doc_show_changes,
+            document_create::doc_create,
             window::doc_draft_state,
             window::doc_close_confirmed,
             temper::temper_teams,
