@@ -27,6 +27,15 @@ pub struct PluginPackage {
     pub files: Vec<PackageFile>,
 }
 
+/// One scanned directory: its package when it read whole, or the reason it did not. A
+/// refusal's text names the package where the directory's name is derivable, and never
+/// embeds a device path — it reaches the shell's foot.
+#[derive(Serialize)]
+pub struct ScanEntry {
+    pub package: Option<PluginPackage>,
+    pub error: Option<String>,
+}
+
 /// The repository's plugins dir in a checkout (`{CARGO_MANIFEST_DIR}/../../plugins`).
 fn plugins_dev_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../plugins")
@@ -48,40 +57,47 @@ fn plugins_root() -> Option<PathBuf> {
 
 /// Every package at the plugins root, in directory-name order: the registration order the
 /// shell reads. A directory holding no `plugin.json` is not a package and is passed over; one
-/// whose manifest cannot be read is named. No root at all is no packages — a package-less
+/// whose manifest cannot be read comes back as a refusal entry, so one bad directory never
+/// takes the healthy packages beside it down. No root at all is no packages — a package-less
 /// desktop stays a desktop.
 #[tauri::command]
-pub fn plugin_packages() -> Result<Vec<PluginPackage>, String> {
+pub async fn plugin_packages() -> Result<Vec<ScanEntry>, String> {
     let Some(root) = plugins_root() else {
         return Ok(Vec::new());
     };
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root)
-        .map_err(|e| format!("failed to read the plugins dir {}: {e}", root.display()))?
+        .map_err(|e| format!("failed to read the plugins dir: {e}"))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|dir| dir.join("plugin.json").is_file())
         .collect();
     dirs.sort();
-    dirs.iter()
+    Ok(dirs
+        .iter()
         .map(|dir| {
-            let name = dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| {
-                    format!(
-                        "the plugins dir holds a name that is not UTF-8: {}",
-                        dir.display()
-                    )
-                })?
-                .to_string();
-            let text = std::fs::read_to_string(dir.join("plugin.json"))
-                .map_err(|e| format!("failed to read {name}'s plugin.json: {e}"))?;
-            Ok(PluginPackage {
-                name,
-                files: vec![PackageFile {
-                    path: "plugin.json".to_string(),
-                    text,
-                }],
-            })
+            let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
+                return ScanEntry {
+                    package: None,
+                    error: Some("a plugins dir holds a package whose name is not UTF-8".into()),
+                };
+            };
+            match std::fs::read_to_string(dir.join("plugin.json")) {
+                Ok(text) => ScanEntry {
+                    package: Some(PluginPackage {
+                        name: name.to_string(),
+                        files: vec![PackageFile {
+                            path: "plugin.json".to_string(),
+                            text,
+                        }],
+                    }),
+                    error: None,
+                },
+                Err(e) => ScanEntry {
+                    package: None,
+                    error: Some(format!(
+                        "failed to read the {name} package's plugin.json: {e}"
+                    )),
+                },
+            }
         })
-        .collect()
+        .collect())
 }

@@ -207,4 +207,125 @@ describe('the package loader', () => {
 		expect(contributions).toEqual([]);
 		expect(refusals[0]).toContain('refused the a-package-anywhere package');
 	});
+
+	// --- closedness: every top-level shape refuses an extra key, and a bound lens is a
+	// deliberate absence of the format — runtime state, never a manifest claim ---------------
+
+	const withManifest = (apply: (manifest: Record<string, unknown>) => void): string => {
+		const manifest = JSON.parse(pluginManifestText()) as Record<string, unknown>;
+		apply(manifest);
+		return JSON.stringify(manifest);
+	};
+
+	const refusesWith = (text: string, sentence: string) => {
+		const { contributions, refusals } = loadOne(text);
+		expect(contributions).toEqual([]);
+		expect(refusals).toEqual([sentence]);
+	};
+
+	it('refuses a manifest carrying an extra key', () => {
+		refusesWith(
+			withManifest((m) => (m.shippedBy = 'someone')),
+			// the manifest itself: zod answers the key, and the field path is empty
+			'refused the temper-workflows package: Unrecognized key: "shippedBy" at '
+		);
+	});
+
+	it('refuses contributions carrying an extra key', () => {
+		refusesWith(
+			withManifest((m) => ((m.contributions as Record<string, unknown>).pinned = true)),
+			'refused the temper-workflows package: Unrecognized key: "pinned" at contributions'
+		);
+	});
+
+	it('refuses a lens accepts carrying an extra key', () => {
+		refusesWith(
+			withManifest((m) => {
+				const lens = (m.contributions as { lenses: Record<string, unknown>[] }).lenses[0];
+				(lens.accepts as Record<string, unknown>).groups = [];
+			}),
+			'refused the temper-workflows package: Unrecognized key: "groups" at contributions.lenses[0].accepts'
+		);
+	});
+
+	it('refuses a way-in filter carrying an extra key', () => {
+		refusesWith(
+			withManifest((m) => {
+				const way = (m.contributions as { waysIn: { filter: Record<string, unknown> }[] })
+					.waysIn[0];
+				way.filter.plugin = 'core';
+			}),
+			'refused the temper-workflows package: Unrecognized key: "plugin" at contributions.waysIn[0].filter'
+		);
+	});
+
+	it('refuses a vocabulary carrying an extra key', () => {
+		refusesWith(
+			withManifest((m) => {
+				const vocabulary = (
+					m.contributions as {
+						vocabularies: Record<string, unknown>[];
+					}
+				).vocabularies[0];
+				vocabulary.defaults = {};
+			}),
+			'refused the temper-workflows package: Unrecognized key: "defaults" at contributions.vocabularies[0]'
+		);
+	});
+
+	it('refuses a lens whose build state is bound — bound is runtime state, not a manifest claim', () => {
+		refusesWith(
+			withManifest((m) => {
+				(m.contributions as { lenses: Record<string, unknown>[] }).lenses[0].build = {
+					state: 'bound',
+					component: 'home-handoff'
+				};
+			}),
+			"refused the temper-workflows package: Invalid discriminator value. Expected 'built' | 'unbuilt' at contributions.lenses[0].build.state"
+		);
+	});
+
+	// --- duplicates: a name already claimed, an id used twice in one package -----------------
+
+	it('refuses a package whose manifest name another package already claims, naming both', () => {
+		const named = (manifestName: string): string => {
+			const manifest = JSON.parse(pluginManifestText()) as { name: string };
+			manifest.name = manifestName;
+			return JSON.stringify(manifest);
+		};
+		const { contributions, refusals } = loadContributions([
+			{ name: 'a-pack', files: [{ path: 'plugin.json', text: named('temper-workflows') }] },
+			{ name: 'b-pack', files: [{ path: 'plugin.json', text: named('temper-workflows') }] }
+		]);
+		expect(contributions).toHaveLength(1);
+		expect(refusals).toEqual([
+			"refused the b-pack package: its manifest name 'temper-workflows' is already claimed by the a-pack package at manifest.name"
+		]);
+	});
+
+	it('refuses a lens id the same package already uses', () => {
+		const { contributions, refusals } = loadOne(
+			withManifest((m) => {
+				const lenses = (m.contributions as { lenses: Record<string, unknown>[] }).lenses;
+				lenses[1].id = lenses[0].id;
+			})
+		);
+		expect(contributions).toEqual([]);
+		expect(refusals[0]).toContain(
+			"duplicate lens id 'temper-workflows/home-handoff' in this package at contributions.lenses[1].id"
+		);
+	});
+
+	it('refuses a way-in id the same package already uses', () => {
+		const { contributions, refusals } = loadOne(
+			withManifest((m) => {
+				const waysIn = (m.contributions as { waysIn: Record<string, unknown>[] }).waysIn;
+				waysIn[1].id = waysIn[0].id;
+			})
+		);
+		expect(contributions).toEqual([]);
+		expect(refusals[0]).toContain(
+			"duplicate way-in id 'goals' in this package at contributions.waysIn[1].id"
+		);
+	});
 });

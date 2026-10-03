@@ -15,6 +15,7 @@ import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
 import { shellContributions } from './contributions';
+import { core } from './contributions/core';
 import { pluginPackages } from './contributions/plugin-fixture';
 import { homeReads } from './home-reads.svelte';
 import { shellPanels } from './panels.svelte';
@@ -936,6 +937,10 @@ describe('the shell', () => {
 	});
 
 	it('the foot names a package the loader refused, with its reason, and nothing half-loaded shows', async () => {
+		const enabled = shellContributions.enabled;
+		// core only: the absence assertion below is true by construction, not by the lazy
+		// mount of home's sections not having landed yet.
+		shellContributions.enabled = [core];
 		shellContributions.refusals = [
 			'refused the temper-workflows package: its plugin.json is not parseable JSON at plugin.json'
 		];
@@ -947,6 +952,7 @@ describe('the shell', () => {
 			);
 			expect(container.querySelector('[data-section="temper-workflows/home-handoff"]')).toBeNull();
 		} finally {
+			shellContributions.enabled = enabled;
 			shellContributions.refusals = [];
 		}
 	});

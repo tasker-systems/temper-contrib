@@ -2,7 +2,8 @@
  * The plugin loader: how the desktop turns package files into contributions. A package arrives as
  * a name and the texts of its files; the zod schemas below are the manifest format's one source of
  * truth, and every object is strict, so an unknown component name, an unknown default kind, an
- * extra key, a lens id its own package name does not namespace, or an unparseable manifest is a
+ * extra key, a lens id its own package name does not namespace, a name or an id its package
+ * already uses, or an unparseable manifest is a
  * refusal — named with the package, the fault and the field path in one sentence — never a
  * half-loaded package. The loader is pure: sources in, contributions and refusals out, no disk,
  * no Tauri, so a test can feed it anything from anywhere.
@@ -137,8 +138,9 @@ function resolvedDefaults(): (today: string) => Record<string, unknown> {
 export function loadContributions(sources: readonly PackageSource[]): LoadedContributions {
 	const contributions: Contribution[] = [];
 	const refusals: string[] = [];
+	const claimed = new Map<string, string>();
 	for (const source of sources) {
-		loadPackage(source, contributions, refusals);
+		loadPackage(source, contributions, refusals, claimed);
 	}
 	return { contributions, refusals };
 }
@@ -146,7 +148,8 @@ export function loadContributions(sources: readonly PackageSource[]): LoadedCont
 function loadPackage(
 	source: PackageSource,
 	contributions: Contribution[],
-	refusals: string[]
+	refusals: string[],
+	claimed: Map<string, string>
 ): void {
 	const file = source.files.find((candidate) => candidate.path === 'plugin.json');
 	if (!file) {
@@ -162,6 +165,7 @@ function loadPackage(
 	}
 	const manifest = manifestShape.safeParse(raw);
 	if (!manifest.success) {
+		// One issue names the fault; the refusal is one bounded sentence by design.
 		const issue = manifest.error.issues[0];
 		refusals.push(
 			refusal(source.name, issue.message, fieldPath(issue.path as (string | number)[]))
@@ -169,8 +173,32 @@ function loadPackage(
 		return;
 	}
 	const plugin = manifest.data.name;
+	const claimedBy = claimed.get(plugin);
+	if (claimedBy !== undefined) {
+		refusals.push(
+			refusal(
+				source.name,
+				`its manifest name '${plugin}' is already claimed by the ${claimedBy} package`,
+				'manifest.name'
+			)
+		);
+		return;
+	}
+	claimed.set(plugin, source.name);
 	const lenses: LensDecl[] = [];
+	const lensIds = new Set<string>();
 	for (const [index, lens] of manifest.data.contributions.lenses.entries()) {
+		if (lensIds.has(lens.id)) {
+			refusals.push(
+				refusal(
+					plugin,
+					`duplicate lens id '${lens.id}' in this package`,
+					`contributions.lenses[${index}].id`
+				)
+			);
+			return;
+		}
+		lensIds.add(lens.id);
 		if (!lens.id.startsWith(`${plugin}/`)) {
 			refusals.push(
 				refusal(
@@ -207,6 +235,20 @@ function loadPackage(
 		lenses.push({ ...base, build: { state: 'built', component } });
 	}
 	const waysIn: WayInDecl[] = manifest.data.contributions.waysIn;
+	const wayInIds = new Set<string>();
+	for (const [index, way] of waysIn.entries()) {
+		if (wayInIds.has(way.id)) {
+			refusals.push(
+				refusal(
+					plugin,
+					`duplicate way-in id '${way.id}' in this package`,
+					`contributions.waysIn[${index}].id`
+				)
+			);
+			return;
+		}
+		wayInIds.add(way.id);
+	}
 	contributions.push({
 		plugin,
 		lenses,

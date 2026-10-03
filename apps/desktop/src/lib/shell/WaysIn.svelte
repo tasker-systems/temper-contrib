@@ -140,7 +140,7 @@
 	<p class="foot">
 		{shellContributions.enabled.length} plugins enabled · {shellContributions.enabled.map((c) => c.plugin).join(', ')}
 		{#each shellContributions.refusals as refusal (refusal)}
-			<span class="t-refusal"> · {refusal}</span>
+			<span> · {refusal}</span>
 		{/each}
 		{#if cachedAt !== null}
 			<span class="t-slot-cacheAge">· from cache, {ageWords(cachedAt)}</span>

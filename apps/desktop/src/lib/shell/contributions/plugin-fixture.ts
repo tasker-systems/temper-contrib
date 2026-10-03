@@ -10,9 +10,19 @@ export function pluginManifestText(): string {
 	return manifestText;
 }
 
-/** The one package the desktop ships this build, as the scan command answers it. */
-export function pluginPackages(): { name: string; files: { path: string; text: string }[] }[] {
+/** The one package the desktop ships this build, as the scan command answers it: a loaded
+ * entry, package whole, nothing refused. */
+export function pluginPackages(): {
+	package: { name: string; files: { path: string; text: string }[] } | null;
+	error: string | null;
+}[] {
 	return [
-		{ name: 'temper-workflows', files: [{ path: 'plugin.json', text: pluginManifestText() }] }
+		{
+			package: {
+				name: 'temper-workflows',
+				files: [{ path: 'plugin.json', text: pluginManifestText() }]
+			},
+			error: null
+		}
 	];
 }
