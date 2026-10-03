@@ -935,6 +935,22 @@ describe('the shell', () => {
 		]);
 	});
 
+	it('the foot names a package the loader refused, with its reason, and nothing half-loaded shows', async () => {
+		shellContributions.refusals = [
+			'refused the temper-workflows package: its plugin.json is not parseable JSON at plugin.json'
+		];
+		try {
+			shellPanels.setWaysOpen(true);
+			const { container } = render(Shell);
+			await waitFor(() =>
+				expect(container.textContent).toContain('refused the temper-workflows package')
+			);
+			expect(container.querySelector('[data-section="temper-workflows/home-handoff"]')).toBeNull();
+		} finally {
+			shellContributions.refusals = [];
+		}
+	});
+
 	it('a ways-in entry opens its subject in a tab: from home, a new one', async () => {
 		shellPanels.setWaysOpen(true);
 		const { container } = render(Shell);
