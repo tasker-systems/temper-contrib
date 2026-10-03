@@ -23,6 +23,10 @@ serde_json = "1"
 temperkb-client = "0.5.4"
 temperkb-core = "0.5.4"
 temperkb-workflow = "0.5.4"
+# The desktop's temper credential lives in the platform keychain (the macOS
+# Security framework through the default v1 store); the stored payload is the
+# client crate's own StoredAuth JSON.
+keyring = "4.2.0"
 uuid = "1"
 chrono = "0.4"
 similar = { version = "3", features = ["inline"] }
