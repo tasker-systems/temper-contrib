@@ -95,9 +95,43 @@ export type WayInDecl = {
 	scope: string;
 } & ({ source: 'contexts' } | { source: 'recent' } | { source: 'list'; filter: ListFilter });
 
-/** Typed now, empty in this build: property vocabularies and renderers. */
+/** One doctype a create vocabulary offers, with the open-tier defaults a new resource starts with. */
+export interface DocTypeDecl {
+	/** The doc type on the wire — what `doc_create` sends and a read answers. */
+	doctype: string;
+	/**
+	 * The open-tier defaults a new resource of this type starts with, asked at the create
+	 * moment — a `date` default is the create-time date, `YYYY-MM-DD`, so the declaration
+	 * cannot store it. Absent where the practice has no opinion: the managed tier is the
+	 * server's to fill (a task lands in `backlog`, a goal in `active`), and the desktop
+	 * sends none of that.
+	 */
+	defaults?: (today: string) => Record<string, unknown>;
+}
+
+/**
+ * A vocabulary: the doctypes a practice offers for creating. Core's is the base — plain
+ * doctypes, no defaults, the arm that keeps creation working where no plugin governs.
+ */
 export interface VocabularyDecl {
+	/** Unique within its plugin. */
 	id: string;
+	/**
+	 * The base arm: it seeds the create menu, and a plugin's entry for a doctype wins it.
+	 * Only core's contributions legitimately set it — the menu's ordering is the merge
+	 * rule's input, and a plugin claiming the base arm would reorder that merge to its own
+	 * advantage. Making the flag structurally core-only (a separate contribution slot) was
+	 * considered and declined as disproportionate for a flag one contributor sets.
+	 */
+	base?: boolean;
+	doctypes: DocTypeDecl[];
+}
+
+/** One row of the create menu: a doctype and the open-tier keys a new resource starts with. */
+export interface CreateOption {
+	doctype: string;
+	/** Asked with the create-time date. `undefined` where no one has an opinion. */
+	defaults?: Record<string, unknown>;
 }
 
 /** Typed now, empty in this build: agent skills and stances. */
@@ -218,6 +252,35 @@ export function lensesFor(
 /** One lens by id, among the enabled contributions. */
 export function lensById(id: string, contributions: readonly Contribution[]): LensDecl | null {
 	return allLenses(contributions).find((l) => l.id === id) ?? null;
+}
+
+/**
+ * The create menu: one option per doctype the enabled contributions offer, with the
+ * open-tier defaults a new resource of that type starts with, resolved against the
+ * create-time date. The base vocabularies seed the menu — plain doctypes, no defaults,
+ * the arm that keeps creation working where no plugin governs — and the plugins then
+ * enrich it, in registration order. A doctype declared again is never a duplicate: the
+ * later entry replaces the earlier one wholesale, defaults included — one opinion governs
+ * a doctype's create, never a blend. The base is offered first, so a plugin's entry wins
+ * the base's plain one wherever both declare a doctype.
+ */
+export function createMenu(contributions: readonly Contribution[], today: string): CreateOption[] {
+	const options = new Map<string, CreateOption>();
+	const offer = (vocabulary: VocabularyDecl) => {
+		for (const doctype of vocabulary.doctypes) {
+			options.set(doctype.doctype, {
+				doctype: doctype.doctype,
+				defaults: doctype.defaults?.(today)
+			});
+		}
+	};
+	// Base first, then the plugins in registration order — the order the merge rule reads.
+	const vocabularies = [
+		...contributions.flatMap((c) => c.vocabularies.filter((v) => v.base)),
+		...contributions.flatMap((c) => c.vocabularies.filter((v) => !v.base))
+	];
+	for (const vocabulary of vocabularies) offer(vocabulary);
+	return [...options.values()];
 }
 
 const HOME_SUBJECT: Subject = { kind: 'place', place: 'home' };
