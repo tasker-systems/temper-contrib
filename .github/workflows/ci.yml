@@ -298,8 +298,31 @@ jobs:
         run: |
           bun run tauri build --debug --no-bundle
           # G_MESSAGES_DEBUG carries WebKitWebDriver's own words into the captured log —
-          # what the driver said while the session was not answering.
-          G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+          # what the driver said while the session was not answering; RUST_LOG does the
+          # same for tauri-driver where it logs. The witness retries a session whose
+          # drive never completed (WITNESS_ATTEMPTS); a completed drive is final, so a
+          # retry never re-rolls a finished set of assertions.
+          RUST_LOG=debug WITNESS_ATTEMPTS=3 G_MESSAGES_DEBUG=all xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py
+        working-directory: apps/desktop
+
+      # WebKit's helper processes can be killed by the kernel before WebKit can say why;
+      # the kernel's own words name the profile and the operation that did it.
+      - name: What the kernel said (AppArmor, seccomp, audit)
+        if: always()
+        run: |
+          sudo sh -c 'dmesg --color=never > /tmp/kernel.log'
+          echo "=== denial lines (apparmor/seccomp/denied) ==="
+          grep -iE 'apparmor|seccomp|denied' /tmp/kernel.log | tail -n 120 || echo "(none)"
+          echo "=== audit tail ==="
+          grep -i audit /tmp/kernel.log | tail -n 40 || echo "(none)"
+
+      # The same build, launched bare — no tauri-driver, no automation. Whether the
+      # WebView's helper processes come up and stay up under a plain launch separates the
+      # webview from its automation as the failing layer. Two census snapshots: 10s and 60s.
+      - name: Launch the app bare and census its webview processes
+        if: always()
+        run: |
+          xvfb-run -a dbus-run-session -- scripts/witness-bare-launch.sh src-tauri/target/debug/desktop
         working-directory: apps/desktop
 
   ci-success:

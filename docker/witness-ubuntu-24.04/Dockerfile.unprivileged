@@ -1,0 +1,31 @@
+FROM temper-witness:24.04
+
+# The same witness environment under the privilege posture a hosted runner gives its
+# jobs: an unprivileged user (uid 1001), toolchains relocated to world-readable paths,
+# and writable caches. The README's run commands work unchanged with this image when
+# the named volumes are owned by 1001:
+#
+#   docker volume create witness-node-modules
+#   docker volume create witness-target
+#   docker run --rm -v witness-target:/chown alpine chown -R 1001 /chown
+#   docker run --rm -v witness-node-modules:/chown alpine chown -R 1001 /chown
+#   docker run --rm --user 1001 \
+#     -v "$PWD:/work" \
+#     -v witness-node-modules:/work/apps/desktop/node_modules \
+#     -v witness-target:/work/apps/desktop/src-tauri/target \
+#     temper-witness:24.04-unprivileged \
+#     bash -lc "cd /work/apps/desktop \
+#       && bun install --frozen-lockfile \
+#       && bun run tauri build --debug --no-bundle \
+#       && xvfb-run -a dbus-run-session -- uv run -q --with 'selenium>=4.20,<5' scripts/csp-witness.py"
+
+RUN useradd --create-home --uid 1001 witness \
+    && cp -a /root/.cargo /root/.rustup /root/.bun /root/.local /opt/ \
+    && chmod -R a+rX /opt/.cargo /opt/.rustup /opt/.bun /opt/.local
+
+ENV PATH="/opt/.cargo/bin:/opt/.bun/bin:/opt/.local/bin:${PATH}" \
+    RUSTUP_HOME=/opt/.rustup \
+    CARGO_HOME=/opt/.cargo \
+    HOME=/home/witness
+
+WORKDIR /work
