@@ -116,9 +116,12 @@ const manifestShape = z.strictObject({
 	contributions: contributionsShape
 });
 
-/** One refusal sentence: the package, the fault, and the field path, in that order. */
+/** One refusal sentence: the package, the fault, and the field path, in that order. A fault
+ * the manifest itself carries has no path to name — the sentence ends at the fault. */
 function refusal(packageName: string, fault: string, path: string): string {
-	return `refused the ${packageName} package: ${fault} at ${path}`;
+	return path
+		? `refused the ${packageName} package: ${fault} at ${path}`
+		: `refused the ${packageName} package: ${fault}`;
 }
 
 /** A zod issue's path as the manifest names it: `contributions.lenses[0].build.component`. */

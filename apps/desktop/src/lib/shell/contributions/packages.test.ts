@@ -226,8 +226,8 @@ describe('the package loader', () => {
 	it('refuses a manifest carrying an extra key', () => {
 		refusesWith(
 			withManifest((m) => (m.shippedBy = 'someone')),
-			// the manifest itself: zod answers the key, and the field path is empty
-			'refused the temper-workflows package: Unrecognized key: "shippedBy" at '
+			// the manifest itself: zod answers the key, and there is no field path to name
+			'refused the temper-workflows package: Unrecognized key: "shippedBy"'
 		);
 	});
 
