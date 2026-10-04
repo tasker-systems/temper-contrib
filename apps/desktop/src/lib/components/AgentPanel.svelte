@@ -78,6 +78,11 @@
 					reach · the agent's own — the desktop relays what it asks, and doesn't limit what it writes
 				{/if}
 			</p>
+			{#if session.conversation.presentations?.state === 'unsupported'}
+				<p class="t-strip presents">
+					presentations · {session.conversation.presentations.reason}
+				</p>
+			{/if}
 		{/if}
 	</header>
 
@@ -294,6 +299,10 @@
 		font-family: var(--tp-font-doing);
 	}
 	.reach {
+		margin: 0;
+		color: var(--tp-text-muted);
+	}
+	.presents {
 		margin: 0;
 		color: var(--tp-text-muted);
 	}
