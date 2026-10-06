@@ -136,8 +136,10 @@ async fn sign_in_client_at(path: &Path) -> Result<TemperClient, String> {
         "no temper provider is configured — connect to a server first".to_string()
     })?;
     // The connection room's one-line refusal, before anything opens a
-    // browser. Past this check the entry provably registers a desktop
-    // client: `sign_in_refusal` is `None` exactly when it does.
+    // browser. `sign_in_refusal` is `None` when the entry registers a
+    // desktop client; the re-guard below repeats the check fail-closed, so
+    // the two modules drifting apart costs an error, not another surface's
+    // client id.
     if let Some(refusal) = gathered.sign_in_refusal {
         return Err(refusal);
     }
@@ -952,19 +954,34 @@ mod tests {
     }
 
     impl WitnessDeployment {
-        fn write(name: &str, desktop_client: Option<&str>, callback_url: &str) -> Self {
+        /// An empty synthetic root — no config yet, the fresh-machine state
+        /// the live first-run witnesses below establish through the app's
+        /// own apply. Every path lives inside the root, and the witnesses
+        /// hand their helpers absolute paths only: a relative path would
+        /// open against the REAL repo.
+        fn empty_root(name: &str) -> Self {
             let root = std::env::temp_dir()
                 .join(format!("desktop-signin-{name}-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir_all(&root).expect("the witness root creates");
             let cli_auth_path = root.join("cli-auth.json");
             let desktop_auth_path = root.join("desktop-auth.json");
             let config_path = root.join("config.toml");
+            Self {
+                root,
+                config_path,
+                cli_auth_path,
+                desktop_auth_path,
+            }
+        }
+
+        fn write(name: &str, desktop_client: Option<&str>, callback_url: &str) -> Self {
+            let dep = Self::empty_root(name);
             let desktop_client_line = match desktop_client {
                 Some(id) => format!("desktop_client_id = \"{id}\"\n"),
                 None => String::new(),
             };
             std::fs::write(
-                &config_path,
+                &dep.config_path,
                 format!(
                     "[vault]\npath = \"{}/vault\"\n\n\
                      [cloud]\napi_url = \"https://witness.invalid\"\n\n\
@@ -978,17 +995,12 @@ mod tests {
                      callback_url = \"{callback_url}\"\n\
                      scopes = [\"openid\", \"profile\", \"email\", \"offline_access\"]\n\
                      {desktop_client_line}",
-                    root.display(),
-                    cli_auth_path.display()
+                    dep.root.display(),
+                    dep.cli_auth_path.display()
                 ),
             )
             .expect("the witness config writes");
-            Self {
-                root,
-                config_path,
-                cli_auth_path,
-                desktop_auth_path,
-            }
+            dep
         }
 
         /// The env a witness body runs under: the CLI's config relocated to
@@ -1010,8 +1022,9 @@ mod tests {
 
     /// WITNESS (custody, absent arm): the desktop's store writes only its own
     /// file. The bite is executed first — `DiskTokenStore::default_path()`,
-    /// the store the connect seam used before the U1 amendment
-    /// (`temper.rs`'s old `try_connect`), resolves to exactly the CLI's
+    /// the store the connect seam used before the desktop held its own
+    /// custody (its old `try_connect` built on the CLI's disk store),
+    /// resolves to exactly the CLI's
     /// `auth.json` under these envs and saving through it writes that file.
     /// The desktop's store, on the same envs, leaves it absent through a
     /// full sign-in's save and sign-out's clear.
@@ -1386,6 +1399,615 @@ mod tests {
             "absence is not a session"
         );
         assert!(!state.is_connected());
+        dep.cleanup();
+    }
+
+    // ─── Witnesses: the live first-run arc (hand-run, ignored) ─────────────
+    //
+    // First-run on an empty synthetic root — configure,
+    // sign in, whoami resolves, refresh on the expired-token path, sign out,
+    // custody clean. Isolation is total and absolute-pathed: the CLI's config
+    // relocates by `TEMPER_GLOBAL_CONFIG` (honored by `global_config_path`,
+    // temper-core config.rs:487-496), the desktop's store by
+    // `TEMPER_DESKTOP_AUTH_STORE`, and the CLI's auth-file home-relative
+    // default by a scoped `HOME` — a relative path would open against the
+    // REAL repo, so no helper here takes one.
+    //
+    // The browser leg of the hosted sign-in is hand-run by its nature —
+    // automation cannot hold the IdP session — and is declared on that
+    // witness, not hidden. The stub-AS legs are fully automated: the stub
+    // authority below is the deployment, its authorize leg 302s to the relay
+    // the derived entry names, and the harness itself walks the chain
+    // (authorize → relay → the flow's loopback listener), mirroring temper's
+    // `cli-callback.ts`.
+
+    use std::collections::{HashMap, HashSet};
+    use std::path::Path;
+    use std::sync::{Arc, Mutex};
+
+    use axum::extract::{Query, State};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::{get, post};
+    use axum::{http, Json, Router};
+    use temper_client::error::ClientError;
+
+    /// The person the stub authority serves — what its API arm's whoami
+    /// answers, and what the stub-AS witnesses assert came back.
+    const STUB_PERSON: &str = "Stub Witness Person";
+
+    /// The harness's poisoned-lock-tolerant mutex read, the same discipline
+    /// `ENV_SERIAL`'s takers use.
+    fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        mutex.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Mint a JWT-shaped access token in the shape the published flow parses
+    /// mechanically — three dot-separated segments, a base64url JSON payload
+    /// carrying `exp` and a UUID `sub`; the signature is checked at the API,
+    /// never by the client (auth.rs:644-648).
+    fn mint_access_token(ttl_seconds: i64, profile_id: uuid::Uuid) -> String {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        use base64::Engine as _;
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256","typ":"JWT"}"#);
+        let exp = chrono::Utc::now().timestamp() + ttl_seconds;
+        let payload = URL_SAFE_NO_PAD.encode(format!(r#"{{"exp":{exp},"sub":"{profile_id}"}}"#));
+        format!("{header}.{payload}.stub-signature")
+    }
+
+    /// The profile the stub API arm serves — the shape `/api/profile`
+    /// deserializes into.
+    fn stub_profile_json(stub: &StubAuthority) -> serde_json::Value {
+        let now = chrono::Utc::now().to_rfc3339();
+        serde_json::json!({
+            "id": stub.profile_id,
+            "display_name": stub.display_name,
+            "slug": "witness",
+            "email": null,
+            "avatar_url": null,
+            "preferences": {},
+            "vault_config": {},
+            "created": now,
+            "updated": now,
+        })
+    }
+
+    /// A `302` carrying `location` verbatim — the relay's redirect target
+    /// stays byte-exact (`cli-callback.ts` builds the header by hand for the
+    /// same reason).
+    fn redirect_302(location: String) -> Response {
+        http::Response::builder()
+            .status(http::StatusCode::FOUND)
+            .header(http::header::LOCATION, location)
+            .body(axum::body::Body::empty())
+            .expect("a hand-built 302")
+    }
+
+    /// A plain-text refusal, the shape `cli-callback.ts`'s `plain` returns.
+    fn plain(status: http::StatusCode, body: &str) -> Response {
+        (status, body.to_string()).into_response()
+    }
+
+    /// One form field out of the token endpoint's urlencoded body. The values
+    /// crossing here are the harness's own — uuids and fixed words — so
+    /// nothing arrives percent-encoded and split-and-compare is exact.
+    fn form_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+        body.split('&').find_map(|pair| {
+            let (k, v) = pair.split_once('=')?;
+            (k == key).then_some(v)
+        })
+    }
+
+    /// The room's apply request, as the witnesses send it: the choice and its
+    /// instance URL set, everything else absent, the vault inside the root.
+    fn apply_request(
+        choice: &str,
+        instance_url: Option<String>,
+        vault: &Path,
+    ) -> crate::connection::ConnectionApplyRequest {
+        crate::connection::ConnectionApplyRequest {
+            choice: choice.to_string(),
+            instance_url,
+            auth_domain: None,
+            client_id: None,
+            audience: None,
+            idp: None,
+            auth_server_id: None,
+            vault_path: Some(vault.to_string_lossy().into_owned()),
+        }
+    }
+
+    /// A local stub Authorization Server with its API arm — the deployment a
+    /// temper-as choice derives when the instance URL is the stub's base:
+    /// `/oauth/authorize`, `/oauth/token`, `/api/auth/cli-callback` (the
+    /// relay), `/api/profile` (whoami). `ttl_seconds` is the access-token
+    /// lifetime it mints; the refresh witness runs it at 2 so expiry is
+    /// reachable inside a test body.
+    async fn stub_authority(ttl_seconds: i64) -> (String, tokio::task::JoinHandle<()>) {
+        let stub = Arc::new(StubAuthority {
+            ttl_seconds,
+            profile_id: uuid::Uuid::new_v4(),
+            display_name: STUB_PERSON.to_string(),
+            codes: Mutex::new(HashSet::new()),
+            live_refresh: Mutex::new(None),
+            spent_refresh: Mutex::new(HashSet::new()),
+            current_access: Mutex::new(String::new()),
+        });
+        let app = Router::new()
+            .route("/oauth/authorize", get(stub_authorize))
+            .route("/api/auth/cli-callback", get(cli_callback_relay))
+            .route("/oauth/token", post(stub_token_grant))
+            .route("/api/profile", get(stub_profile_route))
+            .with_state(stub);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the stub binds loopback");
+        let addr = listener.local_addr().expect("the stub's address");
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    /// The stub's state: one authorization-code family, one access token in
+    /// circulation. The API arm answers only that token, so "the new access
+    /// token serves" is the stub's own check, not the witness's charity.
+    struct StubAuthority {
+        ttl_seconds: i64,
+        profile_id: uuid::Uuid,
+        display_name: String,
+        /// Authorization codes minted, awaiting their one exchange.
+        codes: Mutex<HashSet<String>>,
+        /// The refresh family's one live token; every other is retired.
+        live_refresh: Mutex<Option<String>>,
+        /// Retired refresh tokens: a second presentation is reuse, refused —
+        /// the AS behavior auth.rs:598-607 names.
+        spent_refresh: Mutex<HashSet<String>>,
+        /// The access token in circulation.
+        current_access: Mutex<String>,
+    }
+
+    /// The stub's authorize leg: mint a one-time code, 302 to the
+    /// `redirect_uri` — the relay — exactly as a real AS does after the IdP
+    /// session it would have held, and spawn the harness's own walk of the
+    /// chain, so the leg completes even where no browser follows the 302.
+    async fn stub_authorize(
+        State(stub): State<Arc<StubAuthority>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Response {
+        let (Some(redirect_uri), Some(state)) = (params.get("redirect_uri"), params.get("state"))
+        else {
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Missing redirect_uri or state parameter",
+            );
+        };
+        let code = uuid::Uuid::new_v4().simple().to_string();
+        lock(&stub.codes).insert(code.clone());
+
+        // The harness performs the GETs the opened browser would: the relay,
+        // then the loopback listener the published flow bound. Same code,
+        // one delivery wins; the loser meets a listener the flow already
+        // closed.
+        let relay_url = format!("{redirect_uri}?code={code}&state={state}");
+        let walk = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("the walk client builds");
+        let walked = relay_url.clone();
+        tokio::spawn(async move {
+            if let Ok(relay) = walk.get(&walked).send().await {
+                if let Some(location) = relay
+                    .headers()
+                    .get(http::header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                {
+                    let _ = walk.get(location).send().await;
+                }
+            }
+        });
+
+        redirect_302(relay_url)
+    }
+
+    /// The callback relay the derived entry names — the harness's stand-in
+    /// for temperkb.io's `cli-callback.ts`, mirroring its logic: the loopback
+    /// port rides `state` (1024-65535), and the redirect target is built by
+    /// hand and stays byte-exact — `http://localhost:{port}?code=…`, no
+    /// trailing slash.
+    async fn cli_callback_relay(Query(params): Query<HashMap<String, String>>) -> Response {
+        if let Some(error) = params.get("error") {
+            let description = params
+                .get("error_description")
+                .map(String::as_str)
+                .unwrap_or("unknown error");
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                &format!("Authentication failed: {error} — {description}"),
+            );
+        }
+        let (Some(code), Some(state)) = (params.get("code"), params.get("state")) else {
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Missing code or state parameter",
+            );
+        };
+        let Ok(port) = state.parse::<u16>() else {
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Invalid port in state parameter",
+            );
+        };
+        if !(1024..=65535).contains(&port) {
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Invalid port in state parameter",
+            );
+        }
+        redirect_302(format!("http://localhost:{port}?code={code}"))
+    }
+
+    /// The stub's token leg. An authorization-code grant mints the family's
+    /// first pair; a refresh-token grant rotates — the presented token must
+    /// be the family's live one, and its second presentation is reuse,
+    /// refused. No redirect is ever followed here, the way the published
+    /// exchange itself refuses to (login.rs:54-58).
+    async fn stub_token_grant(State(stub): State<Arc<StubAuthority>>, body: String) -> Response {
+        let mint_pair = |refresh_token: String| {
+            let access = mint_access_token(stub.ttl_seconds, stub.profile_id);
+            *lock(&stub.current_access) = access.clone();
+            serde_json::json!({
+                "access_token": access,
+                "refresh_token": refresh_token,
+                "expires_in": stub.ttl_seconds,
+            })
+        };
+        match form_field(&body, "grant_type") {
+            Some("authorization_code") => {
+                let granted = match form_field(&body, "code") {
+                    Some(code) => lock(&stub.codes).remove(code),
+                    None => false,
+                };
+                if !granted {
+                    return plain(http::StatusCode::BAD_REQUEST, "Unknown authorization code");
+                }
+                let refresh_token = uuid::Uuid::new_v4().simple().to_string();
+                *lock(&stub.live_refresh) = Some(refresh_token.clone());
+                Json(mint_pair(refresh_token)).into_response()
+            }
+            Some("refresh_token") => {
+                let Some(presented) = form_field(&body, "refresh_token") else {
+                    return plain(http::StatusCode::BAD_REQUEST, "Missing refresh_token");
+                };
+                let spent_already = lock(&stub.spent_refresh).contains(presented);
+                let live_is_presented = lock(&stub.live_refresh).as_deref() == Some(presented);
+                if spent_already || !live_is_presented {
+                    return (
+                        http::StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({ "error": "invalid_grant" })),
+                    )
+                        .into_response();
+                }
+                lock(&stub.spent_refresh).insert(presented.to_string());
+                let successor = uuid::Uuid::new_v4().simple().to_string();
+                *lock(&stub.live_refresh) = Some(successor.clone());
+                Json(mint_pair(successor)).into_response()
+            }
+            _ => plain(http::StatusCode::BAD_REQUEST, "Unsupported grant_type"),
+        }
+    }
+
+    /// The stub API arm: `/api/profile` answers only the access token in
+    /// circulation — a stale or spent bearer is a 401, so a whoami that
+    /// resolves proves the presented token is the live one.
+    async fn stub_profile_route(
+        State(stub): State<Arc<StubAuthority>>,
+        headers: http::HeaderMap,
+    ) -> Response {
+        let presented = headers
+            .get(http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+        let current = lock(&stub.current_access).clone();
+        match presented {
+            Some(token) if !current.is_empty() && token == current => {
+                Json(stub_profile_json(&stub)).into_response()
+            }
+            _ => http::StatusCode::UNAUTHORIZED.into_response(),
+        }
+    }
+
+    /// WITNESS (live, hosted; the browser leg is hand-run by nature —
+    /// automation cannot hold the IdP session): first-run on
+    /// an empty synthetic root, entirely through the app's own flow. The
+    /// room's apply establishes the hosted preset at init parity; `sign_in`
+    /// is the published flow — it opens the person's browser at the hosted
+    /// authorize endpoint and waits up to its own 120s deadline, and THE
+    /// PERSON completes the sign-in there (automation cannot hold the IdP
+    /// session; the leg is declared, not hidden). From the callback on, the
+    /// witness runs itself: whoami resolves as the person, sign-out ends
+    /// custody, and the CLI's auth.json was never written.
+    ///
+    /// Run locally: `cargo test -p desktop -- --ignored hosted_first_run`
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    #[ignore = "hand-run: the person completes the hosted sign-in in the browser the flow opens"]
+    async fn a_hosted_first_run_signs_the_person_in_and_sign_out_ends_custody() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::empty_root("hosted-first-run");
+        let _env = dep.scoped_env();
+        // The fresh machine's home is synthetic too: the CLI's auth file
+        // default resolves inside it, and the witness watches it stay absent.
+        let home = dep.root.join("home");
+        let _home = ScopedEnv::set("HOME", home.to_str().unwrap());
+        let watched = resolve_auth_path();
+        assert_eq!(
+            watched,
+            home.join(".config/temper/auth.json"),
+            "the watched CLI auth path is the synthetic home's, not the person's real file"
+        );
+
+        // Configure: the room's own command, on a machine with no config.
+        let reply = crate::connection::temper_connection_apply(apply_request(
+            "hosted",
+            None,
+            &dep.root.join("vault"),
+        ))
+        .expect("the fresh-machine apply establishes the hosted preset");
+        assert_eq!(reply.state.choice.as_deref(), Some("hosted"));
+        assert_eq!(
+            reply.state.sign_in_refusal, None,
+            "the hosted preset registers the desktop's own client"
+        );
+
+        let state = TemperState::connect();
+        assert!(!state.is_connected(), "configured but not signed in");
+
+        println!(
+            "witness: a browser window opens at {} — complete the sign-in there; \
+             the flow waits up to 120s",
+            reply
+                .state
+                .provider
+                .as_ref()
+                .expect("the hosted entry resolves")
+                .authorize_url
+        );
+
+        state
+            .sign_in()
+            .await
+            .expect("the person completed the hosted sign-in");
+
+        assert!(state.is_connected(), "the sign-in is a session");
+        let client = state.client().expect("the state follows the sign-in");
+        let profile = client
+            .profile()
+            .get()
+            .await
+            .expect("whoami resolves as the person");
+        assert!(
+            !profile.display_name.is_empty(),
+            "whoami carries the person"
+        );
+        println!("witness: whoami resolved as {}", profile.display_name);
+
+        assert!(
+            dep.desktop_auth_path.exists(),
+            "the credential is the desktop's own — the override file holds it"
+        );
+        assert!(!watched.exists(), "the CLI's auth.json was never written");
+
+        state.sign_out().expect("sign out");
+        assert!(
+            !dep.desktop_auth_path.exists(),
+            "sign-out cleared the desktop's custody"
+        );
+        assert!(
+            !session_status().expect("the store answers").authenticated,
+            "no credential, no session"
+        );
+        assert!(state.client().is_none(), "a whoami-shaped call is refused");
+        assert!(!state.is_connected());
+        assert!(!watched.exists(), "the CLI's auth.json is still untouched");
+        dep.cleanup();
+    }
+
+    /// WITNESS (live, stub AS, fully automated): the same first-run arc
+    /// against the local stub authority — establish the temper-as deployment,
+    /// sign in, whoami, sign out, custody clean, the CLI's auth.json never
+    /// written. No person and no IdP session: the stub's authorize leg 302s
+    /// to the relay, the harness's walk follows the redirects, and the
+    /// published flow's loopback listener receives the code. The flow still
+    /// opens a browser tab (`open::that` is inline in the published login) —
+    /// the tab completes the same chain and is a bystander.
+    ///
+    /// Run locally: `cargo test -p desktop -- --ignored stub_as_first_run`
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    #[ignore = "hand-run: needs a desktop session — the flow opens a browser tab that completes its leg unattended"]
+    async fn a_stub_as_first_run_signs_in_resolves_whoami_and_signs_out_clean() {
+        let (base, stub) = stub_authority(3600).await;
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::empty_root("stub-first-run");
+        let _env = dep.scoped_env();
+        let home = dep.root.join("home");
+        let _home = ScopedEnv::set("HOME", home.to_str().unwrap());
+        let watched = resolve_auth_path();
+        assert_eq!(
+            watched,
+            home.join(".config/temper/auth.json"),
+            "the watched CLI auth path is the synthetic home's, not the person's real file"
+        );
+
+        let reply = crate::connection::temper_connection_apply(apply_request(
+            "temper-as",
+            Some(base.clone()),
+            &dep.root.join("vault"),
+        ))
+        .expect("the fresh-machine apply establishes the stub deployment");
+        assert_eq!(reply.state.choice.as_deref(), Some("temper-as"));
+        assert_eq!(
+            reply.state.sign_in_refusal, None,
+            "the temper-as derivation registers the desktop's public client"
+        );
+
+        let state = TemperState::connect();
+        assert!(!state.is_connected(), "configured but not signed in");
+
+        state
+            .sign_in()
+            .await
+            .expect("the stub AS completes the sign-in leg unattended");
+
+        assert!(
+            dep.desktop_auth_path.exists(),
+            "the credential is the desktop's own from the first write — the override file holds it"
+        );
+        assert!(state.is_connected(), "the sign-in is a session");
+        let client = state.client().expect("the state follows the sign-in");
+        let profile = client
+            .profile()
+            .get()
+            .await
+            .expect("whoami resolves against the stub API arm");
+        assert_eq!(
+            profile.display_name, STUB_PERSON,
+            "whoami resolves as the stub's person, on the minted access token"
+        );
+
+        assert!(!watched.exists(), "the CLI's auth.json was never written");
+
+        state.sign_out().expect("sign out");
+        assert!(
+            !dep.desktop_auth_path.exists(),
+            "sign-out cleared the desktop's custody"
+        );
+        assert!(
+            !session_status().expect("the store answers").authenticated,
+            "no credential, no session"
+        );
+        assert!(state.client().is_none(), "a whoami-shaped call is refused");
+        assert!(!state.is_connected());
+        assert!(!watched.exists(), "the CLI's auth.json is still untouched");
+        stub.abort();
+        dep.cleanup();
+    }
+
+    /// WITNESS (live, the expired-token refresh path — the live leg of
+    /// "refresh without the CLI"): a stub AS whose access tokens expire two
+    /// seconds after minting. The first run signs in, the grant goes stale
+    /// for real, and the refresh runs through the desktop's own store: the
+    /// rotated refresh token lands in the override file, the spent token's
+    /// second presentation is reuse and is refused, and the new access token
+    /// is the one the API arm answers. The browser leg is the stub-AS
+    /// witness's — automated, unattended.
+    ///
+    /// Run locally: `cargo test -p desktop -- --ignored expired_token_refreshes`
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    #[ignore = "hand-run: needs a desktop session — the flow opens a browser tab that completes its leg unattended"]
+    async fn an_expired_access_token_refreshes_through_the_desktops_store() {
+        let (base, stub) = stub_authority(2).await;
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::empty_root("expired-refresh");
+        let _env = dep.scoped_env();
+        let home = dep.root.join("home");
+        let _home = ScopedEnv::set("HOME", home.to_str().unwrap());
+        let watched = resolve_auth_path();
+        assert_eq!(
+            watched,
+            home.join(".config/temper/auth.json"),
+            "the watched CLI auth path is the synthetic home's, not the person's real file"
+        );
+
+        crate::connection::temper_connection_apply(apply_request(
+            "temper-as",
+            Some(base),
+            &dep.root.join("vault"),
+        ))
+        .expect("the fresh-machine apply establishes the stub deployment");
+        let state = TemperState::connect();
+        state
+            .sign_in()
+            .await
+            .expect("the stub AS completes the sign-in leg unattended");
+        assert!(state.is_connected(), "the sign-in is a session");
+
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        let grant = store
+            .load()
+            .expect("the grant reads back")
+            .expect("the credential is there");
+        assert!(
+            grant.refresh_token.is_some(),
+            "the sign-in's grant carries a refresh token (offline_access)"
+        );
+        assert!(!grant.is_expired(), "the stub minted a live token");
+        let before = stored_json(&grant);
+
+        // Wait past the two-second TTL: the expiry is real, not assumed.
+        tokio::time::sleep(std::time::Duration::from_millis(2600)).await;
+        assert!(grant.is_expired(), "the grant went stale for real");
+
+        let provider = crate::connection::gather_from_path(&dep.config_path)
+            .expect("the deployment resolves")
+            .provider
+            .expect("the provider entry resolves");
+        let client_id = provider
+            .desktop_client_id
+            .expect("the temper-as derivation registered the desktop's public client");
+
+        refresh_token(store.as_ref(), &grant, &provider.token_url, &client_id)
+            .await
+            .expect("the refresh grant completes");
+
+        let reloaded = desktop_token_store()
+            .expect("a fresh handle on the same custody")
+            .load()
+            .expect("the refreshed grant reads back")
+            .expect("the credential is there");
+        let after = stored_json(&reloaded);
+        assert_ne!(
+            after["refresh_token"], before["refresh_token"],
+            "rotation: the successor refresh token landed in the override file"
+        );
+        assert_ne!(after["access_token"], before["access_token"]);
+        assert!(
+            reloaded.expires_at > grant.expires_at,
+            "the refreshed grant expires later than the stale one"
+        );
+
+        // The spent token's second presentation is reuse — the AS refuses
+        // it, and the published chain surfaces that as its own error.
+        let reused = refresh_token(store.as_ref(), &grant, &provider.token_url, &client_id).await;
+        assert!(
+            matches!(reused, Err(ClientError::TokenExpired)),
+            "reuse of the spent refresh token is refused, got {reused:?}"
+        );
+
+        // The new access token serves: a fresh handle on the desktop's own
+        // custody rebuilds the client, and the stub's API arm — which answers
+        // only the token in circulation — resolves the whoami.
+        let client = temper_client::config::build_client(
+            desktop_token_store().expect("the store"),
+            temper_workflow::operations::Surface::Sdk,
+        )
+        .expect("the client rebuilds on the rotated grant");
+        let profile = client
+            .profile()
+            .get()
+            .await
+            .expect("whoami on the new access token");
+        assert_eq!(
+            profile.display_name, STUB_PERSON,
+            "the new access token served"
+        );
+
+        assert!(
+            !watched.exists(),
+            "the refresh ran entirely without the CLI — its auth.json was never written"
+        );
+        stub.abort();
         dep.cleanup();
     }
 }

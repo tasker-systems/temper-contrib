@@ -30,10 +30,10 @@ mod roster;
 mod settings;
 mod spec_check;
 mod temper;
-// Shared env-scoping for the crate's env-touching witnesses — compiled for
-// tests only.
 mod window;
 #[cfg(test)]
+// Shared env-scoping for the crate's env-touching witnesses — compiled for
+// tests only.
 mod witness_env;
 mod work;
 
