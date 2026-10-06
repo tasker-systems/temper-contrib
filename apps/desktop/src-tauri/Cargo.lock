@@ -1163,6 +1163,7 @@ dependencies = [
  "agent-client-protocol",
  "axum",
  "chrono",
+ "dirs 5.0.1",
  "http",
  "jsonschema",
  "keyring",
