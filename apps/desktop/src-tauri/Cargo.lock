@@ -1182,6 +1182,7 @@ dependencies = [
  "temperkb-workflow",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "toml_edit 0.23.10+spec-1.0.0",
  "uuid",
 ]
 
@@ -5941,9 +5942,9 @@ dependencies = [
 
 [[package]]
 name = "temperkb-auth"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb3982ea474ea96332b95af2bef7ab1a7c013348a0e6db9efe819e55656236af"
+checksum = "88e5758cac0792a94a7ba16b676f3425ba676b4fad2f99e3d60599a8b4f4d974"
 dependencies = [
  "base64 0.22.1",
  "rand 0.8.8",
@@ -5955,15 +5956,16 @@ dependencies = [
 
 [[package]]
 name = "temperkb-client"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc3dbb6e0f0c683a0e568a9fa0e48ab7a9fa0faa7b0114d07cb4462f9b5d1b8d"
+checksum = "2619eba51991ee5aae75c2a8502047ba735aae8e86e38711573dc777364e5b99"
 dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "open",
+ "percent-encoding",
  "reqwest 0.12.28",
  "secrecy",
  "serde",
@@ -5984,9 +5986,9 @@ dependencies = [
 
 [[package]]
 name = "temperkb-core"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9634c4c5e53c40302b788c4f3b45abdb914b51f135f8eb7a0b03186fa0f13f4"
+checksum = "1e7c484f12b2202983c234d098bb92da37cf42ba308cc21c3203f4a36c2c75f7"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6011,18 +6013,18 @@ dependencies = [
 
 [[package]]
 name = "temperkb-principal"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4be8307cea66e76486653a307bbb340b464e5ca65c96995960082a096a55779c"
+checksum = "0e717896a9470528b9ca050a36389e5556a5393ac88c94c9d2956b13f34a5794"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "temperkb-telemetry"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bca15119fb0faf58c452518ba59dcf140240299da705fc7a6468acd20f184e0"
+checksum = "730580a31b93a8a69bddd02f454d6d81c6886500bf64f329586ae65b3d16d70d"
 dependencies = [
  "axum",
  "http",
@@ -6038,9 +6040,9 @@ dependencies = [
 
 [[package]]
 name = "temperkb-workflow"
-version = "0.5.4"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "092a8219daecbe14fc580a72565967e7c15fa457434dfa5bad12d48c25a7c7dd"
+checksum = "1d8f3369e4b88d4b21495d65a965c97d1c165c695f7c89c732bb313a1e284696"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6048,7 +6050,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sqlx",
  "temperkb-core",
  "thiserror 2.0.21",
  "tracing",
@@ -6325,6 +6326,19 @@ dependencies = [
  "serde_spanned 0.6.9",
  "toml_datetime 0.6.3",
  "winnow 0.5.40",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.23.10+spec-1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "84c8b9f757e028cee9fa244aea147aab2a9ec09d5325a9b01e0a49730c2b5269"
+dependencies = [
+ "indexmap 2.14.2",
+ "toml_datetime 0.7.5+spec-1.1.0",
+ "toml_parser",
+ "toml_writer",
+ "winnow 0.7.15",
 ]
 
 [[package]]
@@ -7521,6 +7535,9 @@ name = "winnow"
 version = "0.7.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "winnow"
