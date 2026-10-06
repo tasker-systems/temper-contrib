@@ -1623,13 +1623,22 @@ mod tests {
             );
         }
         let (Some(code), Some(state)) = (params.get("code"), params.get("state")) else {
-            return plain(http::StatusCode::BAD_REQUEST, "Missing code or state parameter");
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Missing code or state parameter",
+            );
         };
         let Ok(port) = state.parse::<u16>() else {
-            return plain(http::StatusCode::BAD_REQUEST, "Invalid port in state parameter");
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Invalid port in state parameter",
+            );
         };
         if !(1024..=65535).contains(&port) {
-            return plain(http::StatusCode::BAD_REQUEST, "Invalid port in state parameter");
+            return plain(
+                http::StatusCode::BAD_REQUEST,
+                "Invalid port in state parameter",
+            );
         }
         redirect_302(format!("http://localhost:{port}?code={code}"))
     }
@@ -1667,8 +1676,7 @@ mod tests {
                     return plain(http::StatusCode::BAD_REQUEST, "Missing refresh_token");
                 };
                 let spent_already = lock(&stub.spent_refresh).contains(presented);
-                let live_is_presented =
-                    lock(&stub.live_refresh).as_deref() == Some(presented);
+                let live_is_presented = lock(&stub.live_refresh).as_deref() == Some(presented);
                 if spent_already || !live_is_presented {
                     return (
                         http::StatusCode::BAD_REQUEST,
@@ -1773,7 +1781,10 @@ mod tests {
             .get()
             .await
             .expect("whoami resolves as the person");
-        assert!(!profile.display_name.is_empty(), "whoami carries the person");
+        assert!(
+            !profile.display_name.is_empty(),
+            "whoami carries the person"
+        );
         println!("witness: whoami resolved as {}", profile.display_name);
 
         assert!(
