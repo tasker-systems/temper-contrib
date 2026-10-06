@@ -181,7 +181,7 @@ pub async fn doc_open(
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
-    Ok(open_one(client, id).await)
+    Ok(open_one(client.as_ref(), id).await)
 }
 
 #[cfg(test)]
@@ -341,7 +341,9 @@ mod tests {
     #[ignore = "requires temper credentials, network, and TEMPER_WITNESS_REF"]
     async fn consistent_open_matches_a_fresh_head() {
         let state = TemperState::connect();
-        let client = state
+        // A borrowed handle is all a witness body needs; the Arc it borrows
+        // lives for the body.
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let known = std::env::var("TEMPER_WITNESS_REF")

@@ -392,17 +392,17 @@ pub async fn doc_save_body(
             reason: "not a resource reference".into(),
         });
     };
-    match guarded_save(client, uuid, &base_hash, content).await {
+    match guarded_save(client.as_ref(), uuid, &base_hash, content).await {
         Ok(Guarded::Saved { body_hash }) => Ok(BodySaved::Saved { body_hash }),
         Ok(Guarded::Moved) => {
-            let current = open_one(client, id).await;
+            let current = open_one(client.as_ref(), id).await;
             let changed_sections = match &current {
                 DocOpened::Opened(doc) => changed_headings(&base_markdown, &doc.markdown),
                 _ => Vec::new(),
             };
             Ok(BodySaved::Refused {
                 current: Box::new(current),
-                last_body_change: last_body_change(client, uuid).await,
+                last_body_change: last_body_change(&client, uuid).await,
                 changed_sections,
             })
         }
@@ -739,7 +739,7 @@ mod tests {
     #[ignore = "writes to TEMPER_WITNESS_SCRATCH_REF; requires credentials and network"]
     async fn guarded_save_live() {
         let state = TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let scratch = std::env::var("TEMPER_WITNESS_SCRATCH_REF")
@@ -777,7 +777,7 @@ mod tests {
     #[ignore = "writes to TEMPER_WITNESS_SCRATCH_REF; requires credentials and network"]
     async fn the_channels_stay_separate_live() {
         let state = TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let scratch = std::env::var("TEMPER_WITNESS_SCRATCH_REF")

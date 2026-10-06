@@ -20,9 +20,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-temperkb-client = "0.5.4"
-temperkb-core = "0.5.4"
-temperkb-workflow = "0.5.4"
+temperkb-client = "0.6"
+temperkb-core = "0.6"
+temperkb-workflow = "0.6"
 # The desktop's temper credential lives in the platform keychain (the macOS
 # Security framework through the default v1 store); the stored payload is the
 # client crate's own StoredAuth JSON.
@@ -32,6 +32,10 @@ chrono = "0.4"
 similar = { version = "3", features = ["inline"] }
 regex = "1"
 toml = "0.9"
+# Format-preserving `[auth]` merge into the CLI-shared config.toml: the desktop
+# touches its section and leaves every other byte (comments, foreign sections)
+# as the file carries them.
+toml_edit = "0.23"
 tauri-plugin-opener = "2.5.5"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }

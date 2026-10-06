@@ -1,5 +1,9 @@
 mod acp;
 mod adapters;
+// The connection room's core: the setup/edit half of `temper init` — derive
+// the provider entry the wizard would write and merge it into the CLI-shared
+// config's [auth] section, preserving every other byte.
+mod connection;
 // The desktop's own temper credential custody: keychain-backed, or a file
 // under TEMPER_DESKTOP_AUTH_STORE for dev and witness runs.
 pub mod auth_store;
@@ -26,7 +30,11 @@ mod roster;
 mod settings;
 mod spec_check;
 mod temper;
+// Shared env-scoping for the crate's env-touching witnesses — compiled for
+// tests only.
 mod window;
+#[cfg(test)]
+mod witness_env;
 mod work;
 
 use tauri::Manager;
@@ -76,6 +84,10 @@ pub fn run() {
             settings::settings_remove_agent,
             roster::roster_get,
             temper::temper_connection_status,
+            connection::temper_connection_gather,
+            connection::temper_connection_apply,
+            temper::temper_signin,
+            temper::temper_signout,
             temper::temper_whoami,
             temper::temper_resolve_refs,
             document::doc_open,

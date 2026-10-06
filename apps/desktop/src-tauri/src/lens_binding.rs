@@ -1039,7 +1039,7 @@ pub async fn lens_resolve(
                 .into_iter()
                 .map(|c| (c.id.0, format!("{}/{}", c.owner_ref, c.slug)))
                 .collect();
-            let read = graph_read(client, subject, &homes).await?;
+            let read = graph_read(&client, subject, &homes).await?;
             Ok(Resolved {
                 spec: fill(&spec, &binding, graph_props(&read, &homes))?,
                 refs: node_resolutions(&read, &homes),
@@ -1863,7 +1863,7 @@ mod tests {
     #[ignore = "requires temper credentials, network, and TEMPER_WITNESS_CONTEXT"]
     async fn a_live_graph_fills_a_graph_the_check_admits() {
         let state = TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let context = std::env::var("TEMPER_WITNESS_CONTEXT")
@@ -1949,7 +1949,7 @@ mod tests {
     #[ignore = "requires temper credentials, network, and TEMPER_WITNESS_CONTEXT"]
     async fn a_live_listing_fills_a_table_the_check_admits() {
         let state = TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let context = std::env::var("TEMPER_WITNESS_CONTEXT")
