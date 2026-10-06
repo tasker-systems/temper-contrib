@@ -1844,6 +1844,10 @@ mod tests {
             .await
             .expect("the stub AS completes the sign-in leg unattended");
 
+        assert!(
+            dep.desktop_auth_path.exists(),
+            "the credential is the desktop's own from the first write — the override file holds it"
+        );
         assert!(state.is_connected(), "the sign-in is a session");
         let client = state.client().expect("the state follows the sign-in");
         let profile = client
@@ -1856,10 +1860,6 @@ mod tests {
             "whoami resolves as the stub's person, on the minted access token"
         );
 
-        assert!(
-            dep.desktop_auth_path.exists(),
-            "the credential is the desktop's own — the override file holds it"
-        );
         assert!(!watched.exists(), "the CLI's auth.json was never written");
 
         state.sign_out().expect("sign out");
