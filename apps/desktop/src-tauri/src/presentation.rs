@@ -51,6 +51,26 @@ const PRESENTED_HUB_CONTENT: &str = "Views agents presented in this person's des
 /// in flight is what would record a view whose agent was told refused.
 pub const PREPARE_BOUND: Duration = Duration::from_secs(15);
 
+/// The longest agent name a record carries, in code points — the same
+/// number the catalog bounds every name an agent sends with
+/// (`limits.maxNameLength`); the agent's own name is one of those. A
+/// longer name is shortened where the record is built, and the shape
+/// refuses one past this bound anyway.
+pub const AGENT_NAME_BOUND: usize = 64;
+
+/// The agent's name as the record carries it: within the bound, verbatim;
+/// past it, the name's head closed with an ellipsis — the shortening is
+/// visible in the tab title and heading the record's name renders into,
+/// never a silent cut.
+fn bounded_agent_name(agent: &str) -> String {
+    if agent.chars().count() <= AGENT_NAME_BOUND {
+        agent.to_string()
+    } else {
+        let head: String = agent.chars().take(AGENT_NAME_BOUND - 1).collect();
+        format!("{head}…")
+    }
+}
+
 /// A presented view's record, as committed and as read back. Closed both
 /// ways: the shape refuses a stray field on commit, and a read refuses one
 /// the shape did not.
@@ -84,7 +104,7 @@ pub fn presented_view_schema() -> serde_json::Value {
         "properties": {
             "version": { "const": 1 },
             "conversationId": { "type": "string", "minLength": 1 },
-            "agent": { "type": "string" },
+            "agent": { "type": "string", "maxLength": AGENT_NAME_BOUND },
             "catalogVersion": { "type": "string", "pattern": "^temper@" },
             "presentedAt": { "type": "string", "minLength": 1 },
             "spec": {
@@ -111,7 +131,7 @@ pub fn record_of(
     PresentedRecord {
         version: 1,
         conversation_id: conversation_id.to_string(),
-        agent: presentation.agent.clone(),
+        agent: bounded_agent_name(&presentation.agent),
         catalog_version: crate::present_server::catalog_version(),
         presented_at: presented_at.to_string(),
         spec: presentation.spec.clone(),
@@ -617,9 +637,81 @@ mod tests {
         let mut refused = record.clone();
         refused["outcome"] = json!("refused");
         assert!(!shape_errors(&refused).is_empty(), "only rendered views");
-        let mut unversioned = record;
+        let mut unversioned = record.clone();
         unversioned["catalogVersion"] = json!("1.0.0");
         assert!(!shape_errors(&unversioned).is_empty());
+
+        let mut over_bound = record.clone();
+        over_bound["agent"] = json!("x".repeat(AGENT_NAME_BOUND + 1));
+        assert!(
+            !shape_errors(&over_bound).is_empty(),
+            "the shape refuses a name past the bound"
+        );
+        let mut at_bound = record;
+        at_bound["agent"] = json!("x".repeat(AGENT_NAME_BOUND));
+        assert_eq!(shape_errors(&at_bound), Vec::<String>::new());
+    }
+
+    /// A name past the bound is shortened where the record is built: the
+    /// head of the name closed with an ellipsis, so the tab title and
+    /// heading show the shortening — never a silent cut. A name within the
+    /// bound is carried verbatim.
+    #[test]
+    fn a_name_past_the_bound_is_shortened_so_the_shortening_shows() {
+        let long = "an agent whose own init answer named itself far past the bound, padded out"
+            .to_string();
+        assert!(long.chars().count() > AGENT_NAME_BOUND);
+        let record = record_of(
+            "c1",
+            &Presentation {
+                agent: long.clone(),
+                spec: conforming(),
+            },
+            "t",
+        );
+        let head: String = long.chars().take(AGENT_NAME_BOUND - 1).collect();
+        assert_eq!(record.agent, format!("{head}…"), "the head, visibly cut");
+        let value = serde_json::to_value(&record).unwrap();
+        assert_eq!(
+            shape_errors(&value),
+            Vec::<String>::new(),
+            "the shortened record conforms"
+        );
+
+        let at_bound = "x".repeat(AGENT_NAME_BOUND);
+        let record = record_of(
+            "c1",
+            &Presentation {
+                agent: at_bound.clone(),
+                spec: conforming(),
+            },
+            "t",
+        );
+        assert_eq!(
+            record.agent, at_bound,
+            "a name within the bound is carried verbatim"
+        );
+    }
+
+    /// Records committed before the shape carried the bound may hold a
+    /// longer name: the read does not consult shapes, so it renders whole —
+    /// no migration rewrites what is already written.
+    #[test]
+    fn a_record_written_before_the_bound_still_reads_back() {
+        let long = "x".repeat(AGENT_NAME_BOUND * 2);
+        let mut record = serde_json::to_value(record_of(
+            "c1",
+            &Presentation {
+                agent: "a".to_string(),
+                spec: conforming(),
+            },
+            "t",
+        ))
+        .unwrap();
+        record["agent"] = json!(long.clone());
+        let view = presented_view_from(artifact(PRESENTED_VIEW_KIND, "pinned", record), owner())
+            .expect("a pre-bound record reads");
+        assert_eq!(view.record.agent, long, "the name, whole");
     }
 
     /// Each record is its own immutable fact: pinned, superseding nothing.
@@ -815,6 +907,31 @@ mod tests {
         assert!(
             refused.is_err(),
             "the enforcing shape must refuse a malformed record, got {refused:?}"
+        );
+
+        // The name bound is enforcing too: a record whose agent name is
+        // past it is refused by the shape, though records written before
+        // the bound still read back above with their longer names whole.
+        let mut long_named = serde_json::to_value(&read.record).unwrap();
+        long_named["agent"] = json!("x".repeat(AGENT_NAME_BOUND + 1));
+        let long_refused = client
+            .data_artifacts()
+            .commit(
+                resource,
+                &ArtifactCommitRequest {
+                    kind: PRESENTED_VIEW_KIND.to_string(),
+                    kind_owner: None,
+                    intent: "pinned".to_string(),
+                    precedence: 0.0,
+                    content: long_named,
+                    supersedes: Vec::new(),
+                    act: Default::default(),
+                },
+            )
+            .await;
+        assert!(
+            long_refused.is_err(),
+            "the enforcing shape must refuse a name past the bound, got {long_refused:?}"
         );
 
         client
