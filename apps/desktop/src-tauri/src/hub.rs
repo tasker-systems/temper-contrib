@@ -14,7 +14,7 @@ use temper_client::TemperClient;
 use temper_core::types::data_artifact::{
     ArtifactCommitRequest, ArtifactListParams, ArtifactView, KindOwnerInput,
 };
-use temper_core::types::data_artifact_shape::{EnforcementMode, ShapeDeclareRequest};
+use temper_core::types::data_artifact_shape::{EnforcementMode, ShapeDeclareRequest, ShapeView};
 use temper_core::types::ids::DataArtifactId;
 use temper_core::types::ingest::IngestPayload;
 use temper_workflow::types::resource::ResourceListParams;
@@ -229,12 +229,34 @@ async fn read_currents(
     Ok(batches)
 }
 
-/// Declares a family's shape in the hub's context, only when `list_shapes`
-/// shows it absent — a second declaration would fork the family's lineage.
-/// The namespace is named explicitly: a shape has no resource to default it
-/// from, so the family is declared under the person's profile — and only a
-/// shape in that namespace counts as present, so someone else's shape of the
+/// Whether the context's shape for the family needs declaring: yes when no
+/// live shape of the family stands, or when the one standing carries a
+/// schema the code no longer wants. A changed schema amends the shape — the
+/// old one folds, versioned — and rewrites no stored record, which is why
+/// a read never consults shapes. The namespace is named explicitly — a
+/// shape has no resource to default it from — and only a shape in the
+/// person's own namespace counts as live, so someone else's shape of the
 /// same name never stands in for the person's enforcing one.
+fn shape_needs_declaring(
+    shapes: &[ShapeView],
+    kind: &str,
+    profile_id: Uuid,
+    schema: &serde_json::Value,
+) -> bool {
+    match shapes.iter().find(|s| {
+        !s.is_folded
+            && s.artifact_kind == kind
+            && s.kind_owner_table == "kb_profiles"
+            && s.kind_owner_id == profile_id
+    }) {
+        Some(live) => &live.schema != schema,
+        None => true,
+    }
+}
+
+/// Declares a family's shape in the hub's context when none stands, and
+/// amends it when the schema the code wants has moved on from the one
+/// declared — see [`shape_needs_declaring`].
 pub(crate) async fn ensure_shape(
     client: &TemperClient,
     context_id: Uuid,
@@ -247,12 +269,7 @@ pub(crate) async fn ensure_shape(
         .list_shapes(context_id)
         .await
         .map_err(|e| e.to_string())?;
-    if shapes.iter().any(|s| {
-        !s.is_folded
-            && s.artifact_kind == kind
-            && s.kind_owner_table == "kb_profiles"
-            && s.kind_owner_id == profile_id
-    }) {
+    if !shape_needs_declaring(&shapes, kind, profile_id, &schema) {
         return Ok(());
     }
     client
@@ -426,6 +443,72 @@ mod tests {
 
     const A: &str = "00000000-0000-0000-0000-000000000001";
     const B: &str = "00000000-0000-0000-0000-000000000002";
+
+    fn a_shape_view(kind: &str, schema: serde_json::Value, is_folded: bool) -> ShapeView {
+        serde_json::from_value(serde_json::json!({
+            "shape_id": "00000000-0000-0000-0000-00000000000f",
+            "home_anchor_table": "kb_contexts",
+            "home_anchor_id": "00000000-0000-0000-0000-00000000000e",
+            "kind_owner_table": "kb_profiles",
+            "kind_owner_id": "00000000-0000-0000-0000-00000000000c",
+            "artifact_kind": kind,
+            "schema": schema,
+            "enforcement": "enforcing",
+            "shape_version": 1,
+            "is_folded": is_folded,
+            "created": "2026-09-30T10:00:00Z"
+        }))
+        .unwrap()
+    }
+
+    fn owner() -> Uuid {
+        Uuid::parse_str("00000000-0000-0000-0000-00000000000c").unwrap()
+    }
+
+    /// The declaration decision: absent — declare; present and agreeing —
+    /// nothing; present and behind the schema the code wants — amend. Only a
+    /// live shape of the family in the person's own namespace stands for
+    /// the family.
+    #[test]
+    fn a_changed_schema_amends_the_family_s_shape() {
+        let schema =
+            serde_json::json!({ "type": "object", "properties": { "agent": { "maxLength": 64 } } });
+        let amended = serde_json::json!({ "type": "object", "properties": { "agent": { "type": "string" } } });
+
+        assert!(shape_needs_declaring(&[], "k", owner(), &schema));
+        let agreeing = vec![a_shape_view("k", schema.clone(), false)];
+        assert!(!shape_needs_declaring(&agreeing, "k", owner(), &schema));
+        let stale = vec![a_shape_view("k", amended.clone(), false)];
+        assert!(
+            shape_needs_declaring(&stale, "k", owner(), &schema),
+            "the live shape is behind the code: it amends"
+        );
+
+        let other_family = vec![a_shape_view("other", schema.clone(), false)];
+        assert!(shape_needs_declaring(&other_family, "k", owner(), &schema));
+        let other_owner = vec![a_shape_view("k", schema.clone(), false)];
+        assert!(shape_needs_declaring(
+            &other_owner,
+            "k",
+            Uuid::nil(),
+            &schema
+        ));
+        let folded = vec![a_shape_view("k", schema.clone(), true)];
+        assert!(
+            shape_needs_declaring(&folded, "k", owner(), &schema),
+            "a folded shape stands for nothing"
+        );
+        let superseded_by_amendment = vec![
+            a_shape_view("k", amended, true),
+            a_shape_view("k", schema.clone(), false),
+        ];
+        assert!(!shape_needs_declaring(
+            &superseded_by_amendment,
+            "k",
+            owner(),
+            &schema
+        ));
+    }
 
     /// Witness for the converge clause: two commits from the same base leave
     /// two live currents; the next write merges and supersedes both — union
