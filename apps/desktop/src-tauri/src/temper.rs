@@ -624,8 +624,16 @@ pub async fn temper_resolve_refs(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::{
-        list_params, parse_ref, shape_view, ResourceFilter, LIST_PAGE_MAX, SHAPE_REGIONS_MAX,
+        list_params, parse_ref, session_status, shape_view, sign_in_client_at, ResourceFilter,
+        TemperState, LIST_PAGE_MAX, SHAPE_REGIONS_MAX,
+    };
+    use crate::auth_store::{desktop_token_store, AUTH_STORE_ENV};
+    use crate::witness_env::{cleared, ScopedEnv, ENV_SERIAL};
+    use temper_client::auth::{
+        needs_refresh, refresh_token, resolve_auth_path, DiskTokenStore, StoredAuth, TokenStore,
     };
     use temper_workflow::types::resource::{ResourceSortField, SortOrder};
 
@@ -895,5 +903,489 @@ mod tests {
             !profile.display_name.is_empty(),
             "profile should carry a display name"
         );
+    }
+
+    // ─── Witnesses: native sign-in custody and the sign-in seams ───────────
+    //
+    // Everything here runs under a synthetic deployment: the CLI's config is
+    // relocated by `TEMPER_GLOBAL_CONFIG` (honored by `global_config_path`,
+    // temper-core config.rs:487-496) and the desktop's store by
+    // `TEMPER_DESKTOP_AUTH_STORE`, both pointed inside a scratch root — the
+    // person's real keychain and `~/.config/temper` are never read or
+    // written. Every witness holds the shared env serial for its body.
+
+    /// The expiry instants the fixtures live at, as RFC 3339: long past, far
+    /// future, and inside the five-minute refresh window.
+    const PAST: &str = "2020-01-01T00:00:00Z";
+    const LIVE: &str = "2100-01-01T00:00:00Z";
+
+    /// A `StoredAuth` fixture, built through its own serde impls — token
+    /// strings enter and leave as JSON, never hand-handled.
+    fn stored_auth(access_token: &str, expires_at: &str) -> StoredAuth {
+        serde_json::from_value(serde_json::json!({
+            "provider": { "kind": "auth0", "domain": "witness.invalid" },
+            "access_token": access_token,
+            "refresh_token": "witness-refresh-token",
+            "expires_at": expires_at,
+            "profile_id": null,
+            "device_id": "01900000-0000-7000-8000-000000000000",
+        }))
+        .expect("a StoredAuth fixture")
+    }
+
+    /// The credential as its serde impls restate it, so equality is the
+    /// stored shape's equality and token strings never leave JSON.
+    fn stored_json(auth: &StoredAuth) -> serde_json::Value {
+        serde_json::to_value(auth).expect("StoredAuth serializes")
+    }
+
+    /// A witness deployment: a synthetic config root whose `[auth]` carries
+    /// one provider entry and pins the CLI's auth file INSIDE the root, so
+    /// every path a witness touches is scratch. `desktop_client` is the
+    /// entry's `desktop_client_id` — `None` is the unregistered deployment
+    /// the sign-in refusal names.
+    struct WitnessDeployment {
+        root: PathBuf,
+        config_path: PathBuf,
+        cli_auth_path: PathBuf,
+        desktop_auth_path: PathBuf,
+    }
+
+    impl WitnessDeployment {
+        fn write(name: &str, desktop_client: Option<&str>, callback_url: &str) -> Self {
+            let root = std::env::temp_dir()
+                .join(format!("desktop-signin-{name}-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).expect("the witness root creates");
+            let cli_auth_path = root.join("cli-auth.json");
+            let desktop_auth_path = root.join("desktop-auth.json");
+            let config_path = root.join("config.toml");
+            let desktop_client_line = match desktop_client {
+                Some(id) => format!("desktop_client_id = \"{id}\"\n"),
+                None => String::new(),
+            };
+            std::fs::write(
+                &config_path,
+                format!(
+                    "[vault]\npath = \"{}/vault\"\n\n\
+                     [cloud]\napi_url = \"https://witness.invalid\"\n\n\
+                     [auth]\nprovider = \"auth0\"\npath = \"{}\"\n\n\
+                     [[auth.providers]]\n\
+                     name = \"auth0\"\n\
+                     authorize_url = \"https://witness.us.auth0.com/authorize\"\n\
+                     token_url = \"https://witness.us.auth0.com/oauth/token\"\n\
+                     client_id = \"witness-cli-client\"\n\
+                     audience = \"https://witness.invalid/api\"\n\
+                     callback_url = \"{callback_url}\"\n\
+                     scopes = [\"openid\", \"profile\", \"email\", \"offline_access\"]\n\
+                     {desktop_client_line}",
+                    root.display(),
+                    cli_auth_path.display()
+                ),
+            )
+            .expect("the witness config writes");
+            Self {
+                root,
+                config_path,
+                cli_auth_path,
+                desktop_auth_path,
+            }
+        }
+
+        /// The env a witness body runs under: the CLI's config relocated to
+        /// the synthetic root, the desktop's store on the override file, and
+        /// the CLI's auth-path and env-token variables out of the picture.
+        fn scoped_env(&self) -> Vec<ScopedEnv> {
+            let mut env = vec![
+                ScopedEnv::set("TEMPER_GLOBAL_CONFIG", self.config_path.to_str().unwrap()),
+                ScopedEnv::set(AUTH_STORE_ENV, self.desktop_auth_path.to_str().unwrap()),
+            ];
+            env.extend(cleared(&["TEMPER_AUTH_PATH", "TEMPER_TOKEN"]));
+            env
+        }
+
+        fn cleanup(&self) {
+            std::fs::remove_dir_all(&self.root).ok();
+        }
+    }
+
+    /// WITNESS (custody, absent arm): the desktop's store writes only its own
+    /// file. The bite is executed first — `DiskTokenStore::default_path()`,
+    /// the store the connect seam used before the U1 amendment
+    /// (`temper.rs`'s old `try_connect`), resolves to exactly the CLI's
+    /// `auth.json` under these envs and saving through it writes that file.
+    /// The desktop's store, on the same envs, leaves it absent through a
+    /// full sign-in's save and sign-out's clear.
+    #[test]
+    fn the_desktops_store_never_touches_the_cli_auth_file() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "custody-absent",
+            Some("witness-desktop-client"),
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        // The file the CLI resolves is the one the synthetic config pinned —
+        // refuse loudly rather than run against the person's real files.
+        let watched = resolve_auth_path();
+        assert_eq!(
+            watched, dep.cli_auth_path,
+            "the witness's CLI auth path is the synthetic config's pin, not the person's real file"
+        );
+        assert!(!watched.exists(), "precondition: nothing written yet");
+
+        // THE BITE: the removed code path's write target IS the CLI's auth
+        // file. `DiskTokenStore::default_path` resolves through
+        // `resolve_auth_path` (auth.rs:85-89), and its save is the
+        // `save_auth_to` helper (auth.rs:73-75) — had the desktop kept it,
+        // the login flow's `replace_grant` would have landed right here.
+        let old_store = DiskTokenStore::default_path();
+        old_store
+            .save(&stored_auth("would-have-landed-here", LIVE))
+            .expect("the old store saves");
+        assert!(
+            watched.exists(),
+            "the bite: DiskTokenStore::default_path() writes exactly the CLI's auth.json"
+        );
+        std::fs::remove_file(&watched).expect("the bite's file is scratch; restore absence");
+
+        // GREEN: the desktop's own store, same envs, same operations a real
+        // sign-in (login saves through the store it was handed,
+        // login.rs:156) and sign-out (store.clear) perform.
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        store
+            .save(&stored_auth("desktop-token", LIVE))
+            .expect("the sign-in's save lands");
+        assert!(
+            !watched.exists(),
+            "a desktop sign-in's save left the CLI's auth.json absent"
+        );
+        assert!(
+            dep.desktop_auth_path.exists(),
+            "the desktop's own file holds it"
+        );
+        let loaded = store
+            .load()
+            .expect("the override file reads back")
+            .expect("the credential is there");
+        assert_eq!(
+            stored_json(&loaded)["access_token"],
+            "desktop-token",
+            "what the desktop stored is what it loads"
+        );
+
+        store.clear().expect("the sign-out's clear lands");
+        assert!(
+            !dep.desktop_auth_path.exists(),
+            "the clear empties the desktop's own file"
+        );
+        assert!(
+            !watched.exists(),
+            "and the CLI's auth.json is still absent — never written"
+        );
+        dep.cleanup();
+    }
+
+    /// WITNESS (custody, byte-identical arm): a person who signed in through
+    /// the CLI carries an existing `auth.json`. The desktop's store neither
+    /// reads it (the old `build_client` path would have — its first act was
+    /// `store.load()`) nor alters it through a full save-and-clear cycle:
+    /// the bytes before and after are identical.
+    #[test]
+    fn an_existing_cli_auth_file_survives_the_desktops_store_byte_identical() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "custody-existing",
+            Some("witness-desktop-client"),
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        let watched = resolve_auth_path();
+        assert_eq!(
+            watched, dep.cli_auth_path,
+            "the witness's CLI auth path is the synthetic config's pin, not the person's real file"
+        );
+        // A plausible CLI grant the person signed for with `temper auth login`.
+        let cli_grant = stored_auth("the-cli-token", LIVE);
+        let cli_bytes = serde_json::to_string_pretty(&cli_grant).expect("the CLI grant writes");
+        std::fs::write(&watched, &cli_bytes).expect("pre-write the CLI's auth.json");
+
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        assert!(
+            matches!(store.load(), Ok(None)),
+            "the desktop's store does not read the CLI's auth.json — native custody reads its own file only"
+        );
+
+        store
+            .save(&stored_auth("desktop-token", LIVE))
+            .expect("the sign-in's save lands");
+        store.clear().expect("the sign-out's clear lands");
+        assert_eq!(
+            std::fs::read(&watched).expect("the CLI's auth.json survives"),
+            cli_bytes.as_bytes(),
+            "byte-identical after a full desktop sign-in/sign-out cycle"
+        );
+        dep.cleanup();
+    }
+
+    /// WITNESS (sign-out): the command's own path — seed the desktop's store
+    /// with a live grant (the post-sign-in state), connect, sign out. The
+    /// desktop's file is gone, the CLI's auth.json was never written, and
+    /// the managed state follows without a restart.
+    #[test]
+    fn sign_out_ends_the_desktops_custody_without_a_restart() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "signout",
+            Some("witness-desktop-client"),
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        store
+            .save(&stored_auth("live-desktop-token", LIVE))
+            .expect("seed the post-sign-in grant");
+        let state = TemperState::connect();
+        assert!(
+            state.is_connected(),
+            "a live desktop credential is a session"
+        );
+        assert!(state.client().is_some(), "the client is built on the grant");
+        assert!(
+            !resolve_auth_path().exists(),
+            "precondition: the CLI's auth.json is absent"
+        );
+
+        state.sign_out().expect("sign out");
+
+        assert!(
+            !dep.desktop_auth_path.exists(),
+            "the desktop's credential is gone — custody ended"
+        );
+        assert!(
+            !resolve_auth_path().exists(),
+            "sign-out never wrote the CLI's auth.json"
+        );
+        assert!(
+            !state.is_connected(),
+            "the managed state follows the sign-out"
+        );
+        assert!(state.client().is_none(), "the state dropped its client");
+        dep.cleanup();
+    }
+
+    /// WITNESS (the unregistered refusal): a deployment that registered no
+    /// desktop client refuses sign-in with the connection room's one line —
+    /// produced before [`login`] is even entered, so no browser can open.
+    /// The CLI's client id is never a stand-in.
+    //
+    // The env serial guard spans the awaits deliberately: it relocates the
+    // stores for the whole body, and nothing inside the awaited code takes
+    // it, so no other task can be waiting on it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_unregistered_client_refuses_sign_in_before_any_browser() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "unregistered",
+            None,
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        let err = sign_in_client_at(&dep.config_path)
+            .await
+            .expect_err("an unregistered deployment refuses");
+        assert!(
+            err.contains("desktop_client_id"),
+            "the refusal names the field the registration belongs in: {err}"
+        );
+        assert!(
+            !err.contains("witness-cli-client"),
+            "the CLI's client id never appears: {err}"
+        );
+        assert!(
+            !err.contains("browser") && !err.contains("timed out"),
+            "the refusal is the connection's line, not the flow's — nothing opened: {err}"
+        );
+        dep.cleanup();
+    }
+
+    /// WITNESS (the published empty-callback refusal): the desktop's
+    /// OAuthConfig plumbing preserves the flow's own regression guard — a
+    /// provider entry whose callback never resolved refuses with the same
+    /// actionable `temper init` line the CLI renders (login.rs:86-90, its
+    /// regression test at :353-376), before any browser opens.
+    //
+    // The env serial guard spans the awaits deliberately: it relocates the
+    // stores for the whole body, and nothing inside the awaited code takes
+    // it, so no other task can be waiting on it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn an_empty_callback_refuses_with_the_published_line() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write("empty-callback", Some("witness-desktop-client"), "");
+        let _env = dep.scoped_env();
+
+        let err = sign_in_client_at(&dep.config_path)
+            .await
+            .expect_err("an empty callback refuses");
+        assert!(
+            err.contains("callback URL"),
+            "the published line names the unconfigured callback: {err}"
+        );
+        assert!(
+            err.contains("temper init"),
+            "the published line names the fix: {err}"
+        );
+        dep.cleanup();
+    }
+
+    /// A local OAuth token endpoint: answers every grant with a fresh,
+    /// rotated pair. The refresh witness points `refresh_token` at it.
+    async fn token_stub() -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::post;
+        use axum::{Json, Router};
+        async fn grant() -> Json<serde_json::Value> {
+            Json(serde_json::json!({
+                "access_token": "refreshed-access-token",
+                "refresh_token": "rotated-refresh-token",
+                "expires_in": 3600,
+            }))
+        }
+        let app = Router::new().route("/oauth/token", post(grant));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("the stub binds loopback");
+        let addr = listener.local_addr().expect("the stub's address");
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (format!("http://{addr}/oauth/token"), handle)
+    }
+
+    /// WITNESS (refresh): the published refresh chain runs through the
+    /// desktop's own store — `needs_refresh` inside its window,
+    /// `refresh_token` posting the grant, and the response landing via the
+    /// store's `save` (auth.rs:881) in the override file. A fresh handle on
+    /// the same custody reads the rotated grant back.
+    //
+    // The env serial guard spans the awaits deliberately: it relocates the
+    // stores for the whole body, and nothing inside the awaited code takes
+    // it, so no other task can be waiting on it.
+    #[allow(clippy::await_holding_lock)]
+    #[tokio::test]
+    async fn a_refresh_lands_in_the_desktops_store() {
+        let (token_url, stub) = token_stub().await;
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "refresh",
+            Some("witness-desktop-client"),
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        let soon = (chrono::Utc::now() + chrono::Duration::seconds(30)).to_rfc3339();
+        store
+            .save(&stored_auth("soon-stale-token", &soon))
+            .expect("seed a grant inside the refresh window");
+        let auth = store
+            .load()
+            .expect("the grant reads back")
+            .expect("the credential is there");
+        assert!(
+            needs_refresh(&auth),
+            "a grant inside the five-minute window needs refresh (auth.rs:795-797)"
+        );
+
+        let refreshed = refresh_token(store.as_ref(), &auth, &token_url, "witness-desktop-client")
+            .await
+            .expect("the refresh grant completes");
+
+        let reloaded = desktop_token_store()
+            .expect("a fresh handle on the same custody")
+            .load()
+            .expect("the refreshed grant reads back")
+            .expect("the credential is there");
+        let json = stored_json(&reloaded);
+        assert_eq!(
+            json["access_token"], "refreshed-access-token",
+            "the refresh landed in the desktop's store"
+        );
+        assert_eq!(
+            json["refresh_token"], "rotated-refresh-token",
+            "rotation: the response's refresh token wins (auth.rs:872-875)"
+        );
+        assert!(
+            reloaded.expires_at > auth.expires_at,
+            "the refreshed grant expires later than the stale one"
+        );
+        assert_eq!(
+            stored_json(&refreshed)["access_token"],
+            json["access_token"],
+            "the grant refresh_token returned is the grant the store holds"
+        );
+        stub.abort();
+        dep.cleanup();
+    }
+
+    /// WITNESS (the status surface): `auth_status`'s line — an expired
+    /// credential is not a session (auth.rs:612-617) — holds for the
+    /// desktop's status. The store is consulted fresh on every ask, so a
+    /// landed re-sign-in is a session and a sign-out is not, without
+    /// rebuilding the state.
+    #[test]
+    fn an_expired_credential_is_not_a_session_for_the_desktop() {
+        let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dep = WitnessDeployment::write(
+            "status",
+            Some("witness-desktop-client"),
+            "https://witness.invalid/api/auth/cli-callback",
+        );
+        let _env = dep.scoped_env();
+
+        let store = desktop_token_store().expect("the override env selects the file-backed store");
+        store
+            .save(&stored_auth("expired-token", PAST))
+            .expect("seed an expired grant");
+        let state = TemperState::connect();
+
+        let status = session_status().expect("the store answers");
+        assert!(
+            !status.authenticated,
+            "an expired credential is not a session"
+        );
+        assert_eq!(
+            status.expires_at,
+            Some(
+                chrono::DateTime::parse_from_rfc3339(PAST)
+                    .expect("the fixture's expiry")
+                    .with_timezone(&chrono::Utc)
+            ),
+            "the expired status explains itself with its expiry"
+        );
+        assert!(
+            !state.is_connected(),
+            "the desktop's status holds the same line"
+        );
+
+        store
+            .save(&stored_auth("fresh-token", LIVE))
+            .expect("a re-sign-in's grant");
+        assert!(
+            state.is_connected(),
+            "a live grant in the same store is a session — the status answers from the store"
+        );
+
+        store.clear().expect("sign out");
+        assert!(
+            !session_status().expect("the store answers").authenticated,
+            "absence is not a session"
+        );
+        assert!(!state.is_connected());
+        dep.cleanup();
     }
 }

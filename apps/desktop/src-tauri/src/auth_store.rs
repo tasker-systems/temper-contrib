@@ -150,44 +150,7 @@ impl TokenStore for FileTokenStore {
 mod tests {
     use super::*;
 
-    use std::sync::Mutex;
-
-    /// The env-mutating witnesses share one process env; the lock serializes
-    /// them. The desktop has no `temp_env` dev-dependency, so the scoping
-    /// discipline temper's auth tests get from `temp_env::with_var(s)` is
-    /// mirrored here with restore-on-drop guards (this crate's `InterpreterPin`
-    /// shape) under this lock.
-    static ENV_SERIAL: Mutex<()> = Mutex::new(());
-
-    /// One env var scoped to a witness body: set or removed for the body,
-    /// prior state restored on drop.
-    struct ScopedEnv {
-        key: &'static str,
-        prior: Option<String>,
-    }
-
-    impl ScopedEnv {
-        fn set(key: &'static str, value: &str) -> Self {
-            let prior = std::env::var(key).ok();
-            std::env::set_var(key, value);
-            Self { key, prior }
-        }
-
-        fn removed(key: &'static str) -> Self {
-            let prior = std::env::var(key).ok();
-            std::env::remove_var(key);
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for ScopedEnv {
-        fn drop(&mut self) {
-            match &self.prior {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
-            }
-        }
-    }
+    use crate::witness_env::{cleared, ScopedEnv, ENV_SERIAL};
 
     /// The vars whose values could contaminate a store witness: the CLI's env
     /// token and auth path, and the provider/device tags a developer shell
@@ -201,10 +164,6 @@ mod tests {
 
     fn contaminated_env_cleared() -> Vec<ScopedEnv> {
         cleared(&CONTAMINATING_VARS)
-    }
-
-    fn cleared(vars: &[&'static str]) -> Vec<ScopedEnv> {
-        vars.iter().copied().map(ScopedEnv::removed).collect()
     }
 
     /// A valid-shaped JWT a developer shell might carry: three dot-separated
