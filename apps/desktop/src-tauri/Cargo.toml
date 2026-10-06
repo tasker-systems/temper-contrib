@@ -29,6 +29,10 @@ temperkb-workflow = "0.6"
 keyring = "4.2.0"
 uuid = "1"
 chrono = "0.4"
+# The fresh-machine establish's default vault path: the same `dirs::home_dir`
+# resolution `temper init`'s `default_vault_path` makes (temper-cli pins
+# major 5), so the desktop's default is init's default, byte for byte.
+dirs = "5"
 similar = { version = "3", features = ["inline"] }
 regex = "1"
 toml = "0.9"

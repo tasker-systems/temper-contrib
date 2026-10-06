@@ -6,15 +6,20 @@
 //! The room renders the same three-way choice the wizard's instance selector
 //! asks — hosted (temperkb.io), self-hosted (own instance + Auth0/Okta
 //! tenant), or temper-as (the instance's own Authorization Server) — and
-//! this module derives the exact provider entry `init` would write and
-//! merges it into the CLI-shared `config.toml`.
+//! this module derives the exact provider entry `init` would write.
 //!
-//! The merge is scoped to `[auth]`: `toml_edit` keeps every byte outside the
-//! section — comments, foreign sections, formatting — exactly as the file
-//! carries it. The desktop never writes `auth.path`, the vault, or any
-//! CLI-owned section.
+//! The write scopes by existence. On a config that exists the merge is
+//! scoped to `[auth]`: `toml_edit` keeps every byte outside the section —
+//! comments, foreign sections, formatting — exactly as the file carries it,
+//! and the desktop never writes `auth.path`, the vault, or any CLI-owned
+//! section. Where no config exists the desktop establishes the whole file
+//! at `temper init` parity: the vault path the room chose (init's default
+//! when blank), the vault root and its `.temper/` state dir, and the
+//! `[vault]` + `[cloud]` + `[auth]` render `render_config_toml` produces
+//! (`init.rs:653-705`), mirrored with parity witnesses because the CLI
+//! crate is not a desktop dependency.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use temper_client::config::{api_url, load_cloud_config_from};
@@ -36,12 +41,12 @@ pub mod hosted_preset {
     pub const CLIENT_ID: &str = "mWp8znLw2MUJNCiZNl8wwBv6SPJI2mfF";
     /// The hosted API audience.
     pub const AUDIENCE: &str = "https://temperkb.io/api";
-    /// The temperkb.io Auth0 application for the desktop itself. NOT MINTED
-    /// yet — a deployment prerequisite — so the slot stays `None` and hosted
-    /// connection sign-in refuses, naming the unregistered client, rather
-    /// than degrading to the CLI's id. Set this when the application exists;
-    /// never a placeholder.
-    pub const DESKTOP_CLIENT_ID: Option<&str> = None;
+    /// The temperkb.io Auth0 application for the desktop itself — the
+    /// desktop's own registration, minted beside the CLI's (`init.rs:29`,
+    /// the mirror origin of every constant here). A public client id,
+    /// repo-safe. Hosted sign-in authenticates with this id, never with
+    /// [`CLIENT_ID`], whose registered redirect belongs to the CLI.
+    pub const DESKTOP_CLIENT_ID: Option<&str> = Some("v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE");
 }
 
 /// The desktop's public client on a temper Authorization Server — the name
@@ -155,10 +160,10 @@ fn normalized_instance_url(raw: &str) -> String {
 /// the same derivation `apply_answers`' config half performs, plus the
 /// desktop's own client id when the deployment registered one.
 ///
-/// Hosted fills domain/audience/api-url from the preset; the desktop's own
-/// Auth0 application is not minted yet, so the entry's `desktop_client_id`
-/// stays unset and [`sign_in_refusal`] names it. Self-hosted leaves the
-/// field unset — the deployment registers the desktop application itself.
+/// Hosted fills domain/audience/api-url from the preset and carries the
+/// desktop's own registration ([`hosted_preset::DESKTOP_CLIENT_ID`]).
+/// Self-hosted leaves the field unset — the deployment registers the desktop
+/// application itself, and [`sign_in_refusal`] names it until then.
 /// Temper-as derives everything from the instance URL alone, including the
 /// fixed [`TEMPER_AS_DESKTOP_CLIENT`] public client.
 pub fn derive_provider(choice: &ConnectionChoice) -> Result<AuthProvider, String> {
@@ -260,28 +265,121 @@ fn authorize_domain(provider: &AuthProvider) -> &str {
         .unwrap_or(&provider.authorize_url)
 }
 
-/// Apply the choice to the config file at `path`: derive the provider entry
-/// (instance URL validated, the same rule `init` applies) and merge it into
-/// `[auth]` through `toml_edit`, preserving every byte outside the section.
-/// The desktop never writes `auth.path`, the vault, or any CLI-owned
-/// section; an `[auth]` key it does not own (such as a hand-set `path`) is
-/// left exactly as the file carries it.
+/// Where a fresh machine's vault lives — `init.rs:140-147`'s
+/// `default_vault_path`, mirrored: the home-relative default, or
+/// `./temper-vault` when home is unresolvable.
+fn default_vault_path() -> String {
+    dirs::home_dir()
+        .map(|h| {
+            h.join("Documents/temper-vault")
+                .to_string_lossy()
+                .to_string()
+        })
+        .unwrap_or_else(|| "./temper-vault".to_string())
+}
+
+/// The `[cloud] api_url` a choice's establish writes — the same value
+/// `render_config_toml` passes its cloud section: the preset's for hosted,
+/// the instance base URL otherwise.
+fn cloud_api_url(choice: &ConnectionChoice) -> String {
+    match choice {
+        ConnectionChoice::Hosted => hosted_preset::API_URL.to_string(),
+        ConnectionChoice::SelfHosted(sh) => normalized_instance_url(&sh.instance_url),
+        ConnectionChoice::TemperAs { instance_url } => normalized_instance_url(instance_url),
+    }
+}
+
+/// The whole-file render a fresh machine's establish writes — `[vault]`,
+/// `[cloud] api_url`, and `[auth]` with the derived provider entry, the same
+/// shapes `render_config_toml` emits (`init.rs:653-705`). Every interpolated
+/// value routes through `toml::Value::String` the way init routes its own,
+/// so characters requiring escaping round-trip through `TemperConfig`.
+fn render_establish_config(vault_path: &str, api_url: &str, provider: &AuthProvider) -> String {
+    let tv = |s: &str| toml::Value::String(s.to_string()).to_string();
+    let mut scopes = toml_edit::Array::new();
+    for scope in &provider.scopes {
+        scopes.push(scope.as_str());
+    }
+    // Absent stays absent, the way `skip_serializing_if` would leave it.
+    let desktop_line = provider
+        .desktop_client_id
+        .as_deref()
+        .map(|id| format!("desktop_client_id = {}\n", tv(id)))
+        .unwrap_or_default();
+    format!(
+        "[vault]\npath = {vault}\n\n\
+         [cloud]\napi_url = {api}\n\n\
+         [auth]\nprovider = {name}\n\n\
+         [[auth.providers]]\n\
+         name = {name}\n\
+         authorize_url = {authorize}\n\
+         token_url = {token}\n\
+         client_id = {client}\n\
+         audience = {audience}\n\
+         callback_url = {callback}\n\
+         scopes = {scopes}\n\
+         {desktop_line}",
+        vault = tv(vault_path),
+        api = tv(api_url),
+        name = tv(&provider.name),
+        authorize = tv(&provider.authorize_url),
+        token = tv(&provider.token_url),
+        client = tv(&provider.client_id),
+        audience = tv(&provider.audience),
+        callback = tv(&provider.callback_url),
+        scopes = scopes,
+        desktop_line = desktop_line,
+    )
+}
+
+/// Establish the whole config a fresh machine needs: the vault root and its
+/// `.temper/` state dir created exactly where init's `apply_answers` creates
+/// them (`init.rs:483, 489-491`), then the config written at `temper init`
+/// parity ([`render_establish_config`]). The vault path is the room's choice,
+/// init's default when it left it blank. Returns the vault path as written.
+pub fn establish_at_path(
+    path: &Path,
+    choice: &ConnectionChoice,
+    vault_path: &str,
+) -> Result<String, String> {
+    let provider = derive_provider(choice)?;
+    let api_url = cloud_api_url(choice);
+
+    let vault = PathBuf::from(vault_path);
+    std::fs::create_dir_all(&vault)
+        .map_err(|e| format!("cannot create vault {}: {e}", vault.display()))?;
+    std::fs::create_dir_all(vault.join(".temper"))
+        .map_err(|e| format!("cannot create {}: {e}", vault.join(".temper").display()))?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    }
+    std::fs::write(
+        path,
+        render_establish_config(vault_path, &api_url, &provider),
+    )
+    .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    Ok(vault_path.to_string())
+}
+
+/// Apply the choice to the config file at `path`. The write scopes by
+/// existence: on a config that exists, derive the provider entry (instance
+/// URL validated, the same rule `init` applies) and merge it into `[auth]`
+/// through `toml_edit`, preserving every byte outside the section — the
+/// desktop never writes `auth.path`, the vault, or any CLI-owned section,
+/// and an `[auth]` key it does not own (such as a hand-set `path`) is left
+/// exactly as the file carries it. Where no config exists, the desktop
+/// establishes the whole file at `temper init` parity with the default vault
+/// path ([`establish_at_path`] takes the room's choice).
 ///
 /// Returns the entry as written.
 pub fn apply_to_path(path: &Path, choice: &ConnectionChoice) -> Result<AuthProvider, String> {
-    let provider = derive_provider(choice)?;
-
-    // The desktop edits an existing config; `temper init` is what creates
-    // one. A desktop fresh write could carry only the [auth] section — the
-    // vault section the desktop never writes is the one field the stack's
-    // TemperConfig requires — so an [auth]-only file would be a config the
-    // CLI and this app then fail to parse. Refuse instead.
     if !path.exists() {
-        return Err(format!(
-            "no temper config at {} — run `temper init` first",
-            path.display()
-        ));
+        establish_at_path(path, choice, &default_vault_path())?;
+        return derive_provider(choice);
     }
+    let provider = derive_provider(choice)?;
     let raw = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
     let mut doc = raw
@@ -379,6 +477,11 @@ pub struct ConnectionGather {
     /// Whether the machine carries a config file at all — the fresh-machine
     /// state the room offers the choice in.
     pub config_exists: bool,
+    /// Where a fresh machine's vault would live — init's default, shown so
+    /// the room can offer it editable. None once a config exists: the
+    /// establish arm is the only user, and an existing config's vault is
+    /// the person's own.
+    pub default_vault_path: Option<String>,
     /// What resolves: `"hosted"`, `"self-hosted"`, or `"temper-as"`. None
     /// when nothing resolves — no config, `provider = "none"`, or an active
     /// entry outside the written shapes.
@@ -420,6 +523,7 @@ pub fn gather_from_path(path: &Path) -> Result<ConnectionGather, String> {
 
     Ok(ConnectionGather {
         config_exists,
+        default_vault_path: (!config_exists).then(default_vault_path),
         choice,
         provider,
         api_url,
@@ -464,6 +568,10 @@ pub struct ConnectionApplyRequest {
     pub idp: Option<String>,
     /// Okta authorization server id — required when `idp` is `"okta"`.
     pub auth_server_id: Option<String>,
+    /// Where a fresh machine's vault lives. Used only by the establish arm
+    /// (a machine with no config); an existing config's apply never reads
+    /// it. Blank or absent is init's default.
+    pub vault_path: Option<String>,
 }
 
 /// The trimmed value of a quad field the missing-check already vetted.
@@ -560,16 +668,56 @@ pub fn temper_connection_gather() -> Result<ConnectionGather, String> {
     gather_from_path(&global_config_path())
 }
 
+/// What an apply wrote: the refreshed connection state, and — on a fresh
+/// machine — the vault path the establish arm chose and created. The reply
+/// names what was established, so the room can say so.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionApplyReply {
+    #[serde(flatten)]
+    pub state: ConnectionGather,
+    /// The vault path the establish arm wrote. None on an existing config,
+    /// where the apply merged `[auth]` and nothing else.
+    pub established_vault_path: Option<String>,
+}
+
+/// The vault path a fresh-machine apply uses: the request's non-blank value,
+/// else init's default.
+fn requested_vault_path(req: &ConnectionApplyRequest) -> String {
+    req.vault_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(default_vault_path)
+}
+
 /// Apply the connection the room chose: validate, derive the provider entry
-/// `init` would write, and merge it into `[auth]` — then answer with the
-/// refreshed state so the room reads what now resolves.
+/// `init` would write, and write it — scoped by existence. An existing
+/// config takes the byte-preserving `[auth]` merge and nothing else; a fresh
+/// machine is established whole at `temper init` parity (the vault
+/// directories with it), with the vault path the room chose and the reply
+/// naming it. Either way the answer carries the refreshed state, so the room
+/// reads what now resolves.
 #[tauri::command]
 pub fn temper_connection_apply(
     request: ConnectionApplyRequest,
-) -> Result<ConnectionGather, String> {
+) -> Result<ConnectionApplyReply, String> {
     let choice = parse_request(&request)?;
-    apply_to_path(&global_config_path(), &choice)?;
-    gather_from_path(&global_config_path())
+    let path = global_config_path();
+    let established_vault_path = if path.exists() {
+        apply_to_path(&path, &choice)?;
+        None
+    } else {
+        let vault_path = requested_vault_path(&request);
+        establish_at_path(&path, &choice, &vault_path)?;
+        Some(vault_path)
+    };
+    let state = gather_from_path(&path)?;
+    Ok(ConnectionApplyReply {
+        state,
+        established_vault_path,
+    })
 }
 
 #[cfg(test)]
@@ -601,9 +749,9 @@ mod tests {
     /// WITNESS (derivation parity, hosted): the entry the desktop derives for
     /// Hosted is the block `temper init` writes from its hosted preset
     /// (`init.rs:27-30`, consumed at `render_config_toml`) — same name, same
-    /// endpoint templates, same CLI client id, same callback. The desktop's
-    /// own client id is the one delta, and the slot is unset until the
-    /// temperkb.io desktop application is minted.
+    /// endpoint templates, same CLI client id, same callback — and it
+    /// additionally carries the desktop's own Auth0 registration, which the
+    /// CLI's block never does.
     #[test]
     fn hosted_derivation_matches_init_emission() {
         let entry = derive_provider(&ConnectionChoice::Hosted).expect("hosted derives");
@@ -627,8 +775,15 @@ mod tests {
             vec!["openid", "profile", "email", "offline_access"]
         );
         assert_eq!(
-            entry.desktop_client_id, None,
-            "the desktop application is not minted; the slot stays unset, never a placeholder"
+            entry.desktop_client_id.as_deref(),
+            hosted_preset::DESKTOP_CLIENT_ID,
+            "the entry carries exactly the preset's registration"
+        );
+        assert_eq!(
+            entry.desktop_client_id.as_deref(),
+            Some("v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE"),
+            "the desktop's own Auth0 application for temperkb.io — a separate \
+             registration from the CLI's, never a fallback to it"
         );
     }
 
@@ -817,21 +972,153 @@ api_url = "https://temper.acme.com"
         std::fs::remove_file(&path).ok();
     }
 
-    /// A fresh machine has no config to edit: apply refuses and names
-    /// `temper init`. The desktop never creates the file — an `[auth]`-only
-    /// file would carry no vault section, and the vault is the one section
-    /// the stack's TemperConfig requires, so the whole stack (CLI included)
-    /// would fail to parse the file the desktop had written.
+    /// `temper init`'s rendered config for the hosted preset, as its
+    /// `render_config_toml` emits it (`init.rs:653-705`; the provider and
+    /// cloud sections at `init.rs:597-645`) — fixed here because the CLI
+    /// crate is not a desktop dependency and mirroring with parity witnesses
+    /// is the only consumption path. The `{vault_path}` slot is the one
+    /// input init fills per machine (its `WizardAnswers.vault_path`); every
+    /// other byte is init's own emission.
+    const INIT_HOSTED_RENDER: &str = r#"[vault]
+path = "{vault_path}"
+
+[sync.subscriptions]
+contexts = ["default"]
+
+[skill]
+output = "~/.claude/skills/temper"
+
+[auth]
+provider = "auth0"
+
+[[auth.providers]]
+name = "auth0"
+authorize_url = "https://temperkb.us.auth0.com/authorize"
+token_url = "https://temperkb.us.auth0.com/oauth/token"
+client_id = "mWp8znLw2MUJNCiZNl8wwBv6SPJI2mfF"
+audience = "https://temperkb.io/api"
+callback_url = "https://temperkb.io/api/auth/cli-callback"
+scopes = ["openid", "profile", "email", "offline_access"]
+
+[cloud]
+api_url = "https://temperkb.io"
+
+# [cli] — output-presentation defaults (optional; omit for agent-first auto behavior).
+# [cli]
+# format = "json"
+"#;
+
+    /// WITNESS (establish, the fresh arm): a machine with no config is no
+    /// longer refused — the desktop establishes the whole file at `temper
+    /// init` parity. The vault root and its `.temper/` state dir exist at
+    /// init's default location, the written config parses as the stack's
+    /// TemperConfig with the sections init writes, and the connection now
+    /// resolves. The old refusal witness (apply naming `temper init` on a
+    /// fresh path) modelled the overturned behavior and is gone with it.
     #[test]
-    fn apply_on_a_fresh_machine_refuses_naming_init() {
-        let path = scratch_path("fresh");
-        let err =
-            apply_to_path(&path, &ConnectionChoice::Hosted).expect_err("nothing to edit refuses");
+    fn a_fresh_machine_is_established_whole() {
+        let _order = crate::witness_env::ENV_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // The default vault path resolves from $HOME: scoped to a scratch
+        // root, so the witness never writes the person's real home.
+        let home =
+            std::env::temp_dir().join(format!("desktop-connection-home-{}", uuid::Uuid::new_v4()));
+        let _home = crate::witness_env::ScopedEnv::set("HOME", home.to_str().unwrap());
+        let path = scratch_path("establish");
+        assert!(!path.exists(), "precondition: no config");
+
+        let written =
+            apply_to_path(&path, &ConnectionChoice::Hosted).expect("a fresh machine establishes");
+        assert_eq!(written.name, "auth0", "the derived hosted entry came back");
+
+        // The vault directories, exactly the two `create_dir_all`s init's
+        // apply_answers makes (init.rs:483, 489-491) at init's default.
+        let vault = home.join("Documents/temper-vault");
+        assert!(vault.is_dir(), "the vault root exists at init's default");
         assert!(
-            err.contains("temper init"),
-            "the line names the creator: {err}"
+            vault.join(".temper").is_dir(),
+            "the .temper state dir exists"
         );
-        assert!(!path.exists(), "the refusal wrote nothing");
+        assert!(path.is_file(), "the config was written");
+
+        // The file is a config the whole stack parses, and the connection resolves.
+        let cfg: TemperConfig =
+            toml::from_str(&std::fs::read_to_string(&path).expect("config read"))
+                .expect("the established config parses as TemperConfig");
+        assert_eq!(
+            cfg.vault.path,
+            vault.to_string_lossy(),
+            "the [vault] path names the vault that was created"
+        );
+        assert_eq!(
+            cfg.cloud.api_url,
+            hosted_preset::API_URL,
+            "[cloud] is init's"
+        );
+        assert_eq!(cfg.auth.provider, "auth0");
+        assert_eq!(cfg.auth.providers[0].audience, hosted_preset::AUDIENCE);
+
+        let gathered = gather_from_path(&path).expect("gather after establish");
+        assert!(gathered.config_exists);
+        assert_eq!(gathered.choice.as_deref(), Some("hosted"));
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// WITNESS (differential, the published parser): the desktop-established
+    /// config and `temper init`'s own render load through the same published
+    /// loader (`load_cloud_config_from`) with every section the way init's
+    /// would — and the one delta is named: the desktop's own client
+    /// registration, which init's block never carries.
+    #[test]
+    fn the_established_config_loads_like_inits() {
+        let _order = crate::witness_env::ENV_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home =
+            std::env::temp_dir().join(format!("desktop-connection-home-{}", uuid::Uuid::new_v4()));
+        let _home = crate::witness_env::ScopedEnv::set("HOME", home.to_str().unwrap());
+        let path = scratch_path("establish-load");
+        apply_to_path(&path, &ConnectionChoice::Hosted).expect("establishes");
+
+        // init's render for the same input: its default vault path under the
+        // same scoped home, the one per-machine input filled.
+        let vault = home.join("Documents/temper-vault");
+        let init_path = scratch_path("init-render");
+        std::fs::write(
+            &init_path,
+            INIT_HOSTED_RENDER.replace("{vault_path}", vault.to_string_lossy().as_ref()),
+        )
+        .expect("the init vector writes");
+
+        let desktop = load_cloud_config_from(&path).expect("the desktop-written config loads");
+        let init = load_cloud_config_from(&init_path).expect("init's render loads");
+        assert_eq!(desktop.vault.path, init.vault.path);
+        assert_eq!(desktop.cloud.api_url, init.cloud.api_url);
+        assert_eq!(desktop.auth.provider, init.auth.provider);
+
+        assert_eq!(desktop.auth.providers.len(), 1);
+        let (written, initd) = (&desktop.auth.providers[0], &init.auth.providers[0]);
+        assert_eq!(written.name, initd.name);
+        assert_eq!(written.authorize_url, initd.authorize_url);
+        assert_eq!(written.token_url, initd.token_url);
+        assert_eq!(
+            written.client_id, initd.client_id,
+            "the CLI's id stays the entry's client_id"
+        );
+        assert_eq!(written.audience, initd.audience);
+        assert_eq!(written.callback_url, initd.callback_url);
+        assert_eq!(written.scopes, initd.scopes);
+        assert_eq!(
+            initd.desktop_client_id, None,
+            "init's block registers no desktop client"
+        );
+        assert_eq!(
+            written.desktop_client_id.as_deref(),
+            Some("v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE"),
+            "the one delta: the desktop's own registration rides the entry"
+        );
+        std::fs::remove_dir_all(&home).ok();
     }
 
     /// A write over a minimal-but-valid config touches only `[auth]`: the
@@ -856,6 +1143,185 @@ api_url = "https://temper.acme.com"
             "the desktop never writes auth.path"
         );
         std::fs::remove_file(&path).ok();
+    }
+
+    /// `temper init`'s rendered config for a temper-as choice, same source
+    /// (`init.rs:653-705`, with `provider_and_cloud_sections`' temper-as arm
+    /// at `init.rs:616-622,629-645`), the vault path the one filled input.
+    const INIT_TEMPER_AS_RENDER: &str = r#"[vault]
+path = "{vault_path}"
+
+[sync.subscriptions]
+contexts = ["default"]
+
+[skill]
+output = "~/.claude/skills/temper"
+
+[auth]
+provider = "temper-as"
+
+[[auth.providers]]
+name = "temper-as"
+authorize_url = "https://saml.acme.com/oauth/authorize"
+token_url = "https://saml.acme.com/oauth/token"
+client_id = "temper-cli"
+audience = "https://saml.acme.com/api"
+callback_url = "https://saml.acme.com/api/auth/cli-callback"
+scopes = ["openid", "offline_access"]
+
+[cloud]
+api_url = "https://saml.acme.com"
+
+# [cli] — output-presentation defaults (optional; omit for agent-first auto behavior).
+# [cli]
+# format = "json"
+"#;
+
+    /// WITNESS (establish, init parity, fixed vectors): the establish arm's
+    /// config, parsed, matches `temper init`'s own render section by section
+    /// — `[vault]`, `[cloud]`, and the provider entry — for the hosted
+    /// preset and the temper-as choice, the two fully-derivable shapes. The
+    /// named delta is the desktop's own registration on the hosted entry,
+    /// which init's block never carries.
+    #[test]
+    fn establish_matches_init_rendered_shape() {
+        // A scratch vault root: the establish arm creates the directories it
+        // names, so the chosen path is real but disposable.
+        let vault_root =
+            std::env::temp_dir().join(format!("desktop-connection-shape-{}", uuid::Uuid::new_v4()));
+        let hosted_vault = vault_root.join("hosted-vault");
+
+        let hosted_path = scratch_path("establish-hosted");
+        establish_at_path(
+            &hosted_path,
+            &ConnectionChoice::Hosted,
+            hosted_vault.to_string_lossy().as_ref(),
+        )
+        .expect("hosted establish");
+        let hosted: TemperConfig =
+            toml::from_str(&std::fs::read_to_string(&hosted_path).expect("config read"))
+                .expect("the established config parses as TemperConfig");
+        let hosted_init: TemperConfig = toml::from_str(
+            &INIT_HOSTED_RENDER.replace("{vault_path}", hosted_vault.to_string_lossy().as_ref()),
+        )
+        .expect("the init vector parses");
+        assert_eq!(hosted.vault.path, hosted_init.vault.path);
+        assert_eq!(hosted.cloud.api_url, hosted_init.cloud.api_url);
+        assert_eq!(hosted.auth.provider, hosted_init.auth.provider);
+        assert_eq!(hosted.auth.providers.len(), 1);
+        let (written, initd) = (&hosted.auth.providers[0], &hosted_init.auth.providers[0]);
+        assert_eq!(written.name, initd.name);
+        assert_eq!(written.authorize_url, initd.authorize_url);
+        assert_eq!(written.token_url, initd.token_url);
+        assert_eq!(written.client_id, initd.client_id);
+        assert_eq!(written.audience, initd.audience);
+        assert_eq!(written.callback_url, initd.callback_url);
+        assert_eq!(written.scopes, initd.scopes);
+        assert_eq!(
+            written.desktop_client_id.as_deref(),
+            Some("v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE"),
+            "the desktop's own registration rides the hosted entry"
+        );
+        assert_eq!(initd.desktop_client_id, None);
+        std::fs::remove_file(&hosted_path).ok();
+
+        let as_vault = vault_root.join("as-vault");
+        let as_path = scratch_path("establish-temper-as");
+        establish_at_path(
+            &as_path,
+            &ConnectionChoice::TemperAs {
+                instance_url: "https://saml.acme.com/".to_string(),
+            },
+            as_vault.to_string_lossy().as_ref(),
+        )
+        .expect("temper-as establish");
+        let as_written: TemperConfig =
+            toml::from_str(&std::fs::read_to_string(&as_path).expect("config read"))
+                .expect("the established config parses as TemperConfig");
+        let as_init: TemperConfig = toml::from_str(
+            &INIT_TEMPER_AS_RENDER.replace("{vault_path}", as_vault.to_string_lossy().as_ref()),
+        )
+        .expect("the init vector parses");
+        assert_eq!(as_written.vault.path, as_init.vault.path);
+        assert_eq!(as_written.cloud.api_url, as_init.cloud.api_url);
+        assert_eq!(as_written.auth.provider, as_init.auth.provider);
+        assert_eq!(
+            as_written.auth.providers[0].name, as_init.auth.providers[0].name,
+            "temper-as is its own provider, the way init writes it"
+        );
+        assert_eq!(
+            as_init.auth.providers[0].desktop_client_id, None,
+            "init writes no desktop registration; the AS_CLIENTS entry is the deployment's to add"
+        );
+        assert_eq!(
+            as_written.auth.providers[0].desktop_client_id.as_deref(),
+            Some(TEMPER_AS_DESKTOP_CLIENT),
+            "the desktop's fixed public client is part of the temper-as derivation"
+        );
+        std::fs::remove_file(&as_path).ok();
+        std::fs::remove_dir_all(&vault_root).ok();
+    }
+
+    /// WITNESS (establish, the vault directories and the reply): the
+    /// establish arm creates the vault root and its `.temper/` state dir
+    /// where the chosen path names them, and the command's reply names the
+    /// vault path it established. The command runs against a config path
+    /// relocated by `TEMPER_GLOBAL_CONFIG` (honored by
+    /// `global_config_path`, temper-core config.rs:487-496), so nothing
+    /// touches the machine's real config.
+    #[test]
+    fn the_reply_names_what_was_established() {
+        let _order = crate::witness_env::ENV_SERIAL
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let config_path = std::env::temp_dir()
+            .join(format!("desktop-connection-reply-{}", uuid::Uuid::new_v4()))
+            .join("config.toml");
+        let _env = crate::witness_env::ScopedEnv::set(
+            "TEMPER_GLOBAL_CONFIG",
+            config_path.to_str().unwrap(),
+        );
+        let vault_root = std::env::temp_dir().join(format!(
+            "desktop-connection-reply-vault-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let vault_path = vault_root.join("vault");
+
+        let reply = temper_connection_apply(
+            serde_json::from_value(serde_json::json!({
+                "choice": "hosted",
+                "vaultPath": vault_path.to_string_lossy(),
+            }))
+            .expect("the request parses"),
+        )
+        .expect("a fresh machine's apply establishes");
+
+        assert_eq!(
+            reply.established_vault_path.as_deref(),
+            Some(vault_path.to_string_lossy().as_ref()),
+            "the reply names the vault path it chose"
+        );
+        assert!(vault_path.is_dir(), "the vault root was created");
+        assert!(vault_path.join(".temper").is_dir(), "the state dir with it");
+        assert!(config_path.is_file(), "the config was written");
+        assert!(reply.state.config_exists);
+        assert_eq!(reply.state.choice.as_deref(), Some("hosted"));
+
+        // A second apply, the config now existing, is a merge: the reply
+        // names no establish, and the vault is untouched.
+        let second = temper_connection_apply(
+            serde_json::from_value(serde_json::json!({
+                "choice": "hosted",
+            }))
+            .expect("the request parses"),
+        )
+        .expect("the merge answers");
+        assert_eq!(
+            second.established_vault_path, None,
+            "an existing config is a merge, not an establish"
+        );
+        std::fs::remove_dir_all(&vault_root).ok();
+        std::fs::remove_dir_all(config_path.parent().expect("config has a parent")).ok();
     }
 
     /// WITNESS (no fallback): an entry without the desktop's registration
@@ -914,6 +1380,10 @@ api_url = "https://temper.acme.com"
         let absent = scratch_path("absent");
         let gathered = gather_from_path(&absent).expect("gather over nothing");
         assert!(!gathered.config_exists);
+        assert!(
+            gathered.default_vault_path.is_some(),
+            "a fresh machine is shown init's default vault path"
+        );
         assert_eq!(gathered.choice, None);
         assert_eq!(gathered.provider, None);
         assert_eq!(
@@ -930,19 +1400,22 @@ api_url = "https://temper.acme.com"
         assert!(gathered.config_exists);
         assert_eq!(gathered.choice.as_deref(), Some("hosted"));
         assert_eq!(
+            gathered.default_vault_path, None,
+            "an existing config's vault is the person's own; the default is none of the room's business"
+        );
+        assert_eq!(
             gathered
                 .provider
                 .as_ref()
                 .expect("provider")
-                .desktop_client_id,
-            None
+                .desktop_client_id
+                .as_deref(),
+            Some("v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE"),
+            "the hosted write carries the desktop's own registration"
         );
-        let refusal = gathered
-            .sign_in_refusal
-            .expect("unregistered hosted refuses");
-        assert!(
-            !refusal.contains(hosted_preset::CLIENT_ID),
-            "no CLI-id fallback: {refusal}"
+        assert_eq!(
+            gathered.sign_in_refusal, None,
+            "the desktop's own client is registered: hosted sign-in is ready"
         );
 
         // temper-as with its registration: resolves, and sign-in is ready.
