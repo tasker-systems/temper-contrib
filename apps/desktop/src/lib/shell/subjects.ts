@@ -10,7 +10,7 @@
  */
 import { refId } from '$lib/document';
 
-export type Place = 'home' | 'settings' | 'setup' | 'catalog' | 'new-resource';
+export type Place = 'home' | 'settings' | 'setup' | 'connection' | 'catalog' | 'new-resource';
 
 export type Subject =
 	| { kind: 'resource'; id: string }
@@ -20,13 +20,21 @@ export type Subject =
 	/** `context`, where the place is about one — the create room is opened for a named context. */
 	| { kind: 'place'; place: Place; context?: string };
 
-const PLACES: readonly Place[] = ['home', 'settings', 'setup', 'catalog', 'new-resource'];
+const PLACES: readonly Place[] = [
+	'home',
+	'settings',
+	'setup',
+	'connection',
+	'catalog',
+	'new-resource'
+];
 
 /** What a place is called before anything has been read about it — never its id. */
 const PLACE_WORDS: Record<Place, string> = {
 	home: 'home',
 	settings: 'settings',
 	setup: 'setup',
+	connection: 'connection',
 	catalog: 'catalog',
 	'new-resource': 'new resource'
 };

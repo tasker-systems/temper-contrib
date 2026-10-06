@@ -10,6 +10,7 @@
 	import RegionState from '$lib/components/RegionState.svelte';
 	import ThemeSwitch from '$lib/ThemeSwitch.svelte';
 	import { ageWords, DEFAULT_TEMPER_CONTEXT, ownContextsOf, temperViews } from '$lib/temper-views.svelte';
+	import { placeHref } from '$lib/shell/subjects';
 
 	let workingDir = $state('');
 	/** What the store holds, as last read or saved — the baseline "saved" is measured against. */
@@ -31,6 +32,26 @@
 	let savingLabel = $state(false);
 	let justSavedLabel = $state(false);
 	let saveLabelError = $state('');
+
+	// The temper connection: custody of the grant is the desktop's own, and
+	// sign-out ends it. The corner follows the re-queried state, so the room
+	// only reports and acts.
+	let signingOut = $state(false);
+	let signOutError = $state('');
+
+	async function signOut(): Promise<void> {
+		signingOut = true;
+		signOutError = '';
+		try {
+			await invoke('temper_signout');
+		} catch (e) {
+			signOutError = String(e);
+		} finally {
+			signingOut = false;
+		}
+		// The connection is asked again, so the corner follows without a restart.
+		await temperViews.refreshProfile();
+	}
 
 	// Agents by configuration: the store's roster, and the form for adding or
 	// changing one. `agentKey` names the entry being edited; an empty key means
@@ -369,6 +390,36 @@
 		<p class="t-strip">
 			What home says when a place of work was left on this device and you return from another.
 			Blank means the machine's hostname.
+		</p>
+	</section>
+
+	<p class="t-label">Connection</p>
+	<section class="ed-rail">
+		<p class="t-strip" role="status">
+			{#if temperViews.connected === true}
+				connected{temperViews.profileIdentity
+					? ` as ${temperViews.profileIdentity.displayName}`
+					: ''}
+			{:else if temperViews.connected === false}
+				not connected{temperViews.connectError ? ` — ${temperViews.connectError}` : ''}
+			{:else}
+				asking temper…
+			{/if}
+		</p>
+		<div class="actions">
+			<a class="t-action" href={placeHref('connection')}>edit the connection…</a>
+			{#if temperViews.connected === true}
+				<button class="t-action" onclick={signOut} disabled={signingOut}>
+					{signingOut ? 'Signing out…' : 'Sign out'}
+				</button>
+			{/if}
+		</div>
+		{#if signOutError}
+			<p class="ed-notice" role="alert">Not signed out — the grant is still held. {signOutError}</p>
+		{/if}
+		<p class="t-strip">
+			Signing out ends this app's custody of the temper grant on this device; the credential is
+			forgotten, not stored.
 		</p>
 	</section>
 

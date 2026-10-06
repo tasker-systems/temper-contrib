@@ -26,6 +26,11 @@ type Call = { cmd: string; args: Record<string, unknown> | undefined };
 const calls: Call[] = [];
 const handlers: Record<string, (event: { payload: unknown }) => void> = {};
 
+/** Whether the core holds a live desktop grant — the connection the corner mirrors. */
+let signedIn = true;
+/** What `temper_connection_gather` answers; a fresh machine's view opens the connection room. */
+let connectionView: { configExists: boolean } & Record<string, unknown>;
+
 const A = '01a0e020-a6d7-7420-b924-68f5e89f354b';
 const B = '01a0e0b8-39a6-7c42-97a4-3c1380308dc7';
 const NEW = '01a0f100-0000-7000-8000-000000000001';
@@ -254,6 +259,15 @@ function routeInvoke(cmd: string, args?: Record<string, unknown>): Promise<unkno
 		}
 		case 'temper_contexts':
 			return Promise.resolve(contextsList);
+		case 'temper_connection_status':
+			return Promise.resolve({ connected: signedIn, error: signedIn ? null : 'no grant held' });
+		case 'temper_whoami':
+			return Promise.resolve(signedIn ? { display_name: 'Pete Taylor', slug: 'pete' } : null);
+		case 'temper_connection_gather':
+			return Promise.resolve(connectionView);
+		case 'temper_signout':
+			signedIn = false;
+			return Promise.resolve(null);
 		case 'doc_create':
 			return Promise.resolve({
 				state: 'created',
@@ -297,6 +311,7 @@ describe('the shell', () => {
 	beforeAll(async () => {
 		await import('./lenses/DocumentLens.svelte');
 		await import('./lenses/BoundLens.svelte');
+		await import('./lenses/ConnectionLens.svelte');
 		await import('$lib/markdown/sanitize');
 		vi.mocked(invoke).mockImplementation(routeInvoke as never);
 		shellContributions.init();
@@ -316,6 +331,17 @@ describe('the shell', () => {
 		shellPanels.setPaletteOpen(false);
 		temperViews.reset();
 		homeReads.reset();
+		signedIn = true;
+		// An established machine by default: an existing config enters at
+		// sign-in, and no connection room opens on launch.
+		connectionView = {
+			configExists: true,
+			defaultVaultPath: null,
+			choice: 'hosted',
+			provider: null,
+			apiUrl: 'https://temperkb.io',
+			signInRefusal: null
+		};
 		hubView = { entries: [], queued: 0, thisDevice: 'station' };
 		resolvable = new Set();
 		sessionMarkdown = null;
@@ -1265,5 +1291,83 @@ describe('the shell', () => {
 		// Nothing was sent to the core: the draft stands, and so does the dirty flag.
 		expect(reads('doc_close_confirmed')).toHaveLength(0);
 		confirm.mockRestore();
+	});
+
+	// --- The whoami corner: the person, or the way to connect --------------------
+
+	it('the corner renders the person when connected and Connect temper when disconnected', async () => {
+		const { container } = render(Shell);
+		const corner = () => container.querySelector('.t-slot-profile') as HTMLElement;
+		await temperViews.refreshProfile();
+		await waitFor(() => expect(corner().textContent).toContain('Pete Taylor'));
+
+		// The grant is gone (a sign-out, an unrecoverable refresh): the corner
+		// is an explicit affordance, never an empty slot or a stale person.
+		signedIn = false;
+		await temperViews.refreshProfile();
+		await waitFor(() => expect(corner().textContent).toContain('Connect temper'));
+		const link = corner().querySelector('a[href="/connection"]');
+		expect(link).not.toBeNull();
+		expect(corner().textContent).not.toContain('Pete Taylor');
+	});
+
+	it('Connect temper opens the connection room through the one door', async () => {
+		signedIn = false;
+		const { container } = render(Shell);
+		await temperViews.refreshProfile();
+		const link = await waitFor(() => {
+			const found = container.querySelector('.t-slot-profile a[href="/connection"]');
+			expect(found).not.toBeNull();
+			return found as HTMLAnchorElement;
+		});
+		await fireEvent.click(link);
+		expect(tabs.current(tabs.active).subject).toEqual({ kind: 'place', place: 'connection' });
+		await waitFor(() => expect(activeBody(container).textContent).toContain('The connection room'));
+	});
+
+	it('a machine with no temper config opens the connection room at launch', async () => {
+		connectionView = {
+			configExists: false,
+			defaultVaultPath: '/witness/temper-vault',
+			choice: null,
+			provider: null,
+			apiUrl: null,
+			signInRefusal: null
+		};
+		const { container } = render(Shell);
+		await waitFor(() =>
+			expect(tabs.current(tabs.active).subject).toEqual({ kind: 'place', place: 'connection' })
+		);
+		await waitFor(() => expect(activeBody(container).textContent).toContain('establish one below'));
+		// An established machine does not: the corner's Connect is its way in.
+		const opens = reads('temper_connection_gather').length;
+		connectionView = { ...connectionView, configExists: true };
+		render(Shell);
+		await new Promise((r) => setTimeout(r, 25));
+		expect(tabs.openCount).toBe(1);
+		expect(reads('temper_connection_gather').length).toBeGreaterThan(opens);
+	});
+
+	it('signing out ends custody and the corner returns to Connect temper', async () => {
+		const { container } = render(Shell);
+		const corner = () => container.querySelector('.t-slot-profile') as HTMLElement;
+		await temperViews.refreshProfile();
+		await waitFor(() => expect(corner().textContent).toContain('Pete Taylor'));
+
+		// The settings room's connection section holds the sign-out.
+		tabs.focusOrOpen({ kind: 'place', place: 'settings' });
+		const signOut = await waitFor(() => {
+			const found = [...activeBody(container).querySelectorAll('button')].find(
+				(b) => b.textContent === 'Sign out'
+			);
+			expect(found).toBeDefined();
+			return found as HTMLButtonElement;
+		});
+		await fireEvent.click(signOut);
+
+		expect(reads('temper_signout')).toHaveLength(1);
+		// The connection is re-asked, and the corner follows without a restart.
+		await waitFor(() => expect(corner().textContent).toContain('Connect temper'));
+		expect(corner().textContent).not.toContain('Pete Taylor');
 	});
 });

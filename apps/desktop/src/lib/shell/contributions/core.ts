@@ -1,12 +1,12 @@
 /**
  * Core's contribution: the lenses the desktop ships with. Place lenses (home, settings, setup,
- * catalog, new-resource) are core's own and a plugin never contributes one; a plugin may pin a
- * section to home. The table and graph lenses are bound: a Table filled by the core from a
- * resource listing, and a Graph filled from a graph read — a walk from one resource, or an entry
- * read anchored at a context. The shape and search lenses are named and not built: each lands
- * with its own port, and until then a tab opened on one says so. Core's vocabulary is the base
- * create vocabulary: temper's plain doctypes with no opinionated defaults — the arm that keeps
- * creation working where no plugin governs.
+ * connection, catalog, new-resource) are core's own and a plugin never contributes one; a plugin
+ * may pin a section to home. The table and graph lenses are bound: a Table filled by the core
+ * from a resource listing, and a Graph filled from a graph read — a walk from one resource, or an
+ * entry read anchored at a context. The shape and search lenses are named and not built: each
+ * lands with its own port, and until then a tab opened on one says so. Core's vocabulary is the
+ * base create vocabulary: temper's plain doctypes with no opinionated defaults — the arm that
+ * keeps creation working where no plugin governs.
  */
 import type { Contribution } from '../lenses';
 
@@ -78,6 +78,13 @@ export const core: Contribution = {
 			plugin: 'core',
 			accepts: { kinds: ['place'], places: ['setup'] },
 			build: { state: 'built', component: () => import('../lenses/SetupLens.svelte') }
+		},
+		{
+			id: 'core/connection',
+			name: 'connection',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['connection'] },
+			build: { state: 'built', component: () => import('../lenses/ConnectionLens.svelte') }
 		},
 		{
 			id: 'core/catalog',

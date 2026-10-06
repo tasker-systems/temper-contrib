@@ -5,8 +5,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => async () => {}) }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { fireEvent, render } from '@testing-library/svelte';
+import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { temperViews } from '$lib/temper-views.svelte';
 import Page from './SettingsRoom.svelte';
 
 // jsdom has no matchMedia; the theme control watches the system preference.
@@ -105,6 +106,60 @@ describe("this device's label", () => {
 			expect(vi.mocked(invoke)).toHaveBeenCalledWith('settings_set_device_label', {
 				label: 'laptop'
 			})
+		);
+	});
+});
+
+describe('the connection', () => {
+	/** Whether the core holds the grant; `temper_signout` ends it. */
+	let holdingGrant: boolean;
+
+	beforeEach(() => {
+		holdingGrant = true;
+		temperViews.reset();
+		vi.mocked(invoke).mockImplementation((async (cmd: string) => {
+			if (cmd === 'settings_get') {
+				return Promise.resolve({ workingDir: '/w', temperContext: 'my-context' });
+			}
+			if (cmd === 'roster_get') return Promise.resolve([]);
+			if (cmd === 'temper_connection_status') {
+				return Promise.resolve({
+					connected: holdingGrant,
+					error: holdingGrant ? null : 'no grant held'
+				});
+			}
+			if (cmd === 'temper_whoami') {
+				return Promise.resolve(holdingGrant ? { display_name: 'Pete Taylor', slug: 'pete' } : null);
+			}
+			if (cmd === 'temper_signout') {
+				holdingGrant = false;
+				return Promise.resolve(null);
+			}
+			return Promise.resolve(null);
+		}) as never);
+	});
+
+	it('names the connection, signs out, and re-asks so the corner follows', async () => {
+		const { container } = render(Page);
+		// The store the corner reads is primed the way the layout primes it.
+		await temperViews.refreshProfile();
+		await waitFor(() => expect(container.textContent).toContain('connected as Pete Taylor'));
+
+		const signOut = [...container.querySelectorAll('button')].find(
+			(b) => b.textContent === 'Sign out'
+		);
+		expect(signOut).toBeDefined();
+		// The edit affordance re-enters the connection room.
+		expect(container.querySelector('a[href="/connection"]')).not.toBeNull();
+
+		await fireEvent.click(signOut as HTMLButtonElement);
+		await vi.waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledWith('temper_signout'));
+		// The connection is re-asked: the room's word and the corner's input agree.
+		await waitFor(() => expect(container.textContent).toContain('not connected'));
+		expect(temperViews.connected).toBe(false);
+		// Custody ended, the offer goes with it.
+		await waitFor(() =>
+			expect(container.querySelector('button')?.textContent).not.toBe('Sign out')
 		);
 	});
 });

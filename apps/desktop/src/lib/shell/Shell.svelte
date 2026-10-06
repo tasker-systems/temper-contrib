@@ -24,8 +24,9 @@
 	import RoomStrip from './RoomStrip.svelte';
 	import TabHost from './TabHost.svelte';
 	import TabStrip from './TabStrip.svelte';
-	import { subjectFromAddress } from './subjects';
+	import { subjectFromAddress, placeHref } from './subjects';
 	import { stepTitle, tabs } from './tabs.svelte';
+	import { temperViews } from '$lib/temper-views.svelte';
 	import WaysIn from './WaysIn.svelte';
 
 	// Idempotent: the store's listeners register once, whatever mounts.
@@ -83,10 +84,32 @@
 	}).then((u) => {
 		unlistenClose = u;
 	});
+
+	// First-run chaining: a machine with no temper config has no connection to
+	// enter at, so the connection room opens where the choice is made. A
+	// machine with a config enters at sign-in — the corner's Connect affordance.
+	$effect(() => {
+		void (async () => {
+			try {
+				const view = await invoke<{ configExists: boolean }>('temper_connection_gather');
+				if (view.configExists === false) {
+					tabs.focusOrOpen({ kind: 'place', place: 'connection' });
+				}
+			} catch {
+				// A gather that cannot answer is not a fresh machine; the corner
+				// stays the way in.
+			}
+		})();
+	});
 </script>
 
 {#snippet profileSlot()}
-	<TemperProfile />
+	{#if temperViews.connected === false}
+		<!-- The signed-out corner is an explicit affordance, never a placeholder claiming a state. -->
+		<a class="t-action connect" href={placeHref('connection')}>Connect temper</a>
+	{:else}
+		<TemperProfile />
+	{/if}
 {/snippet}
 
 {#snippet paletteTrigger()}
