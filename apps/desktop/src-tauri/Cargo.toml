@@ -31,11 +31,11 @@ uuid = "1"
 chrono = "0.4"
 similar = { version = "3", features = ["inline"] }
 regex = "1"
-toml = "0.9"
+toml = "1.1"
 # Format-preserving `[auth]` merge into the CLI-shared config.toml: the desktop
 # touches its section and leaves every other byte (comments, foreign sections)
 # as the file carries them.
-toml_edit = "0.23"
+toml_edit = "0.25"
 tauri-plugin-opener = "2.5.5"
 agent-client-protocol = "2.2.0"
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
@@ -50,7 +50,7 @@ schemars = "1"
 # The core's own check of a presented spec before it is recorded, against the
 # same projected catalog schema the server advertises. Already in the graph
 # through temperkb-workflow.
-jsonschema = "0.45"
+jsonschema = "0.58"
 # The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
 # WKWebView driver. Behind a feature: the witness builds with `--features webdriver`, so
 # development and release builds never compile an endpoint.
@@ -63,7 +63,7 @@ webdriver = ["dep:tauri-plugin-wdio-webdriver"]
 # The close guard's witnesses drive a real window through tauri's MockRuntime.
 tauri = { version = "2", features = ["test"] }
 # The presentation server's live-bind gate talks HTTP to itself.
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]
