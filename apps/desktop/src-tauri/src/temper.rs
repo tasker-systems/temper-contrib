@@ -136,8 +136,10 @@ async fn sign_in_client_at(path: &Path) -> Result<TemperClient, String> {
         "no temper provider is configured — connect to a server first".to_string()
     })?;
     // The connection room's one-line refusal, before anything opens a
-    // browser. Past this check the entry provably registers a desktop
-    // client: `sign_in_refusal` is `None` exactly when it does.
+    // browser. `sign_in_refusal` is `None` when the entry registers a
+    // desktop client; the re-guard below repeats the check fail-closed, so
+    // the two modules drifting apart costs an error, not another surface's
+    // client id.
     if let Some(refusal) = gathered.sign_in_refusal {
         return Err(refusal);
     }
@@ -1020,8 +1022,9 @@ mod tests {
 
     /// WITNESS (custody, absent arm): the desktop's store writes only its own
     /// file. The bite is executed first — `DiskTokenStore::default_path()`,
-    /// the store the connect seam used before the U1 amendment
-    /// (`temper.rs`'s old `try_connect`), resolves to exactly the CLI's
+    /// the store the connect seam used before the desktop held its own
+    /// custody (its old `try_connect` built on the CLI's disk store),
+    /// resolves to exactly the CLI's
     /// `auth.json` under these envs and saving through it writes that file.
     /// The desktop's store, on the same envs, leaves it absent through a
     /// full sign-in's save and sign-out's clear.
@@ -1401,7 +1404,7 @@ mod tests {
 
     // ─── Witnesses: the live first-run arc (hand-run, ignored) ─────────────
     //
-    // The plan's Task 6: first-run on an empty synthetic root — configure,
+    // First-run on an empty synthetic root — configure,
     // sign in, whoami resolves, refresh on the expired-token path, sign out,
     // custody clean. Isolation is total and absolute-pathed: the CLI's config
     // relocates by `TEMPER_GLOBAL_CONFIG` (honored by `global_config_path`,
@@ -1713,7 +1716,8 @@ mod tests {
         }
     }
 
-    /// WITNESS (live, hosted, the plan's declared hand-run leg): first-run on
+    /// WITNESS (live, hosted; the browser leg is hand-run by nature —
+    /// automation cannot hold the IdP session): first-run on
     /// an empty synthetic root, entirely through the app's own flow. The
     /// room's apply establishes the hosted preset at init parity; `sign_in`
     /// is the published flow — it opens the person's browser at the hosted
