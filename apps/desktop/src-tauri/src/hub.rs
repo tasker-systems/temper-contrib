@@ -379,7 +379,7 @@ pub async fn hub_commit_recent_work(
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
-    commit_recent_work(client, &context_name, entries).await
+    commit_recent_work(&client, &context_name, entries).await
 }
 
 /// Folds this device's queued entries into what the hub answered, by the
@@ -404,7 +404,7 @@ pub async fn hub_recent_work(
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
-    let read = recent_work(client, &context_name).await?;
+    let read = recent_work(&client, &context_name).await?;
     let mut view = with_queued(read, &queue.queued());
     view.this_device = Some(settings.device_label());
     Ok(view)
@@ -526,7 +526,7 @@ mod tests {
         use temper_core::types::data_artifact::ArtifactCommitRequest;
 
         let state = crate::temper::TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;

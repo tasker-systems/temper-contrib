@@ -1,23 +1,34 @@
 // Package names on crates.io are `temperkb-*`; their lib names are `temper_*`.
-use std::sync::Arc;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
-use temper_client::auth::DiskTokenStore;
+use temper_client::auth::{auth_status, AuthStatus};
 use temper_client::config::{api_url, build_client, load_cloud_config};
 use temper_client::error::ClientError;
+use temper_client::login::{login, OAuthConfig};
 use temper_client::TemperClient;
+use temper_core::types::config::global_config_path;
 use temper_workflow::operations::Surface;
 use temper_workflow::types::resource::{ResourceListParams, ResourceSortField, SortOrder};
 
+use crate::auth_store;
+
 /// The temper connection held by the Rust core.
 ///
-/// The client reuses the machine's existing temper credentials (the same
-/// disk store the CLI writes); the OAuth login flow is later work. Until the
-/// credentials exist, `client` stays `None` and `connect_error` names why —
-/// the UI shows that state rather than pretending to be connected.
+/// The desktop is its own OAuth client: it signs in through the provider
+/// entry the connection room writes — its own `desktop_client_id`, never the
+/// CLI's — and keeps the credential in its own store ([`auth_store`]: the
+/// keychain, or the `TEMPER_DESKTOP_AUTH_STORE` file in dev and witness
+/// runs). The CLI's `auth.json` is never read or written here. The client is
+/// built on that store at startup and rebuilt when sign-in or sign-out
+/// lands, so the managed state follows without an app restart.
 pub struct TemperState {
-    client: Option<Arc<TemperClient>>,
-    connect_error: Option<String>,
+    /// The connected client, when the machine's config and credential
+    /// resolved to one. Behind a lock because sign-in and sign-out swap it
+    /// while the app runs; the lock is never held across an await.
+    client: Mutex<Option<Arc<TemperClient>>>,
+    connect_error: Mutex<Option<String>>,
     /// The deployed server's address, as the machine's config resolved it —
     /// the one temper-shaped URL shape a rendered markdown link intercepts
     /// into a tab. None when the machine has no configured server.
@@ -30,29 +41,133 @@ impl TemperState {
             .ok()
             .map(|config| api_url(&config))
             .filter(|url| !url.trim().is_empty());
+        let mut state = Self {
+            client: Mutex::new(None),
+            connect_error: Mutex::new(None),
+            server_url,
+        };
+        // The constructor owns the state exclusively: plain mutable access,
+        // no lock discipline needed.
         match Self::try_connect() {
-            Ok(client) => Self {
-                client: Some(Arc::new(client)),
-                connect_error: None,
-                server_url,
-            },
-            Err(err) => Self {
-                client: None,
-                connect_error: Some(err),
-                server_url,
-            },
+            Ok(client) => {
+                *state.client.get_mut().expect("temper client lock") = Some(Arc::new(client))
+            }
+            Err(err) => {
+                *state.connect_error.get_mut().expect("temper error lock") = Some(err);
+            }
         }
+        state
     }
 
     /// The connected client, when the machine's credentials resolved to one.
-    pub fn client(&self) -> Option<&TemperClient> {
-        self.client.as_deref()
+    /// A clone of the shared handle, so a concurrent sign-in or sign-out
+    /// cannot pull it out from under a command mid-read.
+    pub fn client(&self) -> Option<Arc<TemperClient>> {
+        self.client.lock().expect("temper client lock").clone()
+    }
+
+    fn connect_error(&self) -> Option<String> {
+        self.connect_error
+            .lock()
+            .expect("temper error lock")
+            .clone()
+    }
+
+    /// Whether the desktop holds a live temper session: a client built on
+    /// the machine's config, and a credential in the desktop's own store
+    /// that `auth_status` calls a session — an expired credential is not
+    /// one. The store is consulted fresh on every ask, so a sign-out or a
+    /// landed refresh is reflected without rebuilding anything.
+    fn is_connected(&self) -> bool {
+        self.client().is_some()
+            && session_status()
+                .map(|status| status.authenticated)
+                .unwrap_or(false)
+    }
+
+    /// Signs the person in through the desktop's own OAuth client and store,
+    /// then installs the rebuilt client — the managed state follows without
+    /// an app restart.
+    async fn sign_in(&self) -> Result<Arc<TemperClient>, String> {
+        let client = Arc::new(sign_in_client_at(&global_config_path()).await?);
+        *self.client.lock().expect("temper client lock") = Some(client.clone());
+        *self.connect_error.lock().expect("temper error lock") = None;
+        Ok(client)
+    }
+
+    /// Ends the desktop's custody: the credential leaves the desktop's store
+    /// (idempotent, the same clear the store gives an already-absent entry)
+    /// and the state drops its client.
+    fn sign_out(&self) -> Result<(), String> {
+        let store = auth_store::desktop_token_store().map_err(|e| e.to_string())?;
+        store.clear().map_err(|e| e.to_string())?;
+        *self.client.lock().expect("temper client lock") = None;
+        Ok(())
     }
 
     fn try_connect() -> Result<TemperClient, String> {
-        let store = Arc::new(DiskTokenStore::default_path());
+        let store = auth_store::desktop_token_store().map_err(|e| e.to_string())?;
         build_client(store, Surface::Sdk).map_err(|e| e.to_string())
     }
+}
+
+/// The store's own word on the desktop's credential, through
+/// `temper_client::auth::auth_status` — display-safe by construction, so no
+/// token value can cross it. `None` when the store itself could not answer.
+fn session_status() -> Option<AuthStatus> {
+    let store = auth_store::desktop_token_store().ok()?;
+    auth_status(store.as_ref()).ok()
+}
+
+/// The sign-in flow's core, parameterised by the config path the way
+/// [`crate::connection::gather_from_path`] is. Resolves the active provider
+/// entry the client's own `oauth_config` resolves; refuses — before anything
+/// opens a browser — when that entry registers no desktop client; then runs
+/// the published [`login`] against the desktop's own store and rebuilds the
+/// client on the store that now holds the fresh credential.
+///
+/// The `client_id` the flow authenticates with is the entry's
+/// `desktop_client_id` — the desktop's own registered OAuth client. There is
+/// no fallback to the entry's `client_id`: that client's registered redirect
+/// belongs to the CLI, which this app does not share.
+async fn sign_in_client_at(path: &Path) -> Result<TemperClient, String> {
+    let gathered = crate::connection::gather_from_path(path)?;
+    let provider = gathered.provider.ok_or_else(|| {
+        "no temper provider is configured — connect to a server first".to_string()
+    })?;
+    // The connection room's one-line refusal, before anything opens a
+    // browser. Past this check the entry provably registers a desktop
+    // client: `sign_in_refusal` is `None` exactly when it does.
+    if let Some(refusal) = gathered.sign_in_refusal {
+        return Err(refusal);
+    }
+    let client_id = provider
+        .desktop_client_id
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| {
+            "the provider entry carries no desktop_client_id — the desktop never signs in \
+             with another surface's client"
+                .to_string()
+        })?;
+    // The same entry→config mapping the client's own `oauth_config` performs
+    // for the CLI, with the desktop's own client id in place of the CLI's.
+    let oauth = OAuthConfig {
+        authorize_url: provider.authorize_url,
+        token_url: provider.token_url,
+        client_id,
+        audience: Some(provider.audience),
+        callback_url: provider.callback_url,
+        scopes: provider.scopes,
+    };
+    let store = auth_store::desktop_token_store().map_err(|e| e.to_string())?;
+    // The published flow opens the browser, waits for the callback, exchanges
+    // the code, and saves through the store it was handed — the desktop's
+    // custody from the first write. The stored credential itself never
+    // crosses to the webview; the reply carries the profile facts only.
+    let _stored = login(&oauth, store.as_ref())
+        .await
+        .map_err(|e| e.to_string())?;
+    build_client(store, Surface::Sdk).map_err(|e| e.to_string())
 }
 
 #[derive(Serialize)]
@@ -69,10 +184,35 @@ pub struct ConnectionStatus {
 #[tauri::command]
 pub fn temper_connection_status(state: tauri::State<TemperState>) -> ConnectionStatus {
     ConnectionStatus {
-        connected: state.client.is_some(),
-        error: state.connect_error.clone(),
+        // The store's word, not the client object's: a built client with an
+        // expired or absent credential is no session. An expired credential
+        // is not a session — the same rule `auth status` renders.
+        connected: state.is_connected(),
+        error: state.connect_error(),
         server_url: state.server_url.clone(),
     }
+}
+
+/// Signs the person in: opens the browser through the published login flow
+/// against the desktop's own OAuth client and store, then answers with the
+/// signed-in profile — the facts `temper_whoami` renders. The credential
+/// itself never crosses this boundary: `StoredAuth` serializes its secrets,
+/// so it is dropped here and only the profile is serialized.
+#[tauri::command]
+pub async fn temper_signin(
+    state: tauri::State<'_, TemperState>,
+) -> Result<serde_json::Value, String> {
+    let client = state.sign_in().await?;
+    let profile = client.profile().get().await.map_err(|e| e.to_string())?;
+    serde_json::to_value(profile).map_err(|e| e.to_string())
+}
+
+/// Signs out: the desktop's custody of the temper credential ends — the
+/// store is cleared and the connection state drops its client without an
+/// app restart.
+#[tauri::command]
+pub fn temper_signout(state: tauri::State<TemperState>) -> Result<(), String> {
+    state.sign_out()
 }
 
 /// Fetches the signed-in person's profile through the temper API.
@@ -81,8 +221,7 @@ pub async fn temper_whoami(
     state: tauri::State<'_, TemperState>,
 ) -> Result<serde_json::Value, String> {
     let client = state
-        .client
-        .as_ref()
+        .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let profile = client.profile().get().await.map_err(|e| e.to_string())?;
     serde_json::to_value(profile).map_err(|e| e.to_string())
@@ -210,11 +349,9 @@ pub struct TemperRecentWork {
     pub rows: Vec<TemperRecentRow>,
 }
 
-fn temper_client<'a>(state: &'a tauri::State<'_, TemperState>) -> Result<&'a TemperClient, String> {
+fn temper_client(state: &tauri::State<'_, TemperState>) -> Result<Arc<TemperClient>, String> {
     state
-        .client
-        .as_ref()
-        .map(|client| client.as_ref())
+        .client()
         .ok_or_else(|| "temper is not connected".to_string())
 }
 
@@ -476,12 +613,11 @@ pub async fn temper_resolve_refs(
     ids: Vec<String>,
 ) -> Result<Vec<RefResolution>, String> {
     let client = state
-        .client
-        .as_ref()
+        .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let mut out = Vec::with_capacity(ids.len());
     for raw in ids {
-        out.push(resolve_one(client, raw).await);
+        out.push(resolve_one(&client, raw).await);
     }
     Ok(out)
 }
@@ -622,7 +758,7 @@ mod tests {
     async fn context_create_round_trip() {
         let state = super::TemperState::connect();
         let client = state
-            .client
+            .client()
             .expect("machine temper credentials should resolve to a client");
 
         let name = format!("desktop-witness-{}", uuid::Uuid::new_v4().simple());
@@ -660,7 +796,7 @@ mod tests {
     async fn resolves_a_known_ref() {
         let state = super::TemperState::connect();
         let client = state
-            .client
+            .client()
             .expect("machine temper credentials should resolve to a client");
         let known = std::env::var("TEMPER_WITNESS_REF")
             .expect("set TEMPER_WITNESS_REF to a readable resource id");
@@ -687,7 +823,7 @@ mod tests {
     async fn temper_reads_round_trip() {
         let state = super::TemperState::connect();
         let client = state
-            .client
+            .client()
             .expect("machine temper credentials should resolve to a client");
 
         let teams = client.teams().list().await.expect("teams list");
@@ -748,7 +884,7 @@ mod tests {
     async fn profile_round_trip() {
         let state = super::TemperState::connect();
         let client = state
-            .client
+            .client()
             .expect("machine temper credentials should resolve to a client");
         let profile = client
             .profile()

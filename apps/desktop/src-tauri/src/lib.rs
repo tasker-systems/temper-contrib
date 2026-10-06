@@ -30,7 +30,11 @@ mod roster;
 mod settings;
 mod spec_check;
 mod temper;
+// Shared env-scoping for the crate's env-touching witnesses — compiled for
+// tests only.
 mod window;
+#[cfg(test)]
+mod witness_env;
 mod work;
 
 use tauri::Manager;
@@ -82,6 +86,8 @@ pub fn run() {
             temper::temper_connection_status,
             connection::temper_connection_gather,
             connection::temper_connection_apply,
+            temper::temper_signin,
+            temper::temper_signout,
             temper::temper_whoami,
             temper::temper_resolve_refs,
             document::doc_open,

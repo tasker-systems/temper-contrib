@@ -174,7 +174,7 @@ pub async fn flush(app: &AppHandle) -> Result<usize, String> {
         .get()
         .temper_context_name()
         .to_string();
-    commit_recent_work(client, &context_name, batch.clone()).await?;
+    commit_recent_work(&client, &context_name, batch.clone()).await?;
     queue.settle(&batch);
     Ok(batch.len())
 }

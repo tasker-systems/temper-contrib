@@ -337,7 +337,7 @@ pub async fn present_answer(
         |conversation_id, presentation| async move {
             let client = client.ok_or_else(|| "temper is not connected".to_string())?;
             record_on(
-                client,
+                &client,
                 &context_name,
                 PRESENTED_HUB_TITLE,
                 &conversation_id,
@@ -363,7 +363,7 @@ pub async fn present_read(
         Uuid::parse_str(&resource).map_err(|e| format!("not a resource id: {resource} — {e}"))?;
     let artifact =
         Uuid::parse_str(&artifact).map_err(|e| format!("not an artifact id: {artifact} — {e}"))?;
-    read_presented(client, resource, artifact).await
+    read_presented(&client, resource, artifact).await
 }
 
 #[cfg(test)]
@@ -741,7 +741,7 @@ mod tests {
     async fn present_artifact_round_trips_live() {
         const WITNESS_HUB: &str = "Presented views (witness)";
         let state = crate::temper::TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;
@@ -789,7 +789,7 @@ mod tests {
 
         // Closed and reopened: a fresh connection reads the same record.
         let reopened_state = crate::temper::TemperState::connect();
-        let reopened = read_presented(reopened_state.client().unwrap(), resource, artifact)
+        let reopened = read_presented(&reopened_state.client().unwrap(), resource, artifact)
             .await
             .expect("the record reads again after reopening");
         assert_eq!(reopened, read);

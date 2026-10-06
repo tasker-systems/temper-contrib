@@ -197,7 +197,7 @@ pub async fn temper_write_work_record(
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
     let context_name = settings.get().temper_context_name().to_string();
-    write_work_record(client, facts, idempotency_key, &context_name).await
+    write_work_record(&client, facts, idempotency_key, &context_name).await
 }
 
 #[cfg(test)]
@@ -320,7 +320,7 @@ mod tests {
     #[ignore = "requires temper credentials, network, and performs a real write"]
     async fn writes_a_readable_work_record() {
         let state = crate::temper::TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
 

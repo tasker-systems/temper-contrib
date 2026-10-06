@@ -162,7 +162,14 @@ pub async fn doc_create(
     let client = state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())?;
-    Ok(create_document(client, &context_id, &doc_type, &title, idempotency_key).await)
+    Ok(create_document(
+        client.as_ref(),
+        &context_id,
+        &doc_type,
+        &title,
+        idempotency_key,
+    )
+    .await)
 }
 
 #[cfg(test)]
@@ -416,7 +423,7 @@ mod tests {
     #[ignore = "requires temper credentials, network, and performs real writes"]
     async fn a_created_document_opens_and_saves_live() {
         let state = crate::temper::TemperState::connect();
-        let client = state
+        let client = &*state
             .client()
             .expect("machine temper credentials should resolve to a client");
         let context_name = crate::settings::DEFAULT_TEMPER_CONTEXT;

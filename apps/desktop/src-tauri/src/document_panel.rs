@@ -20,6 +20,8 @@ use temper_core::types::{ElementEvent, ElementKind, EventTrail};
 use temper_workflow::types::graph::GraphEdgeRow;
 use uuid::Uuid;
 
+use std::sync::Arc;
+
 use crate::temper::{parse_ref, unresolved_reason, TemperState};
 
 /// The most history events one read hands the panel. Older events are counted, not sent.
@@ -317,7 +319,7 @@ pub(crate) fn shape_sources(mut rows: Vec<BlockProvenanceRow>) -> Sources {
 
 // ─── Commands ───────────────────────────────────────────────────────────────────────────────────
 
-fn connected<'a>(state: &'a tauri::State<'_, TemperState>) -> Result<&'a TemperClient, String> {
+fn connected(state: &tauri::State<'_, TemperState>) -> Result<Arc<TemperClient>, String> {
     state
         .client()
         .ok_or_else(|| "temper is not connected".to_string())
