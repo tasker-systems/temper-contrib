@@ -10,6 +10,7 @@ usage:
   themes.sh build                     regenerate <theme>/theme.css from every <theme>/theme.json
   themes.sh check <theme.json>...     contract + contrast floors + distinctness + generated CSS in sync
   themes.sh contrast <theme.json>     print every contrast pair the contract checks, with its floor
+  themes.sh slots <theme.json>        the slot canvas: within-family and slot-vs-chrome/state ΔE
   themes.sh --self-check              contract valid + every theme passes + broken fixtures refused + brand marks in currentColor
 
 exit: 0 pass, 1 check failure, 2 usage/setup error
@@ -30,7 +31,7 @@ if ! "$PYTHON" -c 'import jsonschema' >/dev/null 2>&1; then
 fi
 
 case "${1:-}" in
-  build | check | contrast | --self-check) exec "$PYTHON" "$SCRIPT_DIR/themes.py" "$@" ;;
+  build | check | contrast | slots | --self-check) exec "$PYTHON" "$SCRIPT_DIR/themes.py" "$@" ;;
   -h | --help) usage ;;
   *) usage >&2; exit 2 ;;
 esac

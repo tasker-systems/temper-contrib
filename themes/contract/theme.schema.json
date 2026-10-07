@@ -103,13 +103,6 @@
             "region-failed-wash",
             "author-human",
             "author-agent",
-            "doctype-research",
-            "doctype-task",
-            "doctype-session",
-            "doctype-concept",
-            "doctype-goal",
-            "doctype-decision",
-            "doctype-memory",
             "cat-1",
             "cat-2",
             "cat-3",
@@ -118,6 +111,7 @@
             "cat-6",
             "cat-7",
             "cat-8",
+            "cat-neutral",
             "code-key",
             "code-string",
             "code-number",
@@ -268,65 +262,41 @@
               "$ref": "#/$defs/color",
               "description": "Authorship gutter mark for an agent acting on someone's behalf. Floor: 3:1 on ground."
             },
-            "doctype-research": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `research` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-task": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `task` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-session": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `session` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-concept": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `concept` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-goal": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `goal` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-decision": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `decision` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
-            "doctype-memory": {
-              "$ref": "#/$defs/color",
-              "description": "Temper doc type `memory` \u2014 graph nodes, type markers. Floor: 4.5:1 on ground."
-            },
             "cat-1": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 1 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 1 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-2": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 2 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 2 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-3": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 3 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 3 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-4": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 4 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 4 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-5": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 5 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 5 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-6": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 6 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 6 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-7": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 7 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 7 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "cat-8": {
               "$ref": "#/$defs/color",
-              "description": "Categorical slot 8 of 8. Plugins bind their own vocabulary to slots; they never name colours. Floor: 3:1 on ground."
+              "description": "Categorical slot 8 of 8. Vocabularies — core's doc types and plugins' — bind their terms to slots; they never name colours. Floor: 4.5:1 on ground, 3:1 on surface."
+            },
+            "cat-neutral": {
+              "$ref": "#/$defs/color",
+              "description": "The categorical mark bound to no slot: a doc type no vocabulary binds, or a tint deliberately unnamed. Floor: 4.5:1 on ground, 3:1 on surface."
             },
             "code-key": {
               "$ref": "#/$defs/color",

@@ -59,7 +59,7 @@
       "code-string": "#fcd34d",
       "code-number": "#93c5fd",
       "code-comment": "rgba(255, 255, 255, 0.45)",
-      "brand-purple": "#b39ddb"
+      "doctype-task": "#f0a870"
     },
     "font": {
       "reading": "\"Source Serif 4 Variable\", \"Source Serif 4\", Georgia, \"Times New Roman\", serif",
