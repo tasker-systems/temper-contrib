@@ -18,7 +18,7 @@
 		"lint:fix": "biome check --write ."
 	},
 	"dependencies": {
-		"@agentclientprotocol/claude-agent-acp": "^0.84.0",
+		"@agentclientprotocol/claude-agent-acp": "^0.85.1",
 		"@agentclientprotocol/codex-acp": "^2.1.0",
 		"@codemirror/commands": "^6.11.1",
 		"@codemirror/lang-markdown": "^6",
@@ -31,13 +31,13 @@
 		"@json-render/core": "^0.21.0",
 		"@json-render/svelte": "^0.21.0",
 		"@tauri-apps/api": "^2",
-		"@tauri-apps/plugin-opener": "^2.6.0",
+		"@tauri-apps/plugin-opener": "^2.7.0",
 		"agy-acp": "^0.5.2",
-		"bits-ui": "^2.19.3",
+		"bits-ui": "^2.19.5",
 		"d3-force": "^3.0.0",
 		"dompurify": "^3.4.16",
 		"highlight.js": "^11.12.0",
-		"layerchart": "^2.5.0",
+		"layerchart": "^2.5.1",
 		"marked": "^18.0.14",
 		"marked-highlight": "^2.2.4",
 		"zod": "^4.6.5"
@@ -47,22 +47,22 @@
 		"better-sqlite3"
 	],
 	"devDependencies": {
-		"@biomejs/biome": "2.5.14",
-		"@sveltejs/adapter-static": "^3",
-		"@sveltejs/kit": "^2.63.0",
+		"@biomejs/biome": "2.5.15",
+		"@sveltejs/adapter-static": "^4",
+		"@sveltejs/kit": "^3.0.0",
 		"@sveltejs/vite-plugin-svelte": "^7.1.2",
 		"@tailwindcss/vite": "^4.3.3",
 		"@tauri-apps/cli": "^2",
 		"@testing-library/svelte": "^5.4.2",
 		"@types/d3-force": "^3.0.10",
 		"jsdom": "^30.1.1",
-		"node-gyp": "^11.5.0",
+		"node-gyp": "^13.1.0",
 		"playwright-core": "^1.63.0",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"tailwindcss": "^4.3.3",
 		"typescript": "^6.0.3",
-		"vite": "^8.0.16",
-		"vitest": "^5.0.2"
+		"vite": "^8.3.2",
+		"vitest": "^5.0.3"
 	}
 }
