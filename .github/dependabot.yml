@@ -25,13 +25,18 @@ updates:
     commit-message:
       prefix: "chore(deps)"
 
-  # The desktop's SvelteKit UI.
-  - package-ecosystem: npm
+  # The desktop's SvelteKit UI. The bun ecosystem updates package.json and bun.lock directly —
+  # the same files CI installs from.
+  - package-ecosystem: bun
     directory: "/apps/desktop"
     schedule:
       interval: weekly
     groups:
-      npm:
+      bun:
         patterns: ["*"]
+    ignore:
+      # typescript majors are adopted by hand, together with the tooling that consumes it.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
