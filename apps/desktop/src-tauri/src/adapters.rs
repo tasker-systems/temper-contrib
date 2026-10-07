@@ -211,6 +211,13 @@ pub fn render_launch(command: &str) -> Result<AcpAgentConfig, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// The one lock over `TEMPER_ACP_INTERPRETER`: the process environment is
+    /// global while the test threads are not. A test that pins the
+    /// interpreter and a test whose render reads the pin transitively hold
+    /// this, or a render sees another test's pin mid-flight.
+    static INTERPRETER_PIN: Mutex<()> = Mutex::new(());
 
     /// The roster's bundled rows are the keys this module resolves — a key
     /// present in one and absent from the other is a row the launch cannot
@@ -247,6 +254,7 @@ mod tests {
     /// declines by name — the error text is the contract the probe relies on.
     #[test]
     fn a_bundled_row_renders_or_says_why() {
+        let _pin = INTERPRETER_PIN.lock().unwrap();
         for key in ["claude", "codex", "antigravity"] {
             match adapter_launch(key) {
                 Ok(config) => {
@@ -307,6 +315,7 @@ mod tests {
     /// asks for node and gets bun is a witness that proved nothing.
     #[test]
     fn a_pinned_interpreter_is_the_one_used() {
+        let _pin = INTERPRETER_PIN.lock().unwrap();
         let path_var = effective_path();
         // Each runtime present interprets a pinned render.
         for pin in ["bun", "node"] {
