@@ -174,7 +174,7 @@ pub async fn doc_create(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use temper_client::error::ClientError;
@@ -296,16 +296,35 @@ mod tests {
                 .push(serde_json::to_value(request).unwrap());
             Err(match self.answer {
                 Answer::Forbidden => ClientError::Forbidden,
-                // A real transport error, not a lookalike: the connection to a
-                // dead loopback port is refused. `is_network` must see the
-                // genuine article to route the failure to `Failed`.
-                Answer::Transport => ClientError::Network(
-                    reqwest::get("http://127.0.0.1:1/")
-                        .await
-                        .expect_err("a dead port refuses the connection"),
-                ),
+                // A real transport error, not a lookalike: the client's own
+                // HTTP door finds the dead loopback port refused, so
+                // `is_network` sees the genuine article it routes to `Failed`.
+                // The error must come from the client crate — its `Network`
+                // carries the client's own `reqwest::Error`, and this crate's
+                // dev-dep reqwest is a different major.
+                Answer::Transport => refused_transport().await,
             })
         }
+    }
+
+    /// A genuine transport error, minted by the client crate: its health door
+    /// against a dead loopback port comes back connection-refused. An error
+    /// built with this crate's `reqwest` could never enter
+    /// `ClientError::Network` — the client links its own reqwest major.
+    async fn refused_transport() -> ClientError {
+        let client = TemperClient::with_token(
+            "http://127.0.0.1:1",
+            None,
+            temper_workflow::operations::Surface::Sdk,
+            "unused — the health door is unauthenticated".to_string(),
+            Arc::new(temper_client::auth::MemoryTokenStore::empty()),
+        )
+        .expect("loopback http is a valid endpoint");
+        client
+            .health()
+            .get_health()
+            .await
+            .expect_err("a dead port refuses the connection")
     }
 
     /// The bite: the server answered no, so nothing was created — and the
