@@ -95,10 +95,36 @@ export type WayInDecl = {
 	scope: string;
 } & ({ source: 'contexts' } | { source: 'recent' } | { source: 'list'; filter: ListFilter });
 
+/** The categorical slots the contract owns, by name. A vocabulary binds its doc types to
+ * slots — never to colours, never to a chrome or state role; anything bound nowhere
+ * renders in the contract's neutral role. */
+export const SLOT_TINTS = [
+	'cat-1',
+	'cat-2',
+	'cat-3',
+	'cat-4',
+	'cat-5',
+	'cat-6',
+	'cat-7',
+	'cat-8'
+] as const;
+
+export type SlotTint = (typeof SLOT_TINTS)[number];
+
+/** What a doc type's mark paints with: its bound slot, or the neutral role. */
+export type DocTypeTint = SlotTint | 'cat-neutral';
+
 /** One doctype a create vocabulary offers, with the open-tier defaults a new resource starts with. */
 export interface DocTypeDecl {
 	/** The doc type on the wire — what `doc_create` sends and a read answers. */
 	doctype: string;
+	/**
+	 * The slot this doc type's marks paint with, when the vocabulary has an opinion. A
+	 * binding is part of the practice's declaration, so the same term keeps the same slot
+	 * in every theme; a doc type bound nowhere renders in the neutral role, and a binding
+	 * to anything but a slot is refused at the loader.
+	 */
+	tint?: SlotTint;
 	/**
 	 * The open-tier defaults a new resource of this type starts with, asked at the create
 	 * moment — a `date` default is the create-time date, `YYYY-MM-DD`, so the declaration

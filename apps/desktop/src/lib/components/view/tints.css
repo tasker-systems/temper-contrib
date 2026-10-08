@@ -2,13 +2,7 @@
    with: a component reads --tint (with its own fallback for none) and decides which channel it
    colours. :where() keeps it at zero specificity, so a component's own rules always win. */
 :where([data-tint='none']) { --tint: initial; }
-:where([data-tint='doctype-research']) { --tint: var(--tp-doctype-research); }
-:where([data-tint='doctype-task']) { --tint: var(--tp-doctype-task); }
-:where([data-tint='doctype-session']) { --tint: var(--tp-doctype-session); }
-:where([data-tint='doctype-concept']) { --tint: var(--tp-doctype-concept); }
-:where([data-tint='doctype-goal']) { --tint: var(--tp-doctype-goal); }
-:where([data-tint='doctype-decision']) { --tint: var(--tp-doctype-decision); }
-:where([data-tint='doctype-memory']) { --tint: var(--tp-doctype-memory); }
+:where([data-tint='cat-neutral']) { --tint: var(--tp-cat-neutral); }
 :where([data-tint='cat-1']) { --tint: var(--tp-cat-1); }
 :where([data-tint='cat-2']) { --tint: var(--tp-cat-2); }
 :where([data-tint='cat-3']) { --tint: var(--tp-cat-3); }

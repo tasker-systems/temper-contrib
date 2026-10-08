@@ -46,12 +46,12 @@
       {
         "id": "create",
         "doctypes": [
-          { "doctype": "task" },
-          { "doctype": "goal" },
-          { "doctype": "session", "defaults": { "date": "today" } },
-          { "doctype": "research", "defaults": { "date": "today" } },
-          { "doctype": "concept" },
-          { "doctype": "decision" }
+          { "doctype": "task", "tint": "cat-6" },
+          { "doctype": "goal", "tint": "cat-8" },
+          { "doctype": "session", "tint": "cat-2", "defaults": { "date": "today" } },
+          { "doctype": "research", "tint": "cat-5", "defaults": { "date": "today" } },
+          { "doctype": "concept", "tint": "cat-4" },
+          { "doctype": "decision", "tint": "cat-7" }
         ]
       }
     ],
