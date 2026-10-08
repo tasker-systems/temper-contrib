@@ -19,6 +19,8 @@
 	import TemperView from '$lib/catalog/TemperView.svelte';
 	import type { ViewActionHandlers } from '$lib/catalog/view-actions';
 	import { getRefResolver, type Resolution } from '$lib/refs';
+	import { shellContributions } from '../contributions';
+	import { boundVocabularies } from '../contributions/bindings';
 	import type { LensProps } from '../lenses';
 
 	type Sort = { key: string; order: 'asc' | 'desc' };
@@ -43,6 +45,10 @@
 	const resolver = getRefResolver();
 
 	const bound = $derived(lens?.build.state === 'bound' ? lens.build : null);
+
+	/** The bindings in force: what each doc type's marks paint with, core's default
+	 * first and a plugin's entry winning it. The merge is the core's to run. */
+	const bindings = $derived(boundVocabularies(shellContributions.enabled));
 
 	/** What this binding asks the core for on this subject, or null when it shows none. */
 	const ask = $derived.by<Ask | null>(() => {
@@ -79,7 +85,8 @@
 			spec: bound.spec,
 			binding: bound.binding,
 			subject: ask,
-			view: asked
+			view: asked,
+			bindings
 		}).then(
 			(answer) => {
 				if (gone) return;

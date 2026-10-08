@@ -8,7 +8,23 @@
  * base create vocabulary: temper's plain doctypes with no opinionated defaults — the arm that
  * keeps creation working where no plugin governs.
  */
-import type { Contribution } from '../lenses';
+import type { Contribution, SlotTint } from '../lenses';
+
+/**
+ * Core's default binding: the slot each of temper's doc types paints with. This is the
+ * base of the merge — a plugin's own binding for a doc type wins it. `memory` is bound
+ * though no create vocabulary offers it: its nodes are read, not created, and still
+ * carry marks. `cat-3` is core's one unbound slot, headroom for a plugin's own kinds.
+ */
+export const CORE_DOC_TYPE_BINDINGS: Record<string, SlotTint> = {
+	research: 'cat-5',
+	task: 'cat-6',
+	session: 'cat-2',
+	concept: 'cat-4',
+	goal: 'cat-8',
+	decision: 'cat-7',
+	memory: 'cat-1'
+};
 
 export const core: Contribution = {
 	plugin: 'core',

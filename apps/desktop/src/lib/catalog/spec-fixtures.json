@@ -1784,44 +1784,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -1892,44 +1892,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -1963,44 +1963,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2071,44 +2071,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2179,44 +2179,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "goal",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2287,44 +2287,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2402,37 +2402,37 @@
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2510,37 +2510,37 @@
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2611,45 +2611,45 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true,
-									"color": "doctype-goal"
+									"color": "#7eb8da"
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -2720,44 +2720,44 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true
 								},
 								{
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "t2",
 									"label": "Catalog v2, first wave",
 									"kind": "task",
-									"tint": "doctype-task"
+									"tint": "cat-6"
 								},
 								{
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session"
+									"tint": "cat-2"
 								},
 								{
 									"id": "r1",
 									"label": "Grounding: the component catalog",
 									"kind": "research",
-									"tint": "doctype-research"
+									"tint": "cat-5"
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision"
+									"tint": "cat-7"
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept"
+									"tint": "cat-4"
 								},
 								{
 									"id": "x1",
@@ -3899,7 +3899,7 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true,
 									"corpusDegree": 41,
 									"excerpt": "The goal every desktop slice advances.",
@@ -3912,7 +3912,7 @@
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task",
+									"tint": "cat-6",
 									"corpusDegree": 12,
 									"excerpt": "Graph grows to the reads' own terms.",
 									"stage": "done",
@@ -3924,7 +3924,7 @@
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session",
+									"tint": "cat-2",
 									"corpusDegree": 3,
 									"home": "01a0f73b-e689-72b0-9d3d-9284090c23d7",
 									"homeKind": "cogmap"
@@ -3933,7 +3933,7 @@
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision",
+									"tint": "cat-7",
 									"corpusDegree": 2,
 									"stage": "decided",
 									"updated": "2026-09-28"
@@ -3942,7 +3942,7 @@
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept",
+									"tint": "cat-4",
 									"corpusDegree": 1
 								},
 								{
@@ -4028,21 +4028,21 @@
 									"id": "ctx",
 									"label": "temper-dev/contrib",
 									"kind": "context",
-									"tint": "doctype-concept",
+									"tint": "cat-4",
 									"corpusDegree": 5
 								},
 								{
 									"id": "a",
 									"label": "A resource",
 									"kind": "task",
-									"tint": "doctype-task",
+									"tint": "cat-6",
 									"corpusDegree": 2
 								},
 								{
 									"id": "b",
 									"label": "Another",
 									"kind": "task",
-									"tint": "doctype-task",
+									"tint": "cat-6",
 									"corpusDegree": 1
 								}
 							],
@@ -4387,7 +4387,7 @@
 									"id": "goal",
 									"label": "Temper is worked from the desktop",
 									"kind": "goal",
-									"tint": "doctype-goal",
+									"tint": "cat-8",
 									"core": true,
 									"corpusDegree": 641,
 									"excerpt": "The goal every desktop slice advances.",
@@ -4400,7 +4400,7 @@
 									"id": "t1",
 									"label": "Catalog: a read-only Graph",
 									"kind": "task",
-									"tint": "doctype-task",
+									"tint": "cat-6",
 									"corpusDegree": 12,
 									"excerpt": "Graph grows to the reads' own terms.",
 									"stage": "done",
@@ -4412,21 +4412,21 @@
 									"id": "s1",
 									"label": "Session: first wave closed",
 									"kind": "session",
-									"tint": "doctype-session",
+									"tint": "cat-2",
 									"corpusDegree": 3
 								},
 								{
 									"id": "d1",
 									"label": "Port temper-ui's layout",
 									"kind": "decision",
-									"tint": "doctype-decision",
+									"tint": "cat-7",
 									"corpusDegree": 2
 								},
 								{
 									"id": "c1",
 									"label": "Colour by binding",
 									"kind": "concept",
-									"tint": "doctype-concept",
+									"tint": "cat-4",
 									"corpusDegree": 1
 								},
 								{
@@ -8419,6 +8419,46 @@
 									"source": "n12",
 									"target": "n87",
 									"edgeKind": "express"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a graph node tinted with a doc-type role",
+			"ok": false,
+			"spec": {
+				"root": "g",
+				"elements": {
+					"g": {
+						"type": "Graph",
+						"props": {
+							"total": 2,
+							"scope": "around this goal",
+							"label": "neighbourhood",
+							"state": "present",
+							"nodes": [
+								{
+									"id": "goal",
+									"label": "Temper is worked from the desktop",
+									"kind": "goal",
+									"tint": "doctype-goal"
+								},
+								{
+									"id": "t1",
+									"label": "Catalog: a read-only Graph",
+									"kind": "task",
+									"tint": "cat-6"
+								}
+							],
+							"edges": [
+								{
+									"source": "t1",
+									"target": "goal",
+									"label": "advances"
 								}
 							]
 						},

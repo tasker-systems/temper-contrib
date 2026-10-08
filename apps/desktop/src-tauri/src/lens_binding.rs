@@ -552,13 +552,11 @@ pub fn table_props(
     serde_json::to_value(props).expect("table props serialize")
 }
 
-/// The Graph's bounds and doc-type tints, read from the same bundled catalog
-/// file the checks read: the numbers a view is held to are the catalog's,
-/// never restated, and a tint is only ever a role the catalog names.
+/// The Graph's bounds, read from the same bundled catalog file the checks
+/// read: the numbers a view is held to are the catalog's, never restated.
 struct GraphCatalog {
     nodes_max: usize,
     edges_max: usize,
-    tints: HashSet<String>,
 }
 
 fn graph_catalog() -> &'static GraphCatalog {
@@ -567,12 +565,6 @@ fn graph_catalog() -> &'static GraphCatalog {
         let catalog: Value =
             serde_json::from_str(CATALOG_JSON).expect("the bundled catalog parses");
         let graph = &catalog["components"]["Graph"]["props"]["properties"];
-        let tints = graph["nodes"]["items"]["properties"]["tint"]["enum"]
-            .as_array()
-            .expect("the catalog names the graph's tints")
-            .iter()
-            .map(|t| t.as_str().expect("a tint is a word").to_string())
-            .collect();
         GraphCatalog {
             nodes_max: graph["nodes"]["maxItems"]
                 .as_u64()
@@ -580,9 +572,31 @@ fn graph_catalog() -> &'static GraphCatalog {
             edges_max: graph["edges"]["maxItems"]
                 .as_u64()
                 .expect("the catalog bounds the graph's edges") as usize,
-            tints,
         }
     })
+}
+
+/// One vocabulary's doc-type bindings: which slot each of its doc types' marks
+/// paint. Core's default arrives first and a plugin's after — the merge is per
+/// doc type, a later entry winning an earlier one, the create menu's rule.
+#[derive(Debug, Clone, Deserialize)]
+pub struct DocTypeBindings {
+    pub id: String,
+    #[serde(default)]
+    pub doctypes: HashMap<String, String>,
+}
+
+/// The bindings merged: doc type → (the slot it paints, the vocabulary that
+/// bound it). The vocabulary rides along so a view that would mean two things
+/// by one colour can be named rather than drawn.
+fn merged_bindings(all: &[DocTypeBindings]) -> HashMap<String, (String, String)> {
+    let mut map = HashMap::new();
+    for vocabulary in all {
+        for (doc_type, slot) in &vocabulary.doctypes {
+            map.insert(doc_type.clone(), (slot.clone(), vocabulary.id.clone()));
+        }
+    }
+    map
 }
 
 /// A graph read and what it was asked at — what `graph_props` fills from. The
@@ -776,13 +790,40 @@ fn cut_to_bounds(
 /// The bare id names the node and is its ref; the home is the anchor's words
 /// when the one contexts read names it, else the anchor's bare id — a
 /// cogmap-homed node always falls back, the contexts read cannot name one.
-fn graph_node(node: &AtlasNode, homes: &HashMap<Uuid, String>) -> GraphNodeProps {
-    let tint = node
-        .doc_type
-        .as_deref()
-        .filter(|t| graph_catalog().tints.contains(&format!("doctype-{t}")))
-        .map(|t| format!("doctype-{t}"));
-    GraphNodeProps {
+///
+/// Colour by binding: a doc type paints the slot its vocabulary bound, resolved
+/// here — never a doc-type role, which no longer exists. A doc type bound
+/// nowhere paints the neutral role; a node with no doc type at all carries no
+/// tint and falls back neutral in the webview. A slot two vocabularies bound
+/// must not mean two words in one view, so the first collision is named, not
+/// drawn: `slot_owners` tracks it across the answer's nodes.
+fn graph_node(
+    node: &AtlasNode,
+    homes: &HashMap<Uuid, String>,
+    bindings: &HashMap<String, (String, String)>,
+    slot_owners: &mut HashMap<String, String>,
+) -> Result<GraphNodeProps, String> {
+    let tint = match node.doc_type.as_deref() {
+        None => None,
+        Some(doc_type) => match bindings.get(doc_type) {
+            None => Some("cat-neutral".to_string()),
+            Some((slot, vocabulary)) => {
+                match slot_owners.get(slot) {
+                    Some(existing) if existing != vocabulary => {
+                        return Err(format!(
+                            "the filled view was refused: one colour channel means two vocabularies — slot {slot} binds both {existing}'s and {vocabulary}'s doc types in this view"
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        slot_owners.insert(slot.clone(), vocabulary.clone());
+                    }
+                }
+                Some(slot.clone())
+            }
+        },
+    };
+    Ok(GraphNodeProps {
         id: node.id.to_string(),
         label: clip(&node.title, NODE_LABEL_MAX),
         kind: node.doc_type.as_deref().map(|t| clip(t, KIND_MAX)),
@@ -802,7 +843,7 @@ fn graph_node(node: &AtlasNode, homes: &HashMap<Uuid, String>) -> GraphNodeProps
             NodeHome::Context => "context",
             NodeHome::Cogmap => "cogmap",
         },
-    }
+    })
 }
 
 fn graph_edge(edge: &AtlasEdge) -> GraphEdgeProps {
@@ -817,14 +858,20 @@ fn graph_edge(edge: &AtlasEdge) -> GraphEdgeProps {
 }
 
 /// A Graph's props from a graph read's answer — a function of the answer, the
-/// read it answers and the one contexts read, nothing else.
+/// read it answers, the one contexts read and the bindings in force, nothing else.
 ///
 /// The nodes and edges are the answer's, cut to the catalog's bounds when the
 /// answer exceeds them. A walk says where it went and how deep; it carries no
 /// bounds — deeper was not reported, and there is no denominator. An entry
 /// read carries the bounds it was given. An answer that drew nothing names
 /// nothing it does not draw: no arm, no cut.
-fn graph_props(read: &GraphRead, homes: &HashMap<Uuid, String>) -> Value {
+fn graph_props(
+    read: &GraphRead,
+    homes: &HashMap<Uuid, String>,
+    bindings: &[DocTypeBindings],
+) -> Result<Value, String> {
+    let merged = merged_bindings(bindings);
+    let mut slot_owners: HashMap<String, String> = HashMap::new();
     let total = read.answer_nodes_len();
     let (scope, nodes, edges, cut, arm, bounds) = match read {
         GraphRead::Walk {
@@ -877,10 +924,13 @@ fn graph_props(read: &GraphRead, homes: &HashMap<Uuid, String>) -> Value {
         arm,
         bounds,
         cut,
-        nodes: nodes.iter().map(|n| graph_node(n, homes)).collect(),
+        nodes: nodes
+            .iter()
+            .map(|n| graph_node(n, homes, &merged, &mut slot_owners))
+            .collect::<Result<Vec<_>, _>>()?,
         edges: edges.iter().map(graph_edge).collect(),
     };
-    serde_json::to_value(props).expect("graph props serialize")
+    Ok(serde_json::to_value(props).expect("graph props serialize"))
 }
 
 /// What the read said each drawn node is, in the shape a reference resolves
@@ -989,6 +1039,8 @@ pub struct Resolved {
 }
 
 /// Resolve a bound lens: make its read, fill its element, check the result.
+/// The bindings in force ride the call — the webview owns what the packages
+/// declared, the core merges and resolves, so the format stays the webview's.
 #[tauri::command]
 pub async fn lens_resolve(
     state: tauri::State<'_, TemperState>,
@@ -996,6 +1048,7 @@ pub async fn lens_resolve(
     binding: Binding,
     subject: LensSubject,
     view: ViewState,
+    bindings: Vec<DocTypeBindings>,
 ) -> Result<Resolved, String> {
     let client = state
         .client()
@@ -1041,7 +1094,7 @@ pub async fn lens_resolve(
                 .collect();
             let read = graph_read(&client, subject, &homes).await?;
             Ok(Resolved {
-                spec: fill(&spec, &binding, graph_props(&read, &homes))?,
+                spec: fill(&spec, &binding, graph_props(&read, &homes, &bindings)?)?,
                 refs: node_resolutions(&read, &homes),
             })
         }
@@ -1469,6 +1522,29 @@ mod tests {
         )])
     }
 
+    /// Core's default binding, as the webview would send it.
+    fn core_bindings() -> Vec<DocTypeBindings> {
+        vec![DocTypeBindings {
+            id: "core".into(),
+            doctypes: [
+                ("research", "cat-5"),
+                ("task", "cat-6"),
+                ("session", "cat-2"),
+                ("concept", "cat-4"),
+                ("goal", "cat-8"),
+                ("decision", "cat-7"),
+                ("memory", "cat-1"),
+            ]
+            .into_iter()
+            .map(|(d, s)| (d.to_string(), s.to_string()))
+            .collect(),
+        }]
+    }
+
+    fn graph_props_of(read: &GraphRead) -> Value {
+        graph_props(read, &homes(), &core_bindings()).expect("the graph props resolve")
+    }
+
     fn walk_from(seed: &str, depth: i32, answer: AtlasSubgraph) -> GraphRead {
         GraphRead::Walk {
             seed: seed.to_string(),
@@ -1487,7 +1563,7 @@ mod tests {
             vec![atlas_edge(1, 1, 2, Some("then"), 0.5)],
         );
         let read = walk_from(&uuid::Uuid::from_u128(1).to_string(), 2, a);
-        assert_eq!(graph_props(&read, &homes()), graph_props(&read, &homes()));
+        assert_eq!(graph_props_of(&read), graph_props_of(&read));
     }
 
     #[test]
@@ -1501,7 +1577,7 @@ mod tests {
         );
         let seed = uuid::Uuid::from_u128(1).to_string();
         let read = walk_from(&seed, 3, a);
-        let props = graph_props(&read, &homes());
+        let props = graph_props_of(&read);
         assert_eq!(props["total"], 2);
         assert_eq!(props["state"], "present");
         assert_eq!(props["label"], "neighbourhood");
@@ -1513,7 +1589,7 @@ mod tests {
         assert!(props.get("bounds").is_none());
         assert!(props.get("cut").is_none());
         assert_eq!(props["nodes"][0]["kind"], "task");
-        assert_eq!(props["nodes"][0]["tint"], "doctype-task");
+        assert_eq!(props["nodes"][0]["tint"], "cat-6");
         assert_eq!(props["nodes"][1]["tint"], serde_json::Value::Null);
         assert_eq!(props["nodes"][0]["ref"], seed);
         assert_eq!(props["nodes"][0]["corpusDegree"], 3);
@@ -1532,6 +1608,98 @@ mod tests {
             })
         );
         fill(&graph_spec(), &graph_binding(), props).expect("the walk passes the check");
+    }
+
+    #[test]
+    fn a_doc_type_bound_nowhere_paints_the_neutral_role() {
+        let a = walk_answer(
+            vec![
+                atlas_node(1, "Seed", Some("character")),
+                atlas_node(2, "Untyped", None),
+            ],
+            vec![],
+        );
+        let read = walk_from(&uuid::Uuid::from_u128(1).to_string(), 1, a);
+        let props = graph_props_of(&read);
+        // `character` is no vocabulary's: the neutral role, named in the props.
+        assert_eq!(props["nodes"][0]["tint"], "cat-neutral");
+        // No doc type at all carries no tint; the webview's fallback paints neutral.
+        assert_eq!(props["nodes"][1]["tint"], serde_json::Value::Null);
+        fill(&graph_spec(), &graph_binding(), props).expect("the walk passes the check");
+    }
+
+    #[test]
+    fn a_plugin_s_binding_wins_the_core_s_default() {
+        let mut plugin = DocTypeBindings {
+            id: "storyteller".into(),
+            doctypes: Default::default(),
+        };
+        plugin
+            .doctypes
+            .insert("character".to_string(), "cat-3".to_string());
+        plugin
+            .doctypes
+            .insert("task".to_string(), "cat-3".to_string());
+        let bindings = [core_bindings(), vec![plugin]].concat();
+        let a = walk_answer(
+            vec![
+                atlas_node(1, "A task", Some("task")),
+                atlas_node(2, "Mara", Some("character")),
+            ],
+            vec![],
+        );
+        let props = graph_props(
+            &walk_from(&uuid::Uuid::from_u128(1).to_string(), 1, a),
+            &homes(),
+            &bindings,
+        )
+        .expect("the graph props resolve");
+        // The plugin bound both its own kind and core's `task` to cat-3: one
+        // vocabulary may share a slot, and its entry for a doc type wins the base's.
+        assert_eq!(props["nodes"][0]["tint"], "cat-3");
+        assert_eq!(props["nodes"][1]["tint"], "cat-3");
+        fill(&graph_spec(), &graph_binding(), props).expect("the walk passes the check");
+    }
+
+    #[test]
+    fn one_slot_meaning_two_vocabularies_in_one_view_is_named_not_drawn() {
+        let mut plugin = DocTypeBindings {
+            id: "storyteller".into(),
+            doctypes: Default::default(),
+        };
+        plugin
+            .doctypes
+            .insert("character".to_string(), "cat-6".to_string());
+        let bindings = [core_bindings(), vec![plugin]].concat();
+        // A task of core's and a character of storyteller's, one answer, both
+        // bound to cat-6: the view would mean two things by one colour.
+        let a = walk_answer(
+            vec![
+                atlas_node(1, "A task", Some("task")),
+                atlas_node(2, "Mara", Some("character")),
+            ],
+            vec![],
+        );
+        let err = graph_props(
+            &walk_from(&uuid::Uuid::from_u128(1).to_string(), 1, a),
+            &homes(),
+            &bindings,
+        )
+        .expect_err("the collision is refused");
+        assert!(err.starts_with("the filled view was refused"), "{err}");
+        assert!(
+            err.contains("cat-6") && err.contains("core") && err.contains("storyteller"),
+            "{err}"
+        );
+        // The same collision, but the character drawn alone: no meeting, no refusal.
+        let a = walk_answer(vec![atlas_node(2, "Mara", Some("character"))], vec![]);
+        let props = graph_props(
+            &walk_from(&uuid::Uuid::from_u128(2).to_string(), 1, a),
+            &homes(),
+            &bindings,
+        )
+        .expect("a view one vocabulary owns resolves");
+        assert_eq!(props["nodes"][0]["tint"], "cat-6");
     }
 
     #[test]
@@ -1555,7 +1723,7 @@ mod tests {
         edges.extend((0..10).map(|i| atlas_edge(700 + i, 1, 201 + i, None, 1.0)));
         let seed = uuid::Uuid::from_u128(1).to_string();
         let read = walk_from(&seed, 1, walk_answer(nodes, edges));
-        let props = graph_props(&read, &homes());
+        let props = graph_props_of(&read);
         assert_eq!(props["total"], 250);
         assert_eq!(props["nodes"].as_array().unwrap().len(), 200);
         assert_eq!(props["edges"].as_array().unwrap().len(), 600);
@@ -1591,7 +1759,7 @@ mod tests {
             .collect();
         let seed = uuid::Uuid::from_u128(1).to_string();
         let read = walk_from(&seed, 1, walk_answer(nodes, edges));
-        let props = graph_props(&read, &homes());
+        let props = graph_props_of(&read);
         assert_eq!(props["nodes"].as_array().unwrap().len(), 10);
         assert_eq!(props["edges"].as_array().unwrap().len(), 600);
         assert_eq!(props["cut"], json!({ "edges": 100 }));
@@ -1615,7 +1783,7 @@ mod tests {
             context: "+temper-dev/contrib".into(),
             answer: a,
         };
-        let props = graph_props(&read, &homes());
+        let props = graph_props_of(&read);
         assert_eq!(
             props["bounds"],
             json!({ "drawn": 2, "eligible": 5, "inScope": 9, "truncated": true })
@@ -1635,7 +1803,7 @@ mod tests {
             2,
             walk_answer(vec![], vec![]),
         );
-        let props = graph_props(&read, &homes());
+        let props = graph_props_of(&read);
         assert_eq!(props["total"], 0);
         assert_eq!(props["state"], "empty");
         assert!(props.get("arm").is_none());
@@ -1655,13 +1823,14 @@ mod tests {
         n.degree = 0;
         let a = walk_answer(vec![n], vec![]);
         let seed = uuid::Uuid::from_u128(1).to_string();
-        let props = graph_props(&walk_from(&seed, 1, a), &homes());
+        let props = graph_props_of(&walk_from(&seed, 1, a));
         let node = &props["nodes"][0];
         assert_eq!(node["label"].as_str().unwrap().chars().count(), 120);
         assert!(node["label"].as_str().unwrap().ends_with('…'));
-        // A type the catalog does not tint is said as kind and carries no tint.
+        // A type no vocabulary binds paints the contract's neutral role, and is
+        // said as kind — odd data never refuses the graph's own view.
         assert_eq!(node["kind"].as_str().unwrap().chars().count(), 40);
-        assert!(node.get("tint").is_none() || node["tint"].is_null());
+        assert_eq!(node["tint"], "cat-neutral");
         assert_eq!(node["stage"].as_str().unwrap().chars().count(), 20);
         // A home no context names falls back to the anchor's bare id.
         assert_eq!(node["home"], uuid::Uuid::from_u128(999).to_string());
@@ -1676,7 +1845,7 @@ mod tests {
             vec![atlas_edge(1, 1, 2, None, 7.5)],
         );
         let seed = uuid::Uuid::from_u128(1).to_string();
-        let props = graph_props(&walk_from(&seed, 1, a), &homes());
+        let props = graph_props_of(&walk_from(&seed, 1, a));
         assert_eq!(props["edges"][0]["weight"], 7.5);
         assert!(fill(&graph_spec(), &graph_binding(), props).is_err());
     }
@@ -1731,7 +1900,9 @@ mod tests {
         let props = graph_props(
             &walk_from(&uuid::Uuid::from_u128(1).to_string(), 1, a),
             &homes(),
-        );
+            &core_bindings(),
+        )
+        .expect("the graph props resolve");
         fill(&graph_spec(), &graph_binding(), props.clone()).expect("the graph fills a Graph");
         // A listing read fills a Table, and the graph element is not one.
         let listing_on_graph = Binding {
@@ -1903,7 +2074,7 @@ mod tests {
             depth,
             answer,
         };
-        let props = graph_props(&read, &homes);
+        let props = graph_props(&read, &homes, &core_bindings()).expect("the graph props resolve");
         print_graph_evidence("walk", &read, &props);
         if let Ok(dir) = std::env::var("WITNESS_DUMP") {
             std::fs::write(
@@ -1929,7 +2100,7 @@ mod tests {
             context: context.clone(),
             answer,
         };
-        let props = graph_props(&read, &homes);
+        let props = graph_props(&read, &homes, &core_bindings()).expect("the graph props resolve");
         print_graph_evidence("entry", &read, &props);
         if let Ok(dir) = std::env::var("WITNESS_DUMP") {
             std::fs::write(

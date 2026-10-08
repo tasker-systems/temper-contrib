@@ -22,7 +22,11 @@ vi.mock('$lib/refs', () => ({
 import { invoke } from '@tauri-apps/api/core';
 import { render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { core } from '../contributions/core';
+import { CORE_DOC_TYPE_BINDINGS, core } from '../contributions/core';
+
+/** The bindings in force where only core is enabled — what the resolve call carries. */
+const BINDINGS = [{ id: 'core', doctypes: CORE_DOC_TYPE_BINDINGS }];
+
 import type { LensDecl, LensProps, TabHandle } from '../lenses';
 import type { Subject } from '../subjects';
 import BoundLens from './BoundLens.svelte';
@@ -75,7 +79,8 @@ describe('the bound lens', () => {
 				spec: bound('core/graph').spec,
 				binding: { element: 'graph', read: 'graph' },
 				subject: { kind: 'neighbourhood', id: ID, depth: 1 },
-				view: { offset: 0 }
+				view: { offset: 0 },
+				bindings: BINDINGS
 			})
 		);
 	});
@@ -89,7 +94,8 @@ describe('the bound lens', () => {
 				spec: bound('core/graph').spec,
 				binding: { element: 'graph', read: 'graph' },
 				subject: { kind: 'neighbourhood', id: ID, depth: 1 },
-				view: { offset: 0 }
+				view: { offset: 0 },
+				bindings: BINDINGS
 			})
 		);
 	});
@@ -101,7 +107,8 @@ describe('the bound lens', () => {
 				spec: bound('core/graph').spec,
 				binding: { element: 'graph', read: 'graph' },
 				subject: { kind: 'query', context: CONTEXT },
-				view: { offset: 0 }
+				view: { offset: 0 },
+				bindings: BINDINGS
 			})
 		);
 	});
@@ -118,7 +125,8 @@ describe('the bound lens', () => {
 				spec: bound('core/table').spec,
 				binding: { element: 'table', read: 'resource-list' },
 				subject: { kind: 'query', context: CONTEXT, docType: 'task', text: 'graph' },
-				view: { offset: 0 }
+				view: { offset: 0 },
+				bindings: BINDINGS
 			})
 		);
 	});

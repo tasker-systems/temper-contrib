@@ -80,12 +80,12 @@ const wasTemperWorkflows = {
 		{
 			id: 'create',
 			doctypes: [
-				{ doctype: 'task', defaults: undefined },
-				{ doctype: 'goal', defaults: undefined },
-				{ doctype: 'session', defaults: { date: TODAY } },
-				{ doctype: 'research', defaults: { date: TODAY } },
-				{ doctype: 'concept', defaults: undefined },
-				{ doctype: 'decision', defaults: undefined }
+				{ doctype: 'task', tint: 'cat-6', defaults: undefined },
+				{ doctype: 'goal', tint: 'cat-8', defaults: undefined },
+				{ doctype: 'session', tint: 'cat-2', defaults: { date: TODAY } },
+				{ doctype: 'research', tint: 'cat-5', defaults: { date: TODAY } },
+				{ doctype: 'concept', tint: 'cat-4', defaults: undefined },
+				{ doctype: 'decision', tint: 'cat-7', defaults: undefined }
 			]
 		}
 	],
@@ -102,8 +102,9 @@ const withoutClosures = (contribution: Contribution) => ({
 	waysIn: contribution.waysIn,
 	vocabularies: contribution.vocabularies.map((vocabulary) => ({
 		id: vocabulary.id,
-		doctypes: vocabulary.doctypes.map(({ doctype, defaults }) => ({
+		doctypes: vocabulary.doctypes.map(({ doctype, tint, defaults }) => ({
 			doctype,
+			tint,
 			defaults: defaults?.(TODAY)
 		}))
 	})),
@@ -181,6 +182,22 @@ describe('the package loader', () => {
 		const { contributions, refusals } = loadOne(JSON.stringify(manifest));
 		expect(contributions).toEqual([]);
 		expect(refusals[0]).toContain('contributions.vocabularies[0].doctypes[2].defaults');
+	});
+
+	it('refuses a doc type bound to anything but a slot', () => {
+		const manifest = JSON.parse(pluginManifestText());
+		manifest.contributions.vocabularies[0].doctypes[0].tint = 'accent';
+		const { contributions, refusals } = loadOne(JSON.stringify(manifest));
+		expect(contributions).toEqual([]);
+		expect(refusals[0]).toContain('contributions.vocabularies[0].doctypes[0].tint');
+	});
+
+	it('refuses a doc type bound to a colour, which is not a slot either', () => {
+		const manifest = JSON.parse(pluginManifestText());
+		manifest.contributions.vocabularies[0].doctypes[0].tint = '#de8fa5';
+		const { contributions, refusals } = loadOne(JSON.stringify(manifest));
+		expect(contributions).toEqual([]);
+		expect(refusals[0]).toContain('contributions.vocabularies[0].doctypes[0].tint');
 	});
 
 	it('refuses a manifest that is not parseable JSON', () => {

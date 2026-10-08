@@ -44,10 +44,14 @@ for _role in [
     "region-failed",
 ]:
     FLOORS.append((_role, [f"{_role}-wash"], 4.5))
-for _d in ["research", "task", "session", "concept", "goal", "decision", "memory"]:
-    FLOORS.append((f"doctype-{_d}", ["ground"], 4.5))
+# Slots carry doc-type marks: the old doctype guarantee (4.5 on ground) rides the
+# binding, plus the categorical mark's own 3:1 on surface. cat-neutral is the family's
+# ninth member and clears the same floors.
 for _i in range(1, 9):
-    FLOORS.append((f"cat-{_i}", ["ground", "surface"], 3.0))
+    FLOORS.append((f"cat-{_i}", ["ground"], 4.5))
+    FLOORS.append((f"cat-{_i}", ["surface"], 3.0))
+FLOORS.append(("cat-neutral", ["ground"], 4.5))
+FLOORS.append(("cat-neutral", ["surface"], 3.0))
 for _c in ["key", "string", "number", "comment"]:
     FLOORS.append((f"code-{_c}", ["surface"], 4.5))
 
@@ -56,12 +60,27 @@ for _c in ["key", "string", "number", "comment"]:
 # the region states (marker, words, border style carry the rest), but a theme that
 # collapses two of them onto one hue has removed a channel, and that is checkable.
 # Threshold is CIE76 ΔE on the colours as painted over ground.
+SLOT_FAMILY = [f"cat-{i}" for i in range(1, 9)] + ["cat-neutral"]
+# The chrome and state roles a slot must never read as: a doc type bound to a slot
+# that paints like the accent (or a region state, an authorship mark) would dress
+# vocabulary in meaning it does not carry.
+CHROME_AND_STATE = [
+    "accent",
+    "author-human",
+    "author-agent",
+    "notice",
+    "region-arriving",
+    "region-empty",
+    "region-gave-up",
+    "region-failed",
+]
 DISTINCT = [
     ("region states", ["region-arriving", "region-empty", "region-gave-up", "region-failed"], 15.0),
-    ("categorical slots", [f"cat-{i}" for i in range(1, 9)], 12.0),
+    ("categorical slots", SLOT_FAMILY, 12.0),
     ("authorship", ["author-human", "author-agent"], 15.0),
     ("conditions", ["notice", "success", "danger", "region-failed"], 12.0),
 ]
+CROSS_DISTINCT = [("slot vs chrome/state", SLOT_FAMILY, CHROME_AND_STATE, 12.0)]
 
 
 def parse_color(value):
@@ -146,6 +165,12 @@ def legibility_errors(theme):
     for label, roles, threshold in DISTINCT:
         for i, a in enumerate(roles):
             for b in roles[i + 1 :]:
+                d = delta_e(paint[a], paint[b])
+                if d < threshold:
+                    errors.append(f"distinct {label}: {a} vs {b} ΔE {d:.1f} < {threshold}")
+    for label, family, others, threshold in CROSS_DISTINCT:
+        for a in family:
+            for b in others:
                 d = delta_e(paint[a], paint[b])
                 if d < threshold:
                     errors.append(f"distinct {label}: {a} vs {b} ΔE {d:.1f} < {threshold}")
@@ -278,6 +303,33 @@ def cmd_contrast(path):
     return 0
 
 
+def cmd_slots(path):
+    """The slot canvas: within-family and slot-vs-chrome/state ΔE, flagged at their thresholds.
+
+    This is the measurement the slot count is decided against — a canvas holding core's doc
+    types and one plugin's together. Eight slots carry any number of terms (many terms may
+    share a slot); they are short only if the family cannot hold nine mutually-distinct
+    marks clear of the chrome and state roles. `check` enforces this; `slots` shows it.
+    """
+    theme = load(Path(path).resolve())
+    paint = painted(theme["tokens"]["color"])
+    within = next(t for label, _, t in DISTINCT if label == "categorical slots")
+    threshold = CROSS_DISTINCT[0][3]
+    print(f"{theme['name']} — within the slot family (floor {within}):")
+    for i, a in enumerate(SLOT_FAMILY):
+        for b in SLOT_FAMILY[i + 1 :]:
+            d = delta_e(paint[a], paint[b])
+            flag = "  " if d + 1e-9 >= within else "!!"
+            print(f"{flag} {a:<12} vs {b:<12} ΔE {d:5.1f}")
+    print(f"{theme['name']} — slots vs chrome/state (floor {threshold}):")
+    for a in SLOT_FAMILY:
+        for b in CHROME_AND_STATE:
+            d = delta_e(paint[a], paint[b])
+            flag = "  " if d + 1e-9 >= threshold else "!!"
+            print(f"{flag} {a:<12} vs {b:<12} ΔE {d:5.1f}")
+    return 0
+
+
 def contract_vars():
     """Every --tp-* name a theme defines, derived from the schema."""
     props = load(SCHEMA_PATH)["properties"]["tokens"]["properties"]
@@ -362,6 +414,8 @@ def main(argv):
         return cmd_check(argv[1:])
     if argv[:1] == ["contrast"] and len(argv) == 2:
         return cmd_contrast(argv[1])
+    if argv[:1] == ["slots"] and len(argv) == 2:
+        return cmd_slots(argv[1])
     if argv == ["--self-check"]:
         return cmd_self_check()
     print(__doc__, file=sys.stderr)

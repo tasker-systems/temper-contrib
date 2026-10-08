@@ -127,7 +127,7 @@ setTimeout(() => setTimeout(() => { try {
     seriesPainted: { 'cat-1': painted.has(cat(1)), 'cat-3': painted.has(cat(3)) },
     graphs: graphs.map((g) => ({ nodes: g.querySelectorAll('.node').length,
       edges: g.querySelectorAll('.edge').length, ids: g.querySelectorAll('[id]').length })),
-    nodesPainted: Object.fromEntries(['doctype-goal', 'doctype-task', 'cat-1', 'cat-5'].map((t) =>
+    nodesPainted: Object.fromEntries(['cat-8', 'cat-6', 'cat-1', 'cat-5'].map((t) =>
       [t, nodeFill(t).length > 0 && nodeFill(t).every((f) => f === role(t))])),
     tableParts: Object.fromEntries(Object.entries({
       sortControls: 'th button.sort', activeSort: 'th[aria-sort]', pager: 'nav.pager button',
