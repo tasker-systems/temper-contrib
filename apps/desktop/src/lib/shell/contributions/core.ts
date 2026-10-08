@@ -36,8 +36,9 @@ export const core: Contribution = {
 			accepts: { kinds: ['place'], places: ['home'] },
 			build: { state: 'built', component: () => import('../lenses/HomeLens.svelte') }
 		},
-		// Home's sections: lenses pinned to home (ruling A). Resume, the agent's asks, Start and
-		// Explore are core's; the workflow's readings of the work are temper-workflows'.
+		// Home's sections: lenses pinned to home (ruling A). Resume, the agent's asks, the presented
+		// views, Start and Explore are core's; the workflow's readings of the work are
+		// temper-workflows'.
 		{
 			id: 'core/home-resume',
 			name: 'resume',
@@ -55,6 +56,20 @@ export const core: Contribution = {
 			pinned: { home: 20 },
 			group: 'Awaiting you',
 			build: { state: 'built', component: () => import('../lenses/home/AsksSection.svelte') }
+		},
+		{
+			id: 'core/home-presented',
+			name: 'presented views',
+			plugin: 'core',
+			accepts: { kinds: ['place'], places: ['home'] },
+			// After the workflow's "Awaiting you" rows (home-recent pins 25 and shares that
+			// group): a tie here would split the group into two headings.
+			pinned: { home: 26 },
+			group: 'Presented views',
+			build: {
+				state: 'built',
+				component: () => import('../lenses/home/PresentedSection.svelte')
+			}
 		},
 		{
 			id: 'core/home-start',
