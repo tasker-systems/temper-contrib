@@ -341,7 +341,9 @@ fn field_cell(kind: &Kind, v: &Value) -> Option<Cell> {
 }
 
 /// One field's counts over the listing, most first (ties by value). A blank
-/// value is not one a reader could pick out, so it is counted as unlisted.
+/// value is not one a reader could pick out, so it is counted as unlisted —
+/// and so is a value too long to draw whole: its clipped form must not ride a
+/// click as the value the listing is narrowed to.
 ///
 /// `active` names the narrowing in force and `filterable` whether its values
 /// narrow — the type facet offers only when the subject names no doc type
@@ -365,7 +367,10 @@ fn facet(
     }
     let mut all: Vec<(String, i64)> = counts
         .iter()
-        .filter(|(v, _)| !v.trim().is_empty())
+        .filter(|(v, _)| {
+            let t = v.trim();
+            !t.is_empty() && t.chars().count() <= LIST_ITEM_MAX
+        })
         .map(|(v, c)| (v.clone(), *c))
         .collect();
     if let Some(pair) = &injected {
@@ -373,10 +378,12 @@ fn facet(
     }
     all.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let mut kept: Vec<(String, i64)> = all.into_iter().take(FACET_VALUES_MAX).collect();
-    if let Some(a) = active_value {
+    // The value in force fell past the cut: it keeps the last slot, and what
+    // it displaced is counted, not unsaid. A value too long to draw whole is
+    // never rescued — it cannot ride a click, so it is named in the scope, not
+    // drawn as a control.
+    if let Some(a) = active_value.filter(|a| a.chars().count() <= LIST_ITEM_MAX) {
         if !kept.iter().any(|(v, _)| v == a) {
-            // The value in force fell past the cut: it keeps the last slot,
-            // and what it displaced is counted, not unsaid.
             kept.pop();
             kept.push((a.to_string(), counts.get(a).copied().unwrap_or(0)));
             kept.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
@@ -1361,6 +1368,22 @@ mod tests {
             .find(|f| f["key"] == "stage")
             .unwrap();
         assert_eq!(stage["unlisted"], 1);
+        // A value too long to draw whole is counted, not offered: its clipped
+        // form must not ride a click as the value the listing is narrowed to.
+        let typ = props["facets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["key"] == "type")
+            .unwrap();
+        let values: Vec<&str> = typ["counts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["value"].as_str().unwrap())
+            .collect();
+        assert!(!values.iter().any(|v| v.ends_with('…')));
+        assert_eq!(typ["unlisted"], 1);
         // A blank value does not make a list of what holds a list.
         assert_eq!(
             props["columns"].as_array().unwrap().last().unwrap()["kind"],
@@ -1591,6 +1614,28 @@ mod tests {
         assert!(typ.get("filterable").is_none());
         let stage = facets.iter().find(|f| f["key"] == "stage").unwrap();
         assert_eq!(stage["filterable"], true);
+        // The reader's own type narrowing, on a subject that names none: the
+        // facet is both marked in force and offered.
+        let view = ViewState {
+            filters: Filters {
+                doc_type: Some("session".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let props = table_props(
+            &answer(tasks(1), 51, 0, 50),
+            &ListingSubject::default(),
+            &view,
+        );
+        let typ = props["facets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["key"] == "type")
+            .unwrap();
+        assert_eq!(typ["active"], "session");
+        assert_eq!(typ["filterable"], true);
     }
 
     #[test]

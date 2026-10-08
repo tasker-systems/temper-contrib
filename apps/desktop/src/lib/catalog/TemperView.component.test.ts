@@ -74,7 +74,6 @@ describe('the first-wave components through TemperView', () => {
 			]
 		};
 		const { container } = render(TemperView, { spec: one('Table', props) });
-		console.log('DBG: ' + container.querySelector('[role="alert"]')?.textContent);
 		expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
 		expect(container.querySelectorAll('.facets .count')).toHaveLength(2);
 	});

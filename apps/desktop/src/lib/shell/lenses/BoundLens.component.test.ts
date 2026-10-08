@@ -81,7 +81,8 @@ const tableAnswer = {
 							label: 'Type',
 							counts: [
 								{ value: 'task', count: 40 },
-								{ value: 'session', count: 11 }
+								{ value: 'session', count: 11 },
+								{ value: 'goal', count: 6 }
 							],
 							filterable: true
 						},
@@ -89,6 +90,12 @@ const tableAnswer = {
 							key: 'stage',
 							label: 'Stage',
 							counts: [{ value: 'backlog', count: 37 }],
+							filterable: true
+						},
+						{
+							key: 'status',
+							label: 'Status',
+							counts: [{ value: 'active', count: 5 }],
 							filterable: true
 						}
 					]
@@ -256,6 +263,41 @@ describe('the bound lens', () => {
 				})
 			)
 		);
+		await fireEvent.click(getByRole('button', { name: /^session/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'session' } } })
+			)
+		);
+		// The other arm: a goal keeps a status filter and drops a stage one;
+		// a type that is neither drops both.
+		await fireEvent.click(getByRole('button', { name: /^task/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'task' } } })
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /^active/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({
+					view: { offset: 0, filters: { docType: 'task', status: 'active' } }
+				})
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /^goal/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({
+					view: { offset: 0, filters: { docType: 'goal', status: 'active' } }
+				})
+			)
+		);
+		// A type that is neither drops what remains.
 		await fireEvent.click(getByRole('button', { name: /^session/ }));
 		await vi.waitFor(() =>
 			expect(invoke).toHaveBeenLastCalledWith(
