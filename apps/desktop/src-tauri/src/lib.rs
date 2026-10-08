@@ -121,7 +121,8 @@ pub fn run() {
             acp::acp_ask_surface,
             acp::acp_answer_permission,
             presentation::present_answer,
-            presentation::present_read
+            presentation::present_read,
+            presentation::present_list
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
