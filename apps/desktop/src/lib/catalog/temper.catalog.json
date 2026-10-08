@@ -300,7 +300,7 @@
                   "type": "object",
                   "maxProperties": 8,
                   "propertyNames": { "maxLength": 40 },
-                  "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical role, cat-1…cat-8. Plugins bind their vocabulary to these; never a colour." }
+                  "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical slot, cat-1…cat-8. A category value reaches colour through the vocabulary that declares it; never a colour, never a doc type." }
                 },
                 "sortable": { "type": "boolean", "description": "Whatever answered the rows can order them by this column." }
               }

@@ -21,7 +21,9 @@ export function boundVocabularies(enabled: readonly Contribution[]): VocabularyB
 	const bindings: VocabularyBindings[] = [{ id: 'core', doctypes: CORE_DOC_TYPE_BINDINGS }];
 	for (const contribution of enabled) {
 		for (const vocabulary of contribution.vocabularies) {
-			const doctypes: Record<string, SlotTint> = {};
+			// Null prototype: a doc type is a wire word, and a record that inherits
+			// would swallow `__proto__` — the Rust merge answers the same name.
+			const doctypes: Record<string, SlotTint> = Object.create(null);
 			for (const { doctype, tint } of vocabulary.doctypes) {
 				if (tint) doctypes[doctype] = tint;
 			}

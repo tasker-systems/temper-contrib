@@ -1,5 +1,5 @@
 {
-  "$schema": "../contract/theme.schema.json",
+  "$schema": "../../../contract/theme.schema.json",
   "kind": "theme",
   "name": "quiet-instrument",
   "title": "Quiet Instrument",

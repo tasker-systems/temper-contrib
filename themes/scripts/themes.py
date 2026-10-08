@@ -313,12 +313,13 @@ def cmd_slots(path):
     """
     theme = load(Path(path).resolve())
     paint = painted(theme["tokens"]["color"])
+    within = next(t for label, _, t in DISTINCT if label == "categorical slots")
     threshold = CROSS_DISTINCT[0][3]
-    print(f"{theme['name']} — within the slot family (floor {12.0}):")
+    print(f"{theme['name']} — within the slot family (floor {within}):")
     for i, a in enumerate(SLOT_FAMILY):
         for b in SLOT_FAMILY[i + 1 :]:
             d = delta_e(paint[a], paint[b])
-            flag = "  " if d + 1e-9 >= 12.0 else "!!"
+            flag = "  " if d + 1e-9 >= within else "!!"
             print(f"{flag} {a:<12} vs {b:<12} ΔE {d:5.1f}")
     print(f"{theme['name']} — slots vs chrome/state (floor {threshold}):")
     for a in SLOT_FAMILY:
