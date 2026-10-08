@@ -628,10 +628,11 @@ describe('the shell', () => {
 	it('home is its pinned sections, in order, under their headings', async () => {
 		const { container } = render(Shell);
 		const home = activeBody(container);
-		await waitFor(() => expect(home.querySelectorAll('[data-section]')).toHaveLength(6));
+		await waitFor(() => expect(home.querySelectorAll('[data-section]')).toHaveLength(7));
 		expect([...home.querySelectorAll('h2')].map((h) => h.textContent)).toEqual([
 			'Resume',
 			'Awaiting you',
+			'Presented views',
 			'Start',
 			'Explore'
 		]);

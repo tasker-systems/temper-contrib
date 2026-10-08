@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use temper_client::TemperClient;
-use temper_core::types::data_artifact::{ArtifactCommitRequest, ArtifactView};
+use temper_core::types::data_artifact::{ArtifactCommitRequest, ArtifactListParams, ArtifactView};
 use uuid::Uuid;
 
 use crate::acp::AcpState;
-use crate::hub::{ensure_hub_resource, ensure_shape};
-use crate::person_context::persons_context_id;
+use crate::hub::{ensure_hub_resource, ensure_shape, find_hub_resources};
+use crate::person_context::{persons_context_id, persons_contexts};
 use crate::present_board::{PresentOutcome, Presentation, PresentationBoard, PresentedTab};
 use crate::settings::SettingsState;
 use crate::spec_check::check_spec;
@@ -84,7 +84,9 @@ pub struct PresentedRecord {
     pub agent: String,
     /// The catalog the spec passed, e.g. `temper@1.0.0`.
     pub catalog_version: String,
-    /// RFC 3339, when the core recorded it.
+    /// RFC 3339, when the core recorded it — written by this family's own
+    /// commit path (`Utc::now().to_rfc3339()`), and the list orders by it
+    /// as a string.
     pub presented_at: String,
     /// The agent's spec, verbatim.
     pub spec: serde_json::Value,
@@ -333,6 +335,94 @@ pub async fn read_presented(
     presented_view_from(view, profile_id)
 }
 
+/// How many views the answer carries at most. Records accumulate for good
+/// — a pinned record is never superseded — and the read beneath this cap
+/// lists every pinned record on every hub, growing with the family: the
+/// list params have no limit of their own. It is the answer that is
+/// capped, and the full count rides beside the carried views, so what the
+/// cap omits is named, never dropped silently.
+pub const PRESENT_LIST_CAP: usize = 20;
+
+/// The person's recorded presented views, as the list answers: the views
+/// the projection admitted, newest first, at most [`PRESENT_LIST_CAP`] of
+/// them. `total` counts every admitted view, so a surface can name what
+/// the cap omits; `refused` counts the artifacts on the hubs the projection
+/// would not admit — counted, never dropped silently.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentedList {
+    pub views: Vec<PresentedView>,
+    pub total: usize,
+    pub refused: usize,
+}
+
+/// Orders and bounds what the hubs listed: every artifact goes through the
+/// one projection a single read uses — the list admits nothing the read
+/// would not — the admitted views sort newest first by each record's own
+/// `presentedAt`, and the cap keeps the newest. Pure, so its witness needs
+/// no server.
+fn presented_list_from(batches: Vec<Vec<ArtifactView>>, profile_id: Uuid) -> PresentedList {
+    let mut views = Vec::new();
+    let mut refused = 0usize;
+    for artifact in batches.into_iter().flatten() {
+        match presented_view_from(artifact, profile_id) {
+            Ok(view) => views.push(view),
+            Err(_) => refused += 1,
+        }
+    }
+    views.sort_by(|a, b| b.record.presented_at.cmp(&a.record.presented_at));
+    let total = views.len();
+    views.truncate(PRESENT_LIST_CAP);
+    PresentedList {
+        views,
+        total,
+        refused,
+    }
+}
+
+/// The list filter for a hub's records: this family, pinned — with folded
+/// records listed too, so that a superseded record reaches the projection's
+/// own live arm and lands in the refused count rather than vanishing at the
+/// filter. The params carry the family and the intent, which the list API
+/// admits; the projection still refuses whatever is not a record: the
+/// filter narrows the read, the projection decides it.
+fn pinned_list_params() -> ArtifactListParams {
+    ArtifactListParams {
+        kind: Some(PRESENTED_VIEW_KIND.to_string()),
+        intent: Some("pinned".to_string()),
+        include_folded: Some(true),
+        counts: Some(false),
+    }
+}
+
+/// Lists the person's recorded presented views across every context of
+/// theirs and every hub in each: a creation race can leave several
+/// contexts and several `Presented views` hubs, and a read that dropped
+/// one would drop the records it holds. Reads nothing else — no
+/// conversation, no session, no device's tab state — which is what makes
+/// the list survive a discarded tab state: the records, not the tabs, are
+/// the way back.
+pub async fn presented_views(
+    client: &TemperClient,
+    context_name: &str,
+) -> Result<PresentedList, String> {
+    let profile_id = client.profile().get().await.map_err(|e| e.to_string())?.id;
+    let mut batches = Vec::new();
+    for context_id in persons_contexts(client, context_name).await? {
+        for hub in find_hub_resources(client, context_id, PRESENTED_HUB_TITLE).await? {
+            let listed = client
+                .data_artifacts()
+                .list(hub, &pinned_list_params())
+                .await
+                .map_err(|e| e.to_string())?;
+            let artifacts: Vec<ArtifactView> = serde_json::from_value(listed)
+                .map_err(|e| format!("unexpected artifact list shape: {e}"))?;
+            batches.push(artifacts);
+        }
+    }
+    Ok(presented_list_from(batches, profile_id))
+}
+
 /// The webview's answer to a presented view: `rendered` when checkSpec
 /// passed, else `refused` with checkSpec's errors as the reasons.
 #[tauri::command]
@@ -384,6 +474,19 @@ pub async fn present_read(
     let artifact =
         Uuid::parse_str(&artifact).map_err(|e| format!("not an artifact id: {artifact} — {e}"))?;
     read_presented(&client, resource, artifact).await
+}
+
+/// The person's recorded presented views, newest first, for home's section.
+#[tauri::command]
+pub async fn present_list(
+    temper: tauri::State<'_, TemperState>,
+    settings: tauri::State<'_, SettingsState>,
+) -> Result<PresentedList, String> {
+    let client = temper
+        .client()
+        .ok_or_else(|| "temper is not connected".to_string())?;
+    let context_name = settings.get().temper_context_name().to_string();
+    presented_views(&client, &context_name).await
 }
 
 #[cfg(test)]
@@ -821,6 +924,144 @@ mod tests {
         );
     }
 
+    /// A record value the way a hub holds it: built by the pure `record_of`.
+    fn a_record_value(agent: &str, presented_at: &str) -> serde_json::Value {
+        serde_json::to_value(record_of(
+            "c1",
+            &Presentation {
+                agent: agent.to_string(),
+                spec: conforming(),
+            },
+            presented_at,
+        ))
+        .unwrap()
+    }
+
+    /// The shared builder stamps one artifact id; a listing needs each row
+    /// its own, so "every record exactly once" has something to count.
+    fn listed(id: &str, kind: &str, intent: &str, content: serde_json::Value) -> ArtifactView {
+        let mut listed = artifact(kind, intent, content);
+        listed.artifact_id = temper_core::types::ids::DataArtifactId(Uuid::parse_str(id).unwrap());
+        listed
+    }
+
+    /// The list witness, pure: records on two hub batches — the shape a
+    /// creation race leaves — plus one artifact the projection refuses.
+    /// Every well-formed record appears exactly once whichever hub holds
+    /// it, the unreadable one is counted rather than dropped silently, and
+    /// the order is newest first by each record's own `presentedAt`.
+    #[test]
+    fn the_list_reads_every_hub_s_batch_through_the_one_projection() {
+        let hub_one = vec![
+            listed(
+                "00000000-0000-0000-0000-000000000001",
+                PRESENTED_VIEW_KIND,
+                "pinned",
+                a_record_value("early", "2026-09-30T10:00:00Z"),
+            ),
+            listed(
+                "00000000-0000-0000-0000-000000000002",
+                PRESENTED_VIEW_KIND,
+                "pinned",
+                a_record_value("late", "2026-09-30T12:00:00Z"),
+            ),
+        ];
+        let hub_two = vec![
+            listed(
+                "00000000-0000-0000-0000-000000000003",
+                PRESENTED_VIEW_KIND,
+                "pinned",
+                a_record_value("middle", "2026-09-30T11:00:00Z"),
+            ),
+            // A record written around the shape — another family's artifact:
+            // refused by the projection, and counted.
+            listed(
+                "00000000-0000-0000-0000-000000000004",
+                "desktop-recent-work",
+                "pinned",
+                a_record_value("not-a-view", "2026-09-30T13:00:00Z"),
+            ),
+            // A folded record of this very family: the filter lists it, and
+            // the projection's live arm refuses it into the count.
+            {
+                let mut folded = listed(
+                    "00000000-0000-0000-0000-000000000005",
+                    PRESENTED_VIEW_KIND,
+                    "pinned",
+                    a_record_value("folded-away", "2026-09-30T09:00:00Z"),
+                );
+                folded.is_folded = true;
+                folded
+            },
+        ];
+        let list = presented_list_from(vec![hub_one, hub_two], owner());
+        assert_eq!(list.total, 3, "three admitted, from both hubs");
+        assert_eq!(list.refused, 2, "the unreadable and the folded are counted");
+        let agents: Vec<&str> = list.views.iter().map(|v| v.record.agent.as_str()).collect();
+        assert_eq!(
+            agents,
+            vec!["late", "middle", "early"],
+            "newest first, whichever hub holds it"
+        );
+        let ids: std::collections::HashSet<&str> =
+            list.views.iter().map(|v| v.artifact.as_str()).collect();
+        assert_eq!(ids.len(), 3, "every record exactly once");
+        assert!(
+            !list.views.iter().any(|v| v.record.agent == "folded-away"),
+            "a folded record is never carried"
+        );
+    }
+
+    /// The list filter lists folded records — that half of the folded
+    /// clause is the read's own: a filter that hid them would drop
+    /// superseded records before the projection could count them. Pure,
+    /// so its witness needs no server.
+    #[test]
+    fn the_filter_lists_what_the_projection_must_count() {
+        assert_eq!(
+            pinned_list_params().include_folded,
+            Some(true),
+            "folded records are listed, so the projection's live arm counts them"
+        );
+    }
+
+    /// The cap keeps the newest, and the answer names what it omits: the
+    /// full count rides beside the carried views.
+    #[test]
+    fn the_list_is_capped_to_the_newest_with_the_remainder_counted() {
+        let batch: Vec<ArtifactView> = (0..PRESENT_LIST_CAP + 5)
+            .map(|i| {
+                listed(
+                    &format!("00000000-0000-0000-0000-{i:012}"),
+                    PRESENTED_VIEW_KIND,
+                    "pinned",
+                    a_record_value("a", &format!("2026-09-{:02}T12:00:00Z", 1 + i)),
+                )
+            })
+            .collect();
+        let list = presented_list_from(vec![batch], owner());
+        assert_eq!(
+            list.total,
+            PRESENT_LIST_CAP + 5,
+            "the total counts every admitted view"
+        );
+        assert_eq!(list.views.len(), PRESENT_LIST_CAP, "the cap holds");
+        assert_eq!(
+            list.total - list.views.len(),
+            5,
+            "the remainder past the cap is named"
+        );
+        assert_eq!(
+            list.views[0].record.presented_at, "2026-09-25T12:00:00Z",
+            "the newest is kept"
+        );
+        let newest_first = list
+            .views
+            .windows(2)
+            .all(|w| w[0].record.presented_at > w[1].record.presented_at);
+        assert!(newest_first, "the carried views sort newest first");
+    }
+
     /// Live witness for the record, against the real API: one presentation
     /// is committed in the configured context, read back from temper by id,
     /// read again through a fresh connection (a closed tab reopened), and a
@@ -939,5 +1180,158 @@ mod tests {
             .delete(resource, &Default::default())
             .await
             .expect("the witness cleans up after itself");
+    }
+
+    /// Live witness for the list, against the real API: records land on two
+    /// `Presented views` hubs — the first through the ordinary record path,
+    /// the second hub created directly beside it, the shape a creation race
+    /// leaves — and the list reads all of them in `presentedAt` order; a
+    /// fresh connection (the app reopened) lists them again. The person's
+    /// own contexts and hubs are never touched: the witness works in a
+    /// context of its own name — the list scans by configured name, so a
+    /// witness under the real name would read the person's real hubs — and
+    /// deletes it afterwards. Run locally:
+    /// `cargo test -p desktop --lib -- --ignored presented_views_list_live`
+    #[tokio::test]
+    #[ignore = "requires temper credentials, network, and performs real writes"]
+    async fn presented_views_list_live() {
+        use temper_core::types::ingest::IngestPayload;
+
+        const WITNESS_CONTEXT: &str = "temper-desktop-witness";
+        let state = crate::temper::TemperState::connect();
+        let client = &*state
+            .client()
+            .expect("machine temper credentials should resolve to a client");
+        let context_id = persons_context_id(client, WITNESS_CONTEXT)
+            .await
+            .expect("the witness context should resolve or be created");
+        for stale in find_hub_resources(client, context_id, PRESENTED_HUB_TITLE)
+            .await
+            .expect("witness hubs should list")
+        {
+            client
+                .resources()
+                .delete(stale, &Default::default())
+                .await
+                .expect("the witness clears its own hubs before it writes");
+        }
+
+        let presentation = Presentation {
+            agent: "witness-agent".to_string(),
+            spec: conforming(),
+        };
+        // The first record lands through the ordinary path, which creates
+        // the hub and declares the family's shape on the witness context.
+        let first = record_on(
+            client,
+            WITNESS_CONTEXT,
+            PRESENTED_HUB_TITLE,
+            "witness-conversation-1",
+            &presentation,
+        )
+        .await
+        .expect("the first record should land");
+        let hub_one = find_hub_resources(client, context_id, PRESENTED_HUB_TITLE)
+            .await
+            .expect("the hub should be findable");
+        assert_eq!(hub_one.len(), 1, "the record path created exactly one hub");
+
+        // The race: a second `Presented views` hub appears beside the
+        // first, created directly.
+        let hub_two = client
+            .ingest()
+            .create(&IngestPayload {
+                title: PRESENTED_HUB_TITLE.to_string(),
+                origin_uri: String::new(),
+                context_ref: context_id.to_string(),
+                home_cogmap_id: None,
+                doc_type_name: crate::hub::HUB_DOC_TYPE.to_string(),
+                goal: None,
+                content_hash: None,
+                idempotency_key: Some(Uuid::new_v4()),
+                content: PRESENTED_HUB_CONTENT.to_string(),
+                metadata: None,
+                managed_meta: None,
+                open_meta: None,
+                chunks_packed: None,
+                sources: Vec::new(),
+                act: Default::default(),
+                segmented: None,
+            })
+            .await
+            .expect("the second hub should be created");
+
+        // Two more records, committed straight onto the hubs with their
+        // own `presentedAt`, so the order across the two hubs is decided:
+        // the first record (recorded now) is newest, then the race hub's,
+        // then the first hub's second record.
+        let second = client
+            .data_artifacts()
+            .commit(
+                hub_two.id.0,
+                &record_request(&record_of(
+                    "witness-conversation-3",
+                    &presentation,
+                    "2026-09-30T11:00:00+00:00",
+                ))
+                .unwrap(),
+            )
+            .await
+            .expect("the race hub's record should land");
+        let third = client
+            .data_artifacts()
+            .commit(
+                hub_one[0],
+                &record_request(&record_of(
+                    "witness-conversation-2",
+                    &presentation,
+                    "2026-09-30T10:00:00+00:00",
+                ))
+                .unwrap(),
+            )
+            .await
+            .expect("the first hub's second record should land");
+
+        let list = presented_views(client, WITNESS_CONTEXT)
+            .await
+            .expect("the list should read");
+        assert_eq!(list.views.len(), 3, "all three records, across both hubs");
+        assert_eq!(list.refused, 0);
+        assert_eq!(list.total, 3);
+        assert_eq!(list.views[0].artifact, first.artifact, "the newest first");
+        assert_eq!(
+            list.views[1].artifact,
+            second.artifact_id.to_string(),
+            "the race hub's record is listed"
+        );
+        assert_eq!(
+            list.views[2].artifact,
+            third.artifact_id.to_string(),
+            "the first hub's second record is listed"
+        );
+
+        // Closed and reopened: a fresh connection lists the same records.
+        let reopened_state = crate::temper::TemperState::connect();
+        let reopened = presented_views(&reopened_state.client().unwrap(), WITNESS_CONTEXT)
+            .await
+            .expect("the list reads again after reopening");
+        assert_eq!(reopened, list);
+
+        // The witness cleans up after itself: its hubs, then its context.
+        for hub in find_hub_resources(client, context_id, PRESENTED_HUB_TITLE)
+            .await
+            .expect("witness hubs should list")
+        {
+            client
+                .resources()
+                .delete(hub, &Default::default())
+                .await
+                .expect("the witness cleans up its hubs");
+        }
+        client
+            .contexts()
+            .delete(context_id)
+            .await
+            .expect("the witness cleans up its context");
     }
 }
