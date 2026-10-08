@@ -20,7 +20,7 @@ vi.mock('$lib/refs', () => ({
 }));
 
 import { invoke } from '@tauri-apps/api/core';
-import { render } from '@testing-library/svelte';
+import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CORE_DOC_TYPE_BINDINGS, core } from '../contributions/core';
 
@@ -58,6 +58,53 @@ const answer = {
 			decoratedRef: ID
 		}
 	]
+};
+
+/** A filled Table whose facets offer: two type values and one stage value, all filterable. */
+const tableAnswer = {
+	spec: {
+		root: 't',
+		elements: {
+			t: {
+				type: 'Table',
+				props: {
+					total: 3,
+					scope: 'resources',
+					label: 'resources',
+					state: 'present',
+					columns: [{ key: 'title', header: 'Title', kind: 'text' }],
+					rows: [{ title: 'drawn' }, { title: 'drawn too' }],
+					page: { offset: 0, size: 2, more: true },
+					facets: [
+						{
+							key: 'type',
+							label: 'Type',
+							counts: [
+								{ value: 'task', count: 40 },
+								{ value: 'session', count: 11 },
+								{ value: 'goal', count: 6 }
+							],
+							filterable: true
+						},
+						{
+							key: 'stage',
+							label: 'Stage',
+							counts: [{ value: 'backlog', count: 37 }],
+							filterable: true
+						},
+						{
+							key: 'status',
+							label: 'Status',
+							counts: [{ value: 'active', count: 5 }],
+							filterable: true
+						}
+					]
+				},
+				children: []
+			}
+		}
+	},
+	refs: []
 };
 
 const tab = (): TabHandle => ({ setTitle: vi.fn(), open: vi.fn(), beforeLeave: () => () => {} });
@@ -162,5 +209,101 @@ describe('the bound lens', () => {
 		await vi.waitFor(() => expect(container.querySelector('[role="alert"]')).not.toBeNull());
 		expect(container.textContent).toContain('was read, but the view made from it was refused');
 		expect(container.querySelector('.region.failed')).toBeNull();
+	});
+
+	it('a facet value narrows the ask from wherever the reader was, and choosing it again widens back', async () => {
+		vi.mocked(invoke).mockResolvedValue(tableAnswer as never);
+		const { container, getByRole } = render(BoundLens, {
+			props: props({ kind: 'query', context: CONTEXT }, decl('core/table'))
+		});
+		await vi.waitFor(() => expect(container.querySelector('.facets')).not.toBeNull());
+		// A page turn first, so the narrowing is seen to reset it.
+		await fireEvent.click(getByRole('button', { name: 'Next page' }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 2 } })
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /backlog/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { stage: 'backlog' } } })
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /backlog/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: {} } })
+			)
+		);
+	});
+
+	it('a type that is neither task nor goal drops the stage or status filter it strands', async () => {
+		vi.mocked(invoke).mockResolvedValue(tableAnswer as never);
+		const { container, getByRole } = render(BoundLens, {
+			props: props({ kind: 'query', context: CONTEXT }, decl('core/table'))
+		});
+		await vi.waitFor(() => expect(container.querySelector('.facets')).not.toBeNull());
+		await fireEvent.click(getByRole('button', { name: /^task/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'task' } } })
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /backlog/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({
+					view: { offset: 0, filters: { docType: 'task', stage: 'backlog' } }
+				})
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /^session/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'session' } } })
+			)
+		);
+		// The other arm: a goal keeps a status filter and drops a stage one;
+		// a type that is neither drops both.
+		await fireEvent.click(getByRole('button', { name: /^task/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'task' } } })
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /^active/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({
+					view: { offset: 0, filters: { docType: 'task', status: 'active' } }
+				})
+			)
+		);
+		await fireEvent.click(getByRole('button', { name: /^goal/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({
+					view: { offset: 0, filters: { docType: 'goal', status: 'active' } }
+				})
+			)
+		);
+		// A type that is neither drops what remains.
+		await fireEvent.click(getByRole('button', { name: /^session/ }));
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenLastCalledWith(
+				'lens_resolve',
+				expect.objectContaining({ view: { offset: 0, filters: { docType: 'session' } } })
+			)
+		);
 	});
 });

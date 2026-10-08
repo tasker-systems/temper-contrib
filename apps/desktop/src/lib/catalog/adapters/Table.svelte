@@ -4,10 +4,10 @@
 	import Table, { type Sort } from '$lib/components/view/Table.svelte';
 	import { getViewActions } from '../view-actions';
 
-	type Props = Omit<ComponentProps<typeof Table>, 'onpage' | 'onsort'>;
+	type Props = Omit<ComponentProps<typeof Table>, 'onpage' | 'onsort' | 'onfilter'>;
 	let { props }: BaseComponentProps<Props> = $props();
 
-	// Paging and sorting are the host's: offered only when it handles them.
+	// Paging, sorting and narrowing are the host's: offered only when it handles them.
 	const actions = getViewActions();
 	const onpage = $derived(
 		actions.handles('Table', 'page')
@@ -19,6 +19,11 @@
 			? (sort: Sort) => actions.act('Table', 'sort', sort)
 			: undefined
 	);
+	const onfilter = $derived(
+		actions.handles('Table', 'filter')
+			? (key: string, value: string) => actions.act('Table', 'filter', { key, value })
+			: undefined
+	);
 </script>
 
-<Table {...props} {onpage} {onsort} />
+<Table {...props} {onpage} {onsort} {onfilter} />

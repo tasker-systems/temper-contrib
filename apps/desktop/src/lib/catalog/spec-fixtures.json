@@ -8466,6 +8466,157 @@
 					}
 				}
 			}
+		},
+		{
+			"name": "a facet naming its narrowing, its unlisted, and a value in force at zero",
+			"ok": true,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 3,
+							"scope": "resources here",
+							"label": "resources",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								}
+							],
+							"rows": [
+								{
+									"title": "a"
+								}
+							],
+							"facets": [
+								{
+									"key": "stage",
+									"label": "Stage",
+									"counts": [
+										{
+											"value": "backlog",
+											"count": 2
+										},
+										{
+											"value": "done",
+											"count": 0
+										}
+									],
+									"active": "backlog",
+									"unlisted": 1,
+									"filterable": true
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a facet carrying a key the catalog does not declare",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 3,
+							"scope": "resources here",
+							"label": "resources",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								}
+							],
+							"rows": [
+								{
+									"title": "a"
+								}
+							],
+							"facets": [
+								{
+									"key": "stage",
+									"label": "Stage",
+									"counts": [
+										{
+											"value": "backlog",
+											"count": 2
+										},
+										{
+											"value": "done",
+											"count": 0
+										}
+									],
+									"active": "backlog",
+									"unlisted": 1,
+									"filterable": true,
+									"colour": "red"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
+		},
+		{
+			"name": "a facet offering with something that is not a yes-or-no",
+			"ok": false,
+			"spec": {
+				"root": "a",
+				"elements": {
+					"a": {
+						"type": "Table",
+						"props": {
+							"total": 3,
+							"scope": "resources here",
+							"label": "resources",
+							"state": "present",
+							"columns": [
+								{
+									"key": "title",
+									"header": "Title",
+									"kind": "text"
+								}
+							],
+							"rows": [
+								{
+									"title": "a"
+								}
+							],
+							"facets": [
+								{
+									"key": "stage",
+									"label": "Stage",
+									"counts": [
+										{
+											"value": "backlog",
+											"count": 2
+										},
+										{
+											"value": "done",
+											"count": 0
+										}
+									],
+									"active": "backlog",
+									"unlisted": 1,
+									"filterable": "yes"
+								}
+							]
+						},
+						"children": []
+					}
+				}
+			}
 		}
 	]
 }

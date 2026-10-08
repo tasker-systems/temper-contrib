@@ -214,7 +214,7 @@
       ]
     },
     "Table": {
-      "description": "Rows under typed columns, with what they omit. `total` is every row the table stands for; `rows` are those shown, each keyed by column. A `category` column tints its values through `tints` (value → cat-N); a `list` cell is a few short values. `page` says which rows of the total these are and whether more follow; `sort` names the order they are in; `facets` count the whole listing by a field, not only this page. The omission sentence is composed; do not word it yourself.",
+      "description": "Rows under typed columns, with what they omit. `total` is every row the table stands for; `rows` are those shown, each keyed by column. A `category` column tints its values through `tints` (value → cat-N); a `list` cell is a few short values. `page` says which rows of the total these are and whether more follow; `sort` names the order they are in; `facets` count the whole listing by a field, not only this page, and a `filterable` facet's values narrow it when the host handles it. The omission sentence is composed; do not word it yourself.",
       "slots": [],
       "actions": {
         "page": {
@@ -235,6 +235,18 @@
             "properties": {
               "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
               "order": { "enum": ["asc", "desc"] }
+            }
+          }
+        },
+        "filter": {
+          "description": "Narrow the listing to a facet's value; choosing the value already in force clears the narrowing. A view action the host handles, never a write; without a host handler, and on a facet not marked `filterable`, no value is a control.",
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
+              "value": { "type": "string", "minLength": 1, "maxLength": 60 }
             }
           }
         }
@@ -270,7 +282,8 @@
               { "value": "complete", "count": 5 }
             ],
             "active": "draft",
-            "unlisted": 1
+            "unlisted": 1,
+            "filterable": true
           }
         ],
         "fieldsNotShown": 2
@@ -350,6 +363,7 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["key", "label", "counts"],
+              "description": "One field's counts across the whole listing, most-counted first; `active` names the narrowing in force, `filterable` whether its values narrow when the host handles it.",
               "properties": {
                 "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9_]{0,31}$" },
                 "label": { "type": "string", "minLength": 1, "maxLength": 40 },
@@ -366,8 +380,9 @@
                     }
                   }
                 },
-                "active": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The value the listing is narrowed to, when it is." },
-                "unlisted": { "type": "integer", "minimum": 0, "description": "How many values are not listed in `counts`." }
+                "active": { "type": "string", "minLength": 1, "maxLength": 60, "description": "The value the listing is narrowed to, when it is. A value in force with no rows under the other filters is still carried, at count 0 — the control that widens back." },
+                "unlisted": { "type": "integer", "minimum": 0, "description": "How many values are not listed in `counts`." },
+                "filterable": { "type": "boolean", "description": "Whether the facet's values narrow the listing when the host handles it. A facet not marked filterable counts; it does not offer." }
               }
             }
           },
