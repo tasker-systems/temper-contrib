@@ -14,6 +14,7 @@
 		counts: { value: string; count: number }[];
 		active?: string;
 		unlisted?: number;
+		filterable?: boolean;
 	};
 </script>
 
@@ -28,7 +29,9 @@
 	 * A table that is one page of its total says which rows it shows and what lies either side
 	 * (`page`); the active order is marked on its column (`sort`); facets count the whole listing
 	 * by a field. Paging and sorting are offered only when the host handles them (`onpage`,
-	 * `onsort`): a control that does nothing would overstate itself.
+	 * `onsort`), and so is narrowing: a `filterable` facet's values are controls only when the
+	 * host handles them (`onfilter`) — the value in force is marked, and choosing it again widens
+	 * back. A control that does nothing would overstate itself.
 	 */
 	import Bounded from '../Bounded.svelte';
 	import type { Page } from '../omission';
@@ -48,7 +51,8 @@
 		facets = [],
 		fieldsNotShown = 0,
 		onpage,
-		onsort
+		onsort,
+		onfilter
 	}: {
 		total: number;
 		scope: string;
@@ -62,6 +66,7 @@
 		fieldsNotShown?: number;
 		onpage?: (offset: number) => void;
 		onsort?: (sort: Sort) => void;
+		onfilter?: (key: string, value: string) => void;
 	} = $props();
 
 	const RESOURCE =
@@ -98,14 +103,25 @@
 	{#if facets.length}
 		<dl class="facets" aria-label={`${label}, counted across the listing`}>
 			{#each facets as facet (facet.key)}
+				{@const narrow = onfilter && facet.filterable}
 				<div class="facet">
 					<dt class="t-label">{facet.label}</dt>
 					<dd>
 						{#each facet.counts as c, i (i)}
-							{#if i > 0}<span class="sep" aria-hidden="true">·</span>{/if}
-							<span class="count" aria-current={facet.active === c.value ? 'true' : undefined}
-								>{c.value} <span class="n">{c.count.toLocaleString()}</span></span
-							>
+							{#if i > 0 && !narrow}<span class="sep" aria-hidden="true">·</span>{/if}
+							{#if narrow}
+								<button
+									class="count"
+									aria-pressed={facet.active === c.value ? 'true' : 'false'}
+									onclick={() => onfilter?.(facet.key, c.value)}
+								>
+									{c.value} <span class="n">{c.count.toLocaleString()}</span>
+								</button>
+							{:else}
+								<span class="count" aria-current={facet.active === c.value ? 'true' : undefined}
+									>{c.value} <span class="n">{c.count.toLocaleString()}</span></span
+								>
+							{/if}
 						{/each}
 						{#if facet.unlisted}
 							<span class="sep" aria-hidden="true">·</span>
@@ -276,6 +292,25 @@
 	.count[aria-current] {
 		color: var(--tp-text);
 		font-weight: 600;
+	}
+	button.count {
+		padding: 0;
+		border: 0;
+		background: none;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+	.facet button.count:not(:first-child) {
+		margin-left: 0.5rem;
+	}
+	.count[aria-pressed='true'] {
+		color: var(--tp-text);
+		font-weight: 600;
+	}
+	.count[aria-pressed='false']:hover,
+	.count[aria-pressed='false']:focus-visible {
+		color: var(--tp-accent);
 	}
 	.n {
 		color: var(--tp-text-subtle);

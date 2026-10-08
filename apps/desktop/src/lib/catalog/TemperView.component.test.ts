@@ -74,6 +74,7 @@ describe('the first-wave components through TemperView', () => {
 			]
 		};
 		const { container } = render(TemperView, { spec: one('Table', props) });
+		console.log('DBG: ' + container.querySelector('[role="alert"]')?.textContent);
 		expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
 		expect(container.querySelectorAll('.facets .count')).toHaveLength(2);
 	});
@@ -82,6 +83,40 @@ describe('the first-wave components through TemperView', () => {
 		const bare = render(TemperView, { spec: one('Table', example('Table')) });
 		expect(bare.container.querySelector('th button')).toBeNull();
 		expect(bare.container.querySelector('nav')).toBeNull();
+		// A filterable facet's values are controls only when the host handles
+		// the filter — a table nobody can narrow draws none.
+		expect(bare.container.querySelector('.facets button')).toBeNull();
+	});
+
+	it('narrows by a facet value only when the host handles it and the facet offers', async () => {
+		const filter = vi.fn();
+		const props = {
+			...example('Table'),
+			facets: [
+				// The example's facet, filterable; and one that counts without offering.
+				...(example('Table').facets as Record<string, unknown>[]),
+				{
+					key: 'mood',
+					label: 'Mood',
+					counts: [{ value: 'calm', count: 4 }]
+				}
+			]
+		};
+		const hosted = render(TemperView, {
+			spec: one('Table', props),
+			actions: { 'Table.filter': filter }
+		});
+		const buttons = [...hosted.container.querySelectorAll('.facets button')];
+		// The filterable facet's values are controls; the unmarked facet's are not.
+		expect(buttons.map((b) => b.textContent?.trim())).toEqual(['draft 7', 'complete 5']);
+		expect(hosted.container.textContent).toContain('calm 4');
+		// The value in force is marked; choosing it again is the host's way back.
+		const active = buttons.find((b) => b.getAttribute('aria-pressed') === 'true');
+		expect(active?.textContent?.trim()).toBe('draft 7');
+		await fireEvent.click(buttons[1]);
+		expect(filter).toHaveBeenCalledWith({ key: 'status', value: 'complete' });
+		await fireEvent.click(active!);
+		expect(filter).toHaveBeenLastCalledWith({ key: 'status', value: 'draft' });
 	});
 
 	it('routes a page or a sort to the host, with the params the catalog declares', async () => {
@@ -109,9 +144,9 @@ describe('the first-wave components through TemperView', () => {
 		expect(() =>
 			render(TemperView, {
 				spec: one('Table', example('Table')),
-				actions: { 'Table.filter': () => {} }
+				actions: { 'Table.discard': () => {} }
 			})
-		).toThrow(/does not declare: Table.filter/);
+		).toThrow(/does not declare: Table.discard/);
 	});
 
 	it('draws a timeline in order, and a table not present as its state', () => {

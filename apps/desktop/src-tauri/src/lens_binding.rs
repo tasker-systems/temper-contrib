@@ -58,13 +58,29 @@ pub enum LensSubject {
     Neighbourhood { id: String, depth: i32 },
 }
 
-/// Where the reader is in the listing: the page, and the order asked for.
+/// Where the reader is in the listing: the page, the order asked for, and the
+/// facet values the reader narrowed to.
 #[derive(Debug, Default, Deserialize)]
 pub struct ViewState {
     #[serde(default)]
     pub offset: i64,
     pub size: Option<i64>,
     pub sort: Option<Sort>,
+    #[serde(default)]
+    pub filters: Filters,
+}
+
+/// The reader's narrowing, one value per facet — the value already in force
+/// asked again meaning "widen back". A lens that is *of* a doc type is never
+/// widened past its subject, so a type filter on a typed subject is refused
+/// rather than composed to nothing; there the type facet counts and does not
+/// offer.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filters {
+    pub doc_type: Option<String>,
+    pub stage: Option<String>,
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -135,7 +151,10 @@ fn given(v: &Option<String>) -> Option<String> {
 }
 
 /// The read a listing subject and view state ask for. A sort the listing
-/// cannot order by is refused rather than quietly replaced.
+/// cannot order by is refused rather than quietly replaced, and so is a type
+/// filter on a subject that already names one: the reader narrows the subject,
+/// never widens past it, and a filter silently voided by the subject would
+/// strand the control that set it.
 pub fn listing_params(
     subject: &ListingSubject,
     view: &ViewState,
@@ -143,10 +162,18 @@ pub fn listing_params(
     let sort = view.sort.clone().unwrap_or_else(default_sort);
     let field = sort_field(&sort.key)
         .ok_or_else(|| format!("the listing cannot be ordered by {}", sort.key))?;
+    let filters = &view.filters;
+    if given(&filters.doc_type).is_some() && given(&subject.doc_type).is_some() {
+        return Err(
+            "the listing is already of a doc type, and is not widened past its subject".to_string(),
+        );
+    }
     Ok(ResourceListParams {
         context_ref: given(&subject.context),
-        doc_type_name: given(&subject.doc_type),
+        doc_type_name: given(&subject.doc_type).or_else(|| given(&filters.doc_type)),
         q: given(&subject.text),
+        stage: given(&filters.stage),
+        status: given(&filters.status),
         sort: Some(field),
         order: Some(match sort.order {
             Order::Asc => SortOrder::Asc,
@@ -208,6 +235,8 @@ struct Facet {
     active: Option<String>,
     #[serde(skip_serializing_if = "is_zero")]
     unlisted: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    filterable: bool,
 }
 
 fn is_zero(n: &usize) -> bool {
@@ -313,41 +342,73 @@ fn field_cell(kind: &Kind, v: &Value) -> Option<Cell> {
 
 /// One field's counts over the listing, most first (ties by value). A blank
 /// value is not one a reader could pick out, so it is counted as unlisted.
+///
+/// `active` names the narrowing in force and `filterable` whether its values
+/// narrow — the type facet offers only when the subject names no doc type
+/// itself, so a lens is never widened past what it is of. A value in force
+/// with no histogram entry is carried at count 0: the way back out must render
+/// even when the narrowing admits nothing. A value the cut would drop is kept
+/// when it is the one in force, and what fell off is counted, not unsaid.
 fn facet(
     key: &'static str,
     label: &'static str,
     counts: &HashMap<String, i64>,
     active: Option<String>,
+    filterable: bool,
 ) -> Option<Facet> {
-    if counts.is_empty() {
+    let active_value = active.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let injected = active_value
+        .filter(|a| !counts.contains_key(*a))
+        .map(|a| (a.to_string(), 0i64));
+    if counts.is_empty() && injected.is_none() {
         return None;
     }
-    let mut all: Vec<(&String, &i64)> = counts
+    let mut all: Vec<(String, i64)> = counts
         .iter()
         .filter(|(v, _)| !v.trim().is_empty())
+        .map(|(v, c)| (v.clone(), *c))
         .collect();
-    all.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-    let unlisted = counts.len() - all.len().min(FACET_VALUES_MAX);
+    if let Some(pair) = &injected {
+        all.push(pair.clone());
+    }
+    all.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut kept: Vec<(String, i64)> = all.into_iter().take(FACET_VALUES_MAX).collect();
+    if let Some(a) = active_value {
+        if !kept.iter().any(|(v, _)| v == a) {
+            // The value in force fell past the cut: it keeps the last slot,
+            // and what it displaced is counted, not unsaid.
+            kept.pop();
+            kept.push((a.to_string(), counts.get(a).copied().unwrap_or(0)));
+            kept.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        }
+    }
+    let unlisted = counts.len().saturating_sub(
+        kept.iter()
+            .filter(|(v, _)| counts.contains_key(v.as_str()))
+            .count(),
+    );
     Some(Facet {
         key,
         label,
-        counts: all
+        counts: kept
             .into_iter()
-            .take(FACET_VALUES_MAX)
             .map(|(value, count)| FacetCount {
-                value: clip(value, LIST_ITEM_MAX),
-                count: *count,
+                value: clip(&value, LIST_ITEM_MAX),
+                count,
             })
             .collect(),
         active: active.map(|a| clip(&a, LIST_ITEM_MAX)),
         unlisted,
+        filterable,
     })
 }
 
-/// What the listing is of, in words: what `total` counts.
-fn scope_words(subject: &ListingSubject) -> String {
+/// What the listing is of, in words: what `total` counts. The narrowing in
+/// force is said here — in the scope and so in the omission sentence — never
+/// only by a highlighted value.
+fn scope_words(subject: &ListingSubject, filters: &Filters) -> String {
     let mut words = vec!["resources".to_string()];
-    if let Some(t) = given(&subject.doc_type) {
+    if let Some(t) = given(&subject.doc_type).or_else(|| given(&filters.doc_type)) {
         words.push(format!("of type {t}"));
     }
     if let Some(c) = given(&subject.context) {
@@ -355,6 +416,12 @@ fn scope_words(subject: &ListingSubject) -> String {
     }
     if let Some(q) = given(&subject.text) {
         words.push(format!("matching “{q}”"));
+    }
+    if let Some(s) = given(&filters.stage) {
+        words.push(format!("of stage {s}"));
+    }
+    if let Some(s) = given(&filters.status) {
+        words.push(format!("with status {s}"));
     }
     clip(&words.join(" "), SCOPE_MAX)
 }
@@ -380,6 +447,10 @@ pub fn table_props(
     let sorted_by = |key: &str| sort.key == key;
     let one_context = given(&subject.context).is_some() && !sorted_by("context");
     let one_type = given(&subject.doc_type).is_some() && !sorted_by("type");
+    let filters = &view.filters;
+    // The type the listing is of: the subject's own, or the reader's narrowing
+    // — never both, `listing_params` refuses that composition.
+    let effective_type = given(&subject.doc_type).or_else(|| given(&filters.doc_type));
 
     let mut columns = vec![Column {
         key: "title".into(),
@@ -472,11 +543,20 @@ pub fn table_props(
             // and the link resolves its title and address from temper either way.
             row.insert("title".to_string(), Cell::Text(r.id.0.to_string()));
             if !one_context {
-                let home = r
-                    .context_ref
-                    .clone()
-                    .or_else(|| r.cogmap_name.clone())
-                    .or_else(|| r.context_name.clone());
+                let home = if sorted_by("context") {
+                    // The order runs on the context's name; the cell shows what
+                    // the rows are ordered by, so a mixed-owner listing reads
+                    // as ordered. Otherwise the owner-qualified ref.
+                    r.context_name
+                        .clone()
+                        .or_else(|| r.context_ref.clone())
+                        .or_else(|| r.cogmap_name.clone())
+                } else {
+                    r.context_ref
+                        .clone()
+                        .or_else(|| r.cogmap_name.clone())
+                        .or_else(|| r.context_name.clone())
+                };
                 if let Some(home) = home {
                     row.insert("context".into(), Cell::Text(clip(&home, CELL_MAX)));
                 }
@@ -520,7 +600,7 @@ pub fn table_props(
 
     let props = TableProps {
         total: answer.total,
-        scope: scope_words(subject),
+        scope: scope_words(subject, filters),
         label: clip(
             given(&subject.doc_type).as_deref().unwrap_or("resources"),
             LABEL_MAX,
@@ -535,14 +615,29 @@ pub fn table_props(
         },
         sort,
         facets: [
+            // The type facet offers only when the subject names no doc type —
+            // a lens is never widened past what it is of.
             facet(
                 "type",
                 "Type",
                 &answer.facets.doc_type,
-                given(&subject.doc_type),
+                effective_type.clone(),
+                given(&subject.doc_type).is_none(),
             ),
-            facet("stage", "Stage", &answer.facets.stage, None),
-            facet("status", "Status", &answer.facets.status, None),
+            facet(
+                "stage",
+                "Stage",
+                &answer.facets.stage,
+                given(&filters.stage),
+                true,
+            ),
+            facet(
+                "status",
+                "Status",
+                &answer.facets.status,
+                given(&filters.status),
+                true,
+            ),
         ]
         .into_iter()
         .flatten()
@@ -1403,12 +1498,174 @@ mod tests {
                 key: "title".into(),
                 order: Order::Asc,
             }),
+            filters: Filters::default(),
         };
         let params = listing_params(&context_subject(), &ok).unwrap();
         assert_eq!(params.limit, Some(PAGE_MAX));
         assert_eq!(params.offset, Some(50));
         assert!(matches!(params.sort, Some(ResourceSortField::Title)));
         assert!(matches!(params.order, Some(SortOrder::Asc)));
+    }
+
+    #[test]
+    fn a_filter_narrows_the_listing_and_a_type_filter_on_a_typed_subject_is_refused() {
+        let view = ViewState {
+            filters: Filters {
+                doc_type: Some("session".into()),
+                stage: Some("backlog".into()),
+                status: Some("active".into()),
+            },
+            ..Default::default()
+        };
+        let params = listing_params(&ListingSubject::default(), &view).unwrap();
+        assert_eq!(params.doc_type_name.as_deref(), Some("session"));
+        assert_eq!(params.stage.as_deref(), Some("backlog"));
+        assert_eq!(params.status.as_deref(), Some("active"));
+        let typed = ListingSubject {
+            doc_type: Some("task".into()),
+            ..Default::default()
+        };
+        assert!(listing_params(&typed, &view).is_err());
+    }
+
+    #[test]
+    fn the_narrowing_in_force_is_said_in_the_scope() {
+        let view = ViewState {
+            filters: Filters {
+                stage: Some("backlog".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let props = table_props(
+            &answer(tasks(1), 1, 0, 50),
+            &ListingSubject::default(),
+            &view,
+        );
+        assert_eq!(props["scope"], "resources of stage backlog");
+        let view = ViewState {
+            filters: Filters {
+                status: Some("active".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let props = table_props(&answer(tasks(1), 1, 0, 50), &context_subject(), &view);
+        assert_eq!(
+            props["scope"],
+            "resources of type task in +temper-dev/contrib with status active"
+        );
+    }
+
+    #[test]
+    fn a_facets_active_is_the_filter_in_force_and_the_type_facet_offers_only_on_a_typeless_subject()
+    {
+        let view = ViewState {
+            filters: Filters {
+                stage: Some("backlog".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let props = table_props(
+            &answer(tasks(1), 51, 0, 50),
+            &ListingSubject::default(),
+            &view,
+        );
+        let facets = props["facets"].as_array().unwrap();
+        let stage = facets.iter().find(|f| f["key"] == "stage").unwrap();
+        assert_eq!(stage["active"], "backlog");
+        assert_eq!(stage["filterable"], true);
+        let typ = facets.iter().find(|f| f["key"] == "type").unwrap();
+        assert!(typ.get("active").is_none());
+        assert_eq!(typ["filterable"], true);
+        // A typed subject: the type facet counts and does not offer.
+        let props = table_props(
+            &answer(tasks(1), 51, 0, 50),
+            &context_subject(),
+            &ViewState::default(),
+        );
+        let facets = props["facets"].as_array().unwrap();
+        let typ = facets.iter().find(|f| f["key"] == "type").unwrap();
+        assert_eq!(typ["active"], "task");
+        assert!(typ.get("filterable").is_none());
+        let stage = facets.iter().find(|f| f["key"] == "stage").unwrap();
+        assert_eq!(stage["filterable"], true);
+    }
+
+    #[test]
+    fn a_value_in_force_with_no_rows_is_carried_at_zero() {
+        // The narrowing admits nothing: the histogram is empty, and the way
+        // back out is the value in force, carried at 0.
+        let view = ViewState {
+            filters: Filters {
+                stage: Some("done".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut a = answer(tasks(1), 1, 0, 50);
+        a.facets.stage = HashMap::new();
+        let props = table_props(&a, &ListingSubject::default(), &view);
+        let stage = props["facets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["key"] == "stage")
+            .unwrap();
+        assert_eq!(stage["counts"], json!([{ "value": "done", "count": 0 }]));
+        fill(&spec(), &binding(), props).expect("passes");
+        // And when the cut would drop the value in force, it is kept and what
+        // fell off is counted.
+        let mut a = answer(tasks(1), 1, 0, 50);
+        a.facets.stage = (0..30).map(|i| (format!("s{i:02}"), 1)).collect();
+        let props = table_props(&a, &ListingSubject::default(), &view);
+        let stage = props["facets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["key"] == "stage")
+            .unwrap();
+        let counts = stage["counts"].as_array().unwrap();
+        assert_eq!(counts.len(), 24);
+        assert_eq!(
+            counts.last().unwrap(),
+            &json!({ "value": "done", "count": 0 })
+        );
+        // 23 of the 30 counted values are shown (the kept slot carries the
+        // value in force), so 7 are named as unlisted.
+        assert_eq!(stage["unlisted"], 7);
+        fill(&spec(), &binding(), props).expect("passes");
+    }
+
+    #[test]
+    fn a_mixed_listing_sorted_by_context_shows_what_the_order_runs_on() {
+        let mut r1 = row(1, "task", json!({}), json!({}));
+        r1["context_name"] = json!("alpha");
+        r1["context_ref"] = json!("+team/alpha");
+        let mut r2 = row(2, "task", json!({}), json!({}));
+        r2["context_name"] = json!("beta");
+        r2["context_ref"] = json!("@me/beta");
+        let view = ViewState {
+            sort: Some(Sort {
+                key: "context".into(),
+                order: Order::Asc,
+            }),
+            ..Default::default()
+        };
+        let props = table_props(
+            &answer(vec![r1.clone(), r2.clone()], 2, 0, 50),
+            &ListingSubject::default(),
+            &view,
+        );
+        assert_eq!(props["rows"][0]["context"], "alpha");
+        assert_eq!(props["rows"][1]["context"], "beta");
+        let props = table_props(
+            &answer(vec![r1, r2], 2, 0, 50),
+            &ListingSubject::default(),
+            &ViewState::default(),
+        );
+        assert_eq!(props["rows"][0]["context"], "+team/alpha");
     }
 
     #[test]
@@ -2144,6 +2401,18 @@ mod tests {
                     ..Default::default()
                 },
             ),
+            // The reader's narrowing: the context's backlog, from the answer's
+            // own facet — and the type facet of a type-less subject offering.
+            (
+                None,
+                ViewState {
+                    filters: Filters {
+                        stage: Some("backlog".into()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            ),
         ];
         for (doc_type, view) in cases {
             let subject = ListingSubject {
@@ -2160,12 +2429,28 @@ mod tests {
             assert_eq!(props["page"]["more"], answer.truncated);
             assert_eq!(props["page"]["offset"], view.offset);
             assert_eq!(props["total"], answer.total);
+            // The narrowing is said, never only marked: the scope carries the
+            // stage in force, and the facet names it active.
+            if view.filters.stage.is_some() {
+                assert!(props["scope"]
+                    .as_str()
+                    .unwrap()
+                    .contains("of stage backlog"));
+                let stage = props["facets"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|f| f["key"] == "stage")
+                    .expect("a narrowed listing still counts its facet");
+                assert_eq!(stage["active"], "backlog");
+                assert_eq!(stage["filterable"], true);
+            }
             if let Ok(dir) = std::env::var("WITNESS_DUMP") {
-                let name = format!(
-                    "{dir}/props-{}-{}.json",
-                    doc_type.unwrap_or("all"),
-                    view.offset
-                );
+                let mut name = format!("{dir}/props-{}-{}", doc_type.unwrap_or("all"), view.offset);
+                if let Some(stage) = &view.filters.stage {
+                    name.push_str(&format!("-stage-{stage}"));
+                }
+                name.push_str(".json");
                 std::fs::write(name, serde_json::to_string_pretty(&props).unwrap()).unwrap();
             }
             let filled = fill(&spec(), &binding(), props).unwrap_or_else(|e| panic!("{e}"));

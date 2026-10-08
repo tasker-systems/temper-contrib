@@ -24,7 +24,9 @@
 	import type { LensProps } from '../lenses';
 
 	type Sort = { key: string; order: 'asc' | 'desc' };
-	type View = { offset: number; sort?: Sort };
+	/** The reader's narrowing, one value per facet; the value in force again widens back. */
+	type Filters = { docType?: string; stage?: string; status?: string };
+	type View = { offset: number; sort?: Sort; filters?: Filters };
 	/** The subject the core is asked for, as the binding read names it. */
 	type Ask = { kind: 'query'; context?: string; docType?: string; text?: string } | {
 		kind: 'neighbourhood';
@@ -77,7 +79,7 @@
 
 	$effect(() => {
 		if (!bound || !ask) return;
-		const asked = { offset: view.offset, sort: view.sort };
+		const asked = { offset: view.offset, sort: view.sort, filters: view.filters };
 		void attempt;
 		let gone = false;
 		busy = true;
@@ -112,7 +114,28 @@
 			view = { ...view, offset: params.offset as number };
 		},
 		'Table.sort': (params) => {
-			view = { offset: 0, sort: params as Sort };
+			view = { offset: 0, sort: params as Sort, filters: view.filters };
+		},
+		'Table.filter': (params) => {
+			const field =
+				params.key === 'type' ? 'docType' : (params.key as keyof Filters);
+			if (field !== 'docType' && field !== 'stage' && field !== 'status') return;
+			const value = params.value as string;
+			const filters = { ...(view.filters ?? {}) };
+			if (filters[field] === value) {
+				// Choosing the value in force widens back.
+				delete filters[field];
+			} else {
+				filters[field] = value;
+				// A selection change cannot strand a filter: stage is a task's
+				// word and status a goal's, so a type that is neither drops them
+				// in the same mutation (temper-ui's kind-scoped clears).
+				if (field === 'docType') {
+					if (value !== 'task') delete filters.stage;
+					if (value !== 'goal') delete filters.status;
+				}
+			}
+			view = { offset: 0, sort: view.sort, filters };
 		}
 	};
 </script>
