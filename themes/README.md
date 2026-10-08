@@ -42,8 +42,7 @@ theme quietly growing a private name.
 | Conditions | `notice` `success` `danger` `pending` (+ `-wash` each) | attention, confirmation, destructive, awaiting-you |
 | Region states | `region-arriving` `region-empty` `region-gave-up` `region-failed` (+ `-wash` each) | the four states a read can present as |
 | Authorship | `author-human` `author-agent` | gutter and attribution marks |
-| Doc types | `doctype-research` `-task` `-session` `-concept` `-goal` `-decision` `-memory` | temper's core vocabulary |
-| Categorical | `cat-1` … `cat-8` | plugin vocabulary (see below) |
+| Categorical | `cat-1` … `cat-8` `cat-neutral` | bound vocabularies — core's doc types and plugins' (see below) |
 | Code | `code-key` `code-string` `code-number` `code-comment` | syntax highlighting |
 | Font | `reading` `doing` `ui` | serif prose, mono technical, dense UI |
 | Radius, motion, tracking | `chip` `panel` · `quick` `settle` `easing` · `label` `strip` `eyebrow` `ui` `mark` | shape and rhythm |
@@ -60,14 +59,18 @@ temper's roles apart from shadcn's names, where `accent` and `muted` mean other 
 - **The contract.** Every role present, none invented, every value `#rrggbb` or `rgba()`.
 - **Legibility floors.** Contrast is measured on the colours as they paint — alpha
   composited over `ground`, washes composited before the text on them is measured.
-  `text` 7:1; secondary and label text, the accent, doc types, conditions, region states
-  and code 4.5:1; focus rings, authorship marks and categorical slots 3:1; `text-faint`
-  2.5:1, which is why it is reserved for disabled and decorative marks and never carries
-  information. `themes.sh contrast <theme.json>` prints every pair.
-- **Distinctness.** The four region states, the eight categorical slots, the two
-  authorship marks and the conditions must stay apart (CIE76 ΔE on the painted colour).
-  Colour is only one of the channels that separates a failed read from a refused one, but
-  a theme that collapses two of them has removed a channel, and that is checkable.
+  `text` 7:1; secondary and label text, the accent, the categorical slots, conditions,
+  region states and code 4.5:1; slots 3:1 on surface; focus rings, authorship marks
+  3:1; `text-faint` 2.5:1, which is why it is reserved for disabled and decorative
+  marks and never carries information. `themes.sh contrast <theme.json>` prints every pair.
+- **Distinctness.** The four region states, the nine categorical marks (eight slots and
+  the neutral), the two authorship marks and the conditions must stay apart; and no
+  slot may read as a chrome or state role (`accent`, `author-*`, `notice`, `region-*`)
+  — a vocabulary bound to a slot that paints like the accent would dress its terms in
+  meaning they do not carry (CIE76 ΔE on the painted colour).
+  `themes.sh slots <theme.json>` prints the slot canvas. Colour is only one of the
+  channels that separates a failed read from a refused one, but a theme that collapses
+  two of them has removed a channel, and that is checkable.
 - **Generated files agree.** `theme.css` matches its `theme.json`; `contract/tailwind.css`
   covers every role in the schema.
 - **Counterparts pair.** A theme's `counterpart` exists, points back, and has the
@@ -97,18 +100,24 @@ A theme can also be applied without a build: the desktop can read a `theme.json`
 each `--tp-*` property on the root element. That is how a theme installed after the app
 was built — or one shipped by a plugin — takes effect.
 
-## Plugin vocabulary and categorical slots
+## Bound vocabularies and categorical slots
 
-Plugins never name colours. A plugin that wants its own vocabulary tinted — author-tools'
-`story`, `poem`, `journal` — binds each term to a categorical slot, and every theme
-guarantees its eight slots are legible and mutually distinct:
+Colour is bound, never named. The contract owns eight categorical slots and a neutral;
+**vocabularies own the bindings to them** — core's doc types through core's declared
+default binding, a plugin's doc types through its own definition. A doc type bound
+nowhere renders in the neutral role. Many doc types may share a slot; a binding to
+anything but a slot is refused.
 
 ```json
-{ "vocabulary": { "story": { "tint": "cat-1" }, "poem": { "tint": "cat-2" } } }
+{ "doctype": "story", "tint": "cat-1" }
 ```
 
-The binding is part of the plugin's package, so the same term keeps the same slot in every
-theme and on every surface that honours it.
+The binding is part of the vocabulary that declares the doc type — core's default for
+core's kinds, the package's entry for a plugin's — so the same term keeps the same slot
+in every theme and on every surface that honours it. Nothing in any app names a
+`doctype-*` role, because no such role exists: a view tints by **one vocabulary per
+colour channel**, so one slot never means two words in the same view. Where a hue marks
+a doc type, the doc type's word is shown beside it — hue never carries identity alone.
 
 ## Adding a theme
 
@@ -122,8 +131,8 @@ theme and on every surface that honours it.
 
 **Quiet Instrument** carries temper's visual voice to the desktop: obsidian ground,
 parchment text, one steel-blue accent; Source Serif 4 for reading, JetBrains Mono for
-doing, Inter only for dense UI. Semantic colour is a whisper — the conditions, doc types
-and categorical slots exist for meaning, not decoration. Hover shifts colour and nothing
+doing, Inter only for dense UI. Semantic colour is a whisper — the conditions and the
+categorical slots exist for meaning, not decoration. Hover shifts colour and nothing
 else; there is no bounce, no shadow, no gradient. The rail — a 2px accent-soft left
 border — is the markdown blockquote marker made structural.
 

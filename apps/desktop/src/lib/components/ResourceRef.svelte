@@ -13,6 +13,8 @@
 	 */
 	import { roomHref } from '$lib/document';
 	import { getRefResolver, type Resolution } from '$lib/refs';
+	import { shellContributions } from '$lib/shell/contributions';
+	import { docTypeTint } from '$lib/shell/contributions/bindings';
 
 	let {
 		id,
@@ -37,9 +39,9 @@
 		});
 	});
 
-	const DOC_TYPES = new Set(['research', 'task', 'session', 'concept', 'goal', 'decision', 'memory']);
-	const typeColour = (docType: string) =>
-		DOC_TYPES.has(docType) ? `var(--tp-doctype-${docType})` : 'var(--tp-text-subtle)';
+	/** The doc type's word is always the identity; its hue is only its bound slot's, or
+	 * the neutral role's — colour by binding, never a colour by name. */
+	const typeColour = (docType: string) => `var(--tp-${docTypeTint(shellContributions.enabled, docType)})`;
 </script>
 
 {#if resolution === null}

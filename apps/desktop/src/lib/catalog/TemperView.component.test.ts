@@ -198,10 +198,10 @@ describe('the graph through TemperView', () => {
 					id: 'goal',
 					label: 'Temper is worked from the desktop',
 					kind: 'goal',
-					tint: 'doctype-goal',
+					tint: 'cat-8',
 					core: true
 				},
-				{ id: 't1', label: 'Catalog: a read-only Graph', kind: 'task', tint: 'doctype-task' },
+				{ id: 't1', label: 'Catalog: a read-only Graph', kind: 'task', tint: 'cat-6' },
 				{ id: 'x1', label: 'A character sketch', kind: 'character' }
 			],
 			edges: [{ source: 't1', target: 'goal', label: 'advances' }]
@@ -296,7 +296,7 @@ describe('the graph through TemperView', () => {
 		const tints = [...container.querySelectorAll('svg .node')].map((n) =>
 			n.getAttribute('data-tint')
 		);
-		expect(tints).toContain('doctype-goal');
+		expect(tints).toContain('cat-8');
 		expect(container.querySelector('.unconnected [data-tint]')?.getAttribute('data-tint')).toBe(
 			'none'
 		);
@@ -311,8 +311,8 @@ describe('the graph through TemperView', () => {
 			e.querySelector('[data-tint]')?.getAttribute('data-tint'),
 			e.textContent?.trim()
 		]);
-		expect(entries).toContainEqual(['doctype-goal', 'goal']);
-		expect(entries).toContainEqual(['doctype-task', 'task']);
+		expect(entries).toContainEqual(['cat-8', 'goal']);
+		expect(entries).toContainEqual(['cat-6', 'task']);
 		// The unconnected character is listed, not drawn, so it is not in the drawing's legend.
 		expect(entries.map(([, k]) => k)).not.toContain('character');
 	});

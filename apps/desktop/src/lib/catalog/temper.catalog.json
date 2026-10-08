@@ -1,7 +1,7 @@
 {
   "catalog": "temper",
   "version": "1.0.0",
-  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup — colour enters only as a role: a categorical role (cat-1…cat-8), a doc-type role, or a condition. `checks` declares what JSON Schema cannot say (a count within its total, keys among columns, edges naming nodes that exist, which children a component holds); both gates read them from this file. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
+  "description": "Components a json-render spec may name in temper-desktop. Props are closed JSON Schema (draft 2020-12): a prop not listed is refused, so no spec can pass a colour, an icon, or markup — colour enters only as a role: a categorical slot (cat-1…cat-8), the neutral, or a condition. `checks` declares what JSON Schema cannot say (a count within its total, keys among columns, edges naming nodes that exist, which children a component holds); both gates read them from this file. Chrome (reach, stance, authorship, the way out) is drawn by the app and is deliberately absent.",
   "limits": {
     "maxElements": 256,
     "maxDepth": 8,
@@ -300,7 +300,7 @@
                   "type": "object",
                   "maxProperties": 8,
                   "propertyNames": { "maxLength": 40 },
-                  "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical role, cat-1…cat-8. Plugins bind their vocabulary to these; never a colour." }
+                  "additionalProperties": { "enum": ["cat-1", "cat-2", "cat-3", "cat-4", "cat-5", "cat-6", "cat-7", "cat-8"], "description": "A categorical slot, cat-1…cat-8. A category value reaches colour through the vocabulary that declares it; never a colour, never a doc type." }
                 },
                 "sortable": { "type": "boolean", "description": "Whatever answered the rows can order them by this column." }
               }
@@ -526,7 +526,7 @@
       ]
     },
     "Graph": {
-      "description": "Nodes and the edges between them, drawn read-only, with what it omits. `total` is every node the graph stands for; `nodes` are those shown. A node with no edge among those carried is listed beneath the drawing, not drawn. A node's `tint` is a doc-type role, a categorical role (cat-1…cat-8) or a condition, never a colour; a node with none is drawn neutral. `kind` is the word for what a node is (a doc type: \"task\", \"character\") and is shown beside its colour in the graph's legend, so colour never carries identity alone. A node may carry what the corpus knows of it: `corpusDegree` named beside the in-view degree, an `excerpt`, its `stage`, when it was last `updated`, and its `home` with `homeKind`. Edges join nodes by `id` and carry the relation's own terms — `edgeKind`, `polarity`, `label`, `weight` — the drawing grammar is derived from; edges between one pair share a line, and an edge joining a node to itself is stated beneath, not drawn. `arm` says where the view was read from: a walk from seeds within a depth, or an entry read anchored at nodes with a k. `bounds` is what an entry read says it drew. `cut` is what the catalog's bounds clipped off the answer, and a cut draws to the bounds. `ref` makes a node's listing a link to that resource. In a `radial` layout, `core` nodes settle at the centre. The omission sentence is composed; do not word it yourself.",
+      "description": "Nodes and the edges between them, drawn read-only, with what it omits. `total` is every node the graph stands for; `nodes` are those shown. A node with no edge among those carried is listed beneath the drawing, not drawn. A node's `tint` is a categorical slot (cat-1…cat-8), the neutral, or a condition, never a colour and never a doc type — a doc type reaches colour through its vocabulary's binding, resolved before the spec is checked; a node with none is drawn neutral. A view tints by one vocabulary per colour channel: two doc types of different vocabularies bound to one slot must not meet in one view. `kind` is the word for what a node is (a doc type: \"task\", \"character\") and is shown beside its colour in the graph's legend, so colour never carries identity alone. A node may carry what the corpus knows of it: `corpusDegree` named beside the in-view degree, an `excerpt`, its `stage`, when it was last `updated`, and its `home` with `homeKind`. Edges join nodes by `id` and carry the relation's own terms — `edgeKind`, `polarity`, `label`, `weight` — the drawing grammar is derived from; edges between one pair share a line, and an edge joining a node to itself is stated beneath, not drawn. `arm` says where the view was read from: a walk from seeds within a depth, or an entry read anchored at nodes with a k. `bounds` is what an entry read says it drew. `cut` is what the catalog's bounds clipped off the answer, and a cut draws to the bounds. `ref` makes a node's listing a link to that resource. In a `radial` layout, `core` nodes settle at the centre. The omission sentence is composed; do not word it yourself.",
       "slots": [],
       "example": {
         "total": 600,
@@ -538,11 +538,11 @@
         "bounds": { "drawn": 600, "eligible": 780, "inScope": 1200, "truncated": true },
         "cut": { "nodes": 400, "edges": 140 },
         "nodes": [
-          {"ref": "00000000-0000-4000-8000-000000000000", "id": "goal", "label": "Temper is worked from the desktop", "kind": "goal", "tint": "doctype-goal", "core": true, "corpusDegree": 641, "excerpt": "The goal every desktop slice advances.", "stage": "shipped", "updated": "2026-10-01", "home": "+temper-dev/contrib", "homeKind": "context"},
-          {"ref": "00000000-0000-4000-8000-000000000001", "id": "t1", "label": "Catalog: a read-only Graph", "kind": "task", "tint": "doctype-task", "corpusDegree": 12, "excerpt": "Graph grows to the reads' own terms.", "stage": "done", "updated": "2026-09-30", "home": "+temper-dev/contrib", "homeKind": "context"},
-          {"ref": "00000000-0000-4000-8000-000000000002", "id": "s1", "label": "Session: first wave closed", "kind": "session", "tint": "doctype-session", "corpusDegree": 3},
-          {"ref": "00000000-0000-4000-8000-000000000003", "id": "d1", "label": "Port temper-ui's layout", "kind": "decision", "tint": "doctype-decision", "corpusDegree": 2},
-          {"ref": "00000000-0000-4000-8000-000000000004", "id": "c1", "label": "Colour by binding", "kind": "concept", "tint": "doctype-concept", "corpusDegree": 1},
+          {"ref": "00000000-0000-4000-8000-000000000000", "id": "goal", "label": "Temper is worked from the desktop", "kind": "goal", "tint": "cat-8", "core": true, "corpusDegree": 641, "excerpt": "The goal every desktop slice advances.", "stage": "shipped", "updated": "2026-10-01", "home": "+temper-dev/contrib", "homeKind": "context"},
+          {"ref": "00000000-0000-4000-8000-000000000001", "id": "t1", "label": "Catalog: a read-only Graph", "kind": "task", "tint": "cat-6", "corpusDegree": 12, "excerpt": "Graph grows to the reads' own terms.", "stage": "done", "updated": "2026-09-30", "home": "+temper-dev/contrib", "homeKind": "context"},
+          {"ref": "00000000-0000-4000-8000-000000000002", "id": "s1", "label": "Session: first wave closed", "kind": "session", "tint": "cat-2", "corpusDegree": 3},
+          {"ref": "00000000-0000-4000-8000-000000000003", "id": "d1", "label": "Port temper-ui's layout", "kind": "decision", "tint": "cat-7", "corpusDegree": 2},
+          {"ref": "00000000-0000-4000-8000-000000000004", "id": "c1", "label": "Colour by binding", "kind": "concept", "tint": "cat-4", "corpusDegree": 1},
           {"ref": "00000000-0000-4000-8000-000000000005", "id": "x1", "label": "A character sketch", "kind": "character", "corpusDegree": 0},
           {"ref": "00000000-0000-4000-8000-000000000006", "id": "n0", "label": "Resource 0", "corpusDegree": 0},
           {"ref": "00000000-0000-4000-8000-000000000007", "id": "n1", "label": "Resource 1", "corpusDegree": 3},
@@ -1448,13 +1448,6 @@
                 },
                 "tint": {
                   "enum": [
-                    "doctype-research",
-                    "doctype-task",
-                    "doctype-session",
-                    "doctype-concept",
-                    "doctype-goal",
-                    "doctype-decision",
-                    "doctype-memory",
                     "cat-1",
                     "cat-2",
                     "cat-3",
@@ -1463,12 +1456,13 @@
                     "cat-6",
                     "cat-7",
                     "cat-8",
+                    "cat-neutral",
                     "notice",
                     "success",
                     "danger",
                     "pending"
                   ],
-                  "description": "A doc-type role, a categorical role (cat-1…cat-8) or a condition. Never a colour. Omitted, the node is neutral."
+                  "description": "A categorical slot (cat-1…cat-8), the neutral, or a condition. Never a colour, and never a doc type: a doc type reaches colour through its vocabulary's binding, and the core resolves it before the spec is checked. Omitted, the node is neutral."
                 },
                 "ref": {
                   "type": "string",

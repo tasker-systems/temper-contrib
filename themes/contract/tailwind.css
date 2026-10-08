@@ -42,13 +42,6 @@
   --color-tp-region-failed-wash: var(--tp-region-failed-wash);
   --color-tp-author-human: var(--tp-author-human);
   --color-tp-author-agent: var(--tp-author-agent);
-  --color-tp-doctype-research: var(--tp-doctype-research);
-  --color-tp-doctype-task: var(--tp-doctype-task);
-  --color-tp-doctype-session: var(--tp-doctype-session);
-  --color-tp-doctype-concept: var(--tp-doctype-concept);
-  --color-tp-doctype-goal: var(--tp-doctype-goal);
-  --color-tp-doctype-decision: var(--tp-doctype-decision);
-  --color-tp-doctype-memory: var(--tp-doctype-memory);
   --color-tp-cat-1: var(--tp-cat-1);
   --color-tp-cat-2: var(--tp-cat-2);
   --color-tp-cat-3: var(--tp-cat-3);
@@ -57,6 +50,7 @@
   --color-tp-cat-6: var(--tp-cat-6);
   --color-tp-cat-7: var(--tp-cat-7);
   --color-tp-cat-8: var(--tp-cat-8);
+  --color-tp-cat-neutral: var(--tp-cat-neutral);
   --color-tp-code-key: var(--tp-code-key);
   --color-tp-code-string: var(--tp-code-string);
   --color-tp-code-number: var(--tp-code-number);

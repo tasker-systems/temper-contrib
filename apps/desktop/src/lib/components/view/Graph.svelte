@@ -3,20 +3,14 @@
 	import type { GraphArm, GraphBounds, GraphCut } from '../omission';
 	import type { Tint } from './Tag.svelte';
 
-	export type DocTypeRole =
-		| 'doctype-research'
-		| 'doctype-task'
-		| 'doctype-session'
-		| 'doctype-concept'
-		| 'doctype-goal'
-		| 'doctype-decision'
-		| 'doctype-memory';
-
 	export type GraphNode = {
 		id: string;
 		label: string;
 		kind?: string;
-		tint?: DocTypeRole | Tint;
+		/** A slot, the neutral, or a condition — never a colour, never a doc type: a
+		 * doc type reaches colour through its vocabulary's binding, resolved before
+		 * the spec is checked. */
+		tint?: Tint | 'cat-neutral';
 		ref?: string;
 		core?: boolean;
 		/** The node's edge count across the whole visible corpus, named beside the in-view degree. */
@@ -343,10 +337,11 @@
 		align-items: center;
 		gap: 0.35rem;
 	}
-	/* A node's colour is its role, read from the shared tint mapping (tints.css); a node with no
-	   tint is neutral. One custom property, read by the mark and every dot. */
+	/* A node's colour is its role, read from the shared tint mapping (tints.css); a node
+	   with no tint, or a doc type bound to no slot, paints the contract's neutral role.
+	   One custom property, read by the mark and every dot. */
 	[data-tint] {
-		--node: var(--tint, var(--tp-text-subtle));
+		--node: var(--tint, var(--tp-cat-neutral));
 	}
 
 	.mark {

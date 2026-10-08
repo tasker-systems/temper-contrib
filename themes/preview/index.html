@@ -126,7 +126,7 @@
   <div class="grid" id="sw-core"></div>
   <div class="t-label" style="margin-top:1.4rem">Conditions and region states</div>
   <div class="grid" id="sw-state"></div>
-  <div class="t-label" style="margin-top:1.4rem">Temper doc types · categorical slots for plugin vocabulary</div>
+  <div class="t-label" style="margin-top:1.4rem">Categorical slots · bound vocabularies, core's doc types and plugins' alike</div>
   <div class="grid" id="sw-vocab"></div>
 
   <!-- ─────────────────────────── Chrome ─────────────────────────── -->
@@ -186,9 +186,9 @@
 
         <div class="t-label" style="margin-top:1rem">Resource refs</div>
         <div class="row">
-          <a class="ref" href="#"><span class="type" style="color:var(--tp-doctype-goal)">goal</span><span class="title">Temper is worked natively…</span></a>
-          <a class="ref" href="#"><span class="type" style="color:var(--tp-doctype-research)">research</span><span class="title">Grounding: chrome and rooms</span></a>
-          <a class="ref" href="#"><span class="type" style="color:var(--tp-doctype-decision)">decision</span><span class="title">Build rulings</span></a>
+          <a class="ref" href="#"><span class="type" style="color:var(--tp-cat-8)">goal</span><span class="title">Temper is worked natively…</span></a>
+          <a class="ref" href="#"><span class="type" style="color:var(--tp-cat-5)">research</span><span class="title">Grounding: chrome and rooms</span></a>
+          <a class="ref" href="#"><span class="type" style="color:var(--tp-cat-7)">decision</span><span class="title">Build rulings</span></a>
         </div>
 
         <div class="t-label" style="margin-top:1rem">Plugin vocabulary — author-tools, bound to slots</div>
@@ -246,7 +246,7 @@
   const groups = {
     'sw-core': ['ground','surface','surface-raised','text','text-muted','text-subtle','text-faint','rule-strong','accent','accent-muted','accent-wash','focus','author-human','author-agent'],
     'sw-state': ['notice','success','danger','pending','region-arriving','region-empty','region-gave-up','region-failed'],
-    'sw-vocab': ['doctype-research','doctype-task','doctype-session','doctype-concept','doctype-goal','doctype-decision','doctype-memory','cat-1','cat-2','cat-3','cat-4','cat-5','cat-6','cat-7','cat-8'],
+    'sw-vocab': ['cat-1','cat-2','cat-3','cat-4','cat-5','cat-6','cat-7','cat-8','cat-neutral'],
   };
   for (const [id, roles] of Object.entries(groups)) {
     const el = document.getElementById(id);

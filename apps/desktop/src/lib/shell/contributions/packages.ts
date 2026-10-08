@@ -11,6 +11,7 @@
 import type { Component } from 'svelte';
 import { z } from 'zod';
 import type { Contribution, LensDecl, LensProps, WayInDecl } from '../lenses';
+import { SLOT_TINTS } from '../lenses';
 
 /** What a package hands the loader: its name, and the raw text of each file it carries. */
 export interface PackageSource {
@@ -94,6 +95,7 @@ const wayInShape = z.union([
 
 const doctypeShape = z.strictObject({
 	doctype: z.string(),
+	tint: z.enum(SLOT_TINTS).optional(),
 	defaults: defaultsShape.optional()
 });
 
@@ -260,6 +262,7 @@ function loadPackage(
 			id: vocabulary.id,
 			doctypes: vocabulary.doctypes.map((doctype) => ({
 				doctype: doctype.doctype,
+				tint: doctype.tint,
 				defaults: doctype.defaults && resolvedDefaults()
 			}))
 		})),

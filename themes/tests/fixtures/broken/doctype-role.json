@@ -20,7 +20,7 @@
       "text-faint": "rgba(255, 255, 255, 0.30)",
       "rule": "rgba(255, 255, 255, 0.06)",
       "rule-strong": "rgba(255, 255, 255, 0.10)",
-      "accent": "steelblue",
+      "accent": "#7eb8da",
       "accent-muted": "rgba(126, 184, 218, 0.40)",
       "accent-line": "rgba(126, 184, 218, 0.50)",
       "accent-line-soft": "rgba(126, 184, 218, 0.25)",
@@ -58,7 +58,8 @@
       "code-key": "#8fd8a8",
       "code-string": "#fcd34d",
       "code-number": "#93c5fd",
-      "code-comment": "rgba(255, 255, 255, 0.45)"
+      "code-comment": "rgba(255, 255, 255, 0.45)",
+      "doctype-task": "#f0a870"
     },
     "font": {
       "reading": "\"Source Serif 4 Variable\", \"Source Serif 4\", Georgia, \"Times New Roman\", serif",
