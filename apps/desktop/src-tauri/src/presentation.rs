@@ -84,7 +84,9 @@ pub struct PresentedRecord {
     pub agent: String,
     /// The catalog the spec passed, e.g. `temper@1.0.0`.
     pub catalog_version: String,
-    /// RFC 3339, when the core recorded it.
+    /// RFC 3339, when the core recorded it — written by this family's own
+    /// commit path (`Utc::now().to_rfc3339()`), and the list orders by it
+    /// as a string.
     pub presented_at: String,
     /// The agent's spec, verbatim.
     pub spec: serde_json::Value,
@@ -333,10 +335,12 @@ pub async fn read_presented(
     presented_view_from(view, profile_id)
 }
 
-/// How many views the list carries at most. Records accumulate for good —
-/// a pinned record is never superseded — so the list is bounded; the answer
-/// carries the full count beside it, so what the bound omits is named,
-/// never dropped silently.
+/// How many views the answer carries at most. Records accumulate for good
+/// — a pinned record is never superseded — and the read beneath this cap
+/// lists every pinned record on every hub, growing with the family: the
+/// list params have no limit of their own. It is the answer that is
+/// capped, and the full count rides beside the carried views, so what the
+/// cap omits is named, never dropped silently.
 pub const PRESENT_LIST_CAP: usize = 20;
 
 /// The person's recorded presented views, as the list answers: the views
@@ -376,15 +380,17 @@ fn presented_list_from(batches: Vec<Vec<ArtifactView>>, profile_id: Uuid) -> Pre
     }
 }
 
-/// The list filter for a hub's records: this family, pinned, live — the
-/// params carry the family and the intent, which the list API admits. The
-/// projection still refuses whatever is not a record: the filter narrows
-/// the read, the projection decides it.
+/// The list filter for a hub's records: this family, pinned — with folded
+/// records listed too, so that a superseded record reaches the projection's
+/// own live arm and lands in the refused count rather than vanishing at the
+/// filter. The params carry the family and the intent, which the list API
+/// admits; the projection still refuses whatever is not a record: the
+/// filter narrows the read, the projection decides it.
 fn pinned_list_params() -> ArtifactListParams {
     ArtifactListParams {
         kind: Some(PRESENTED_VIEW_KIND.to_string()),
         intent: Some("pinned".to_string()),
-        include_folded: Some(false),
+        include_folded: Some(true),
         counts: Some(false),
     }
 }
@@ -975,10 +981,22 @@ mod tests {
                 "pinned",
                 a_record_value("not-a-view", "2026-09-30T13:00:00Z"),
             ),
+            // A folded record of this very family: the filter lists it, and
+            // the projection's live arm refuses it into the count.
+            {
+                let mut folded = listed(
+                    "00000000-0000-0000-0000-000000000005",
+                    PRESENTED_VIEW_KIND,
+                    "pinned",
+                    a_record_value("folded-away", "2026-09-30T09:00:00Z"),
+                );
+                folded.is_folded = true;
+                folded
+            },
         ];
         let list = presented_list_from(vec![hub_one, hub_two], owner());
         assert_eq!(list.total, 3, "three admitted, from both hubs");
-        assert_eq!(list.refused, 1, "the unreadable one is counted");
+        assert_eq!(list.refused, 2, "the unreadable and the folded are counted");
         let agents: Vec<&str> = list.views.iter().map(|v| v.record.agent.as_str()).collect();
         assert_eq!(
             agents,
@@ -988,6 +1006,23 @@ mod tests {
         let ids: std::collections::HashSet<&str> =
             list.views.iter().map(|v| v.artifact.as_str()).collect();
         assert_eq!(ids.len(), 3, "every record exactly once");
+        assert!(
+            !list.views.iter().any(|v| v.record.agent == "folded-away"),
+            "a folded record is never carried"
+        );
+    }
+
+    /// The list filter lists folded records — that half of the folded
+    /// clause is the read's own: a filter that hid them would drop
+    /// superseded records before the projection could count them. Pure,
+    /// so its witness needs no server.
+    #[test]
+    fn the_filter_lists_what_the_projection_must_count() {
+        assert_eq!(
+            pinned_list_params().include_folded,
+            Some(true),
+            "folded records are listed, so the projection's live arm counts them"
+        );
     }
 
     /// The cap keeps the newest, and the answer names what it omits: the

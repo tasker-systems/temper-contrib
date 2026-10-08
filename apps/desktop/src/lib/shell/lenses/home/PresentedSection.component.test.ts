@@ -16,32 +16,57 @@ const ARTIFACT = '01a0f000-0000-7000-8000-00000000000b';
 const OLDER_RESOURCE = '01a0f000-0000-7000-8000-00000000000c';
 const OLDER_ARTIFACT = '01a0f000-0000-7000-8000-00000000000d';
 
-const record = (agent: string, presentedAt: string) => ({
+/** How many views the core's answer carries at most — the section names what it omits. */
+const CARRY = 20;
+
+const record = (agent: string, presentedAt: string, type = 'RegionState') => ({
 	version: 1,
 	conversationId: 'c1',
 	agent,
 	catalogVersion: 'temper@1.0.0',
 	presentedAt,
-	spec: {
-		root: 'r',
-		elements: {
-			r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
-		}
-	},
+	spec: { root: 'r', elements: { r: { type, props: {}, children: [] } } },
 	outcome: 'rendered'
 });
 
+/** A small valid answer: the two views are all of them, nothing refused. */
 const answer = {
 	views: [
-		{ resource: RESOURCE, artifact: ARTIFACT, record: record('opencode', '2026-09-30T12:00:00Z') },
+		{
+			resource: RESOURCE,
+			artifact: ARTIFACT,
+			record: record('opencode', '2026-09-30T12:00:00Z')
+		},
 		{
 			resource: OLDER_RESOURCE,
 			artifact: OLDER_ARTIFACT,
-			record: record('witness-agent', '2026-09-30T10:00:00Z')
+			record: record('witness-agent', '2026-09-30T10:00:00Z', 'Table')
 		}
 	],
-	total: 5,
+	total: 2,
+	refused: 0
+};
+
+/** A valid answer with a record the read could not admit: admitted plus refused. */
+const withRefused = {
+	views: answer.views,
+	total: 2,
 	refused: 1
+};
+
+/** A valid answer at the carry bound: the twenty newest carried, five more on the hubs past it
+    — `views.length` is the carry, `total` counts every admitted view. */
+const atBound = {
+	views: Array.from({ length: CARRY }, (_, i) => {
+		const id = `01a0f000-0000-7000-8000-${(i + 1).toString().padStart(12, '0')}`;
+		return {
+			resource: id,
+			artifact: id,
+			record: record(`agent ${i + 1}`, `2026-09-${(10 + i).toString().padStart(2, '0')}T12:00:00Z`)
+		};
+	}),
+	total: 25,
+	refused: 0
 };
 
 const tab = (): TabHandle => ({
@@ -71,6 +96,35 @@ describe('the presented-views section', () => {
 		expect(text).toContain('witness-agent');
 	});
 
+	it('distinguishes rows by the record’s own root component type', async () => {
+		const { container } = render(PresentedSection, { props: props() });
+		await vi.waitFor(() => expect(container.querySelectorAll('.entry').length).toBe(2));
+		const chips = [...container.querySelectorAll('.entry .type')].map((el) => el.textContent);
+		expect(chips).toEqual(['RegionState', 'Table']);
+	});
+
+	it('never crashes on a degraded record — the chip falls back to the word view', async () => {
+		const degraded = {
+			views: [
+				{
+					resource: RESOURCE,
+					artifact: ARTIFACT,
+					record: {
+						...record('opencode', '2026-09-30T12:00:00Z'),
+						spec: { root: 'gone', elements: {} }
+					}
+				}
+			],
+			total: 1,
+			refused: 0
+		};
+		vi.mocked(invoke).mockResolvedValue(degraded as never);
+		const { container } = render(PresentedSection, { props: props() });
+		await vi.waitFor(() => expect(container.querySelectorAll('.entry').length).toBe(1));
+		expect(container.querySelector('.entry .type')?.textContent).toBe('view');
+		expect(container.textContent).toContain('opencode');
+	});
+
 	it('opens a row through the tabs model, as the record’s own presentation subject', async () => {
 		const spy = vi.spyOn(tabs, 'focusOrOpen').mockReturnValue(true);
 		try {
@@ -87,15 +141,24 @@ describe('the presented-views section', () => {
 		}
 	});
 
-	it('names its bounds: the shown-of-total sentence, the unreadable, the remainder past the list', async () => {
+	it('names both bounds: the section’s shown-of-total sentence and the remainder past the carry', async () => {
+		vi.mocked(invoke).mockResolvedValue(structuredClone(atBound) as never);
+		const { container } = render(PresentedSection, { props: props() });
+		await vi.waitFor(() => expect(container.querySelectorAll('.entry').length).toBe(5));
+		const text = (container.textContent ?? '').replace(/\s+/g, ' ');
+		expect(text).toContain('5 of 25 presented views; 20 not shown.');
+		expect(text).toContain(
+			'The list carries the 20 newest; 5 older ones stay on the hubs’ records.'
+		);
+	});
+
+	it('counts the records it could not read, and never drops them silently', async () => {
+		vi.mocked(invoke).mockResolvedValue(structuredClone(withRefused) as never);
 		const { container } = render(PresentedSection, { props: props() });
 		await vi.waitFor(() => expect(container.querySelectorAll('.entry').length).toBe(2));
 		const text = (container.textContent ?? '').replace(/\s+/g, ' ');
-		expect(text).toContain('2 of 5 presented views; 3 not shown.');
-		expect(text).toContain('could not be read as a presented view');
-		expect(text).toContain(
-			'The list carries the 2 newest; 3 older ones stay on the hubs’ records.'
-		);
+		expect(text).toContain('1 record on the hubs could not be read as a presented view');
+		expect(text).toContain('All 2 presented views.');
 	});
 
 	it('says when none were presented yet', async () => {

@@ -30,7 +30,9 @@
 		agent: string;
 		catalogVersion: string;
 		presentedAt: string;
-		spec: unknown;
+		/** The spec, verbatim as the record carries it; the projection's check
+		    guarantees the root element named here is present. */
+		spec: { root: string; elements: Record<string, { type: string }> };
 		outcome: string;
 	};
 
@@ -88,7 +90,14 @@
 		list.state === 'present' ? Math.max(0, list.total - list.views.length) : 0
 	);
 
-	const scope = $derived(list.state === 'present' ? 'presented views, newest first' : '');
+	const scope = $derived(list.state === 'present' ? 'your records, newest first' : '');
+
+	/** The row's chip: the root component's type, as the record's own spec names it — the
+	    word "view" when a degraded record carries none. Home never crashes on one. */
+	function viewType(view: PresentedView): string {
+		const at = view.record.spec.elements[view.record.spec.root];
+		return at ? at.type : 'view';
+	}
 </script>
 
 {#if list.state === 'arriving'}
@@ -107,6 +116,7 @@
 		>
 			{#each rows as view (view.artifact)}
 				<button class="entry" onclick={() => reopen(view)}>
+					<span class="type">{viewType(view)}</span>
 					<span class="main">{view.record.agent}</span>
 					<span class="sub">{ageWords(Date.parse(view.record.presentedAt))}</span>
 				</button>
@@ -141,6 +151,13 @@
 	}
 	.honest {
 		font: italic 0.8rem var(--tp-font-reading);
+		color: var(--tp-text-subtle);
+	}
+	.type {
+		flex: none;
+		font: 0.56rem var(--tp-font-doing);
+		letter-spacing: var(--tp-tracking-label);
+		text-transform: uppercase;
 		color: var(--tp-text-subtle);
 	}
 	.entry {
