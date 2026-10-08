@@ -149,6 +149,7 @@ describe("home's sections", () => {
 			'temper-workflows/home-handoff',
 			'core/home-asks',
 			'temper-workflows/home-recent',
+			'core/home-presented',
 			'core/home-start',
 			'core/home-explore'
 		]);
@@ -157,7 +158,15 @@ describe("home's sections", () => {
 
 	it('share one heading per group: the first section of a run opens it', () => {
 		const headings = homeSections([core, temperWorkflows]).map((s) => s.heading);
-		expect(headings).toEqual(['Resume', null, 'Awaiting you', null, 'Start', 'Explore']);
+		expect(headings).toEqual([
+			'Resume',
+			null,
+			'Awaiting you',
+			null,
+			'Presented views',
+			'Start',
+			'Explore'
+		]);
 	});
 
 	it('without the workflow plugin, its sections vanish and home still reads whole', () => {
@@ -165,6 +174,7 @@ describe("home's sections", () => {
 		expect(sections.map((s) => s.lens.id)).toEqual([
 			'core/home-resume',
 			'core/home-asks',
+			'core/home-presented',
 			'core/home-start',
 			'core/home-explore'
 		]);
