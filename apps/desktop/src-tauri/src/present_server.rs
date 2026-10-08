@@ -53,7 +53,10 @@ pub fn catalog_version() -> String {
 /// component's props in `$defs`, referenced through a `oneOf` in `elements`.
 /// `$defs` sits at the schema's root: a `#/$defs/…` pointer resolves from the
 /// document root, so defs nested anywhere else leave every ref dangling —
-/// which a strict harness answers by dropping the tool.
+/// which a strict harness answers by dropping the tool. Each def also
+/// carries the component's own `description` — what it is for and the rules
+/// its props cannot state — read from the same file, so the agent reads
+/// purpose beside shape and no second copy exists to drift.
 /// Pure and unit-tested; the projection is the only place catalog names are
 /// read, so a renamed component surfaces here first.
 pub fn present_view_input_schema() -> Value {
@@ -63,7 +66,17 @@ pub fn present_view_input_schema() -> Value {
         .expect("the catalog carries components");
     let defs: serde_json::Map<String, Value> = components
         .iter()
-        .map(|(name, c)| (name.clone(), c["props"].clone()))
+        .map(|(name, c)| {
+            // The description rides the def as a JSON Schema annotation
+            // beside the props it documents. A component without one projects
+            // without one — the tests hold the corpus to carrying one, so a
+            // silent gap here is a red suite, not a quiet shrug.
+            let mut def = c["props"].clone();
+            if let Some(description) = c["description"].as_str() {
+                def["description"] = Value::String(description.to_string());
+            }
+            (name.clone(), def)
+        })
         .collect();
     // `children` is required: the gate (`checkSpec`, via json-render's
     // element shape) refuses an element without it, so a schema that left it
@@ -505,6 +518,52 @@ async fn a_dropped_guard_shuts_the_server_down() {
 mod tests {
     use super::*;
 
+    /// The backtick-delimited spans of a string, in order: the names a
+    /// description puts in code voice.
+    fn backtick_tokens(description: &str) -> Vec<&str> {
+        description
+            .split('`')
+            .enumerate()
+            .filter(|(i, _)| i % 2 == 1)
+            .map(|(_, token)| token)
+            .collect()
+    }
+
+    /// The names a component's props schema declares: every key under a
+    /// `properties` object, and every string `enum`/`const` value, at any
+    /// depth. Derived from the file, never enumerated by hand.
+    fn declared_names(value: &Value, names: &mut Vec<String>) {
+        match value {
+            Value::Object(map) => {
+                for (key, v) in map {
+                    match key.as_str() {
+                        "properties" => {
+                            if let Some(props) = v.as_object() {
+                                names.extend(props.keys().cloned());
+                            }
+                        }
+                        "enum" => {
+                            if let Some(variants) = v.as_array() {
+                                names.extend(
+                                    variants.iter().filter_map(|v| v.as_str().map(String::from)),
+                                );
+                            }
+                        }
+                        "const" => {
+                            if let Some(s) = v.as_str() {
+                                names.push(s.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                    declared_names(v, names);
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|v| declared_names(v, names)),
+            _ => {}
+        }
+    }
+
     /// The projection carries every catalog component in `$defs`, closed.
     #[test]
     fn the_schema_projects_every_component_closed() {
@@ -518,9 +577,13 @@ mod tests {
             components.len(),
             "one $defs entry per component"
         );
-        for (name, props) in components {
+        for (name, c) in components {
             let def = &defs[name];
-            assert_eq!(def, &props["props"], "props copied verbatim for {name}");
+            let mut expected = c["props"].clone();
+            if let Some(description) = c["description"].as_str() {
+                expected["description"] = json!(description);
+            }
+            assert_eq!(def, &expected, "props and description carried for {name}");
             assert_eq!(
                 def.get("additionalProperties").and_then(Value::as_bool),
                 Some(false),
@@ -537,6 +600,79 @@ mod tests {
         for branch in one_of {
             assert_eq!(branch["required"], json!(["type", "props", "children"]));
         }
+    }
+
+    /// Every component's description reaches the agent verbatim from the
+    /// catalog file: a description missing from the file, missing from the
+    /// projection, or worded differently than the file's is this test red.
+    #[test]
+    fn every_component_s_description_rides_the_schema_verbatim() {
+        let schema = present_view_input_schema();
+        let defs = schema["$defs"].as_object().expect("$defs is an object");
+        let catalog: Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        for (name, c) in catalog["components"].as_object().unwrap() {
+            let description = c["description"]
+                .as_str()
+                .map(str::trim)
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| panic!("{name}'s catalog description is missing or empty"));
+            let carried = defs[name]["description"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name}'s description is missing from the wire schema"));
+            assert_eq!(
+                carried, description,
+                "{name}'s description differs from the catalog file's"
+            );
+        }
+    }
+
+    /// A description that names a name names one the catalog declares: every
+    /// backticked span resolves to the component's own declared vocabulary —
+    /// its props, their nested fields and their variants — or another
+    /// component's name. A renamed prop that left a description behind turns
+    /// this red.
+    #[test]
+    fn a_component_description_names_only_declared_names() {
+        let catalog: Value = serde_json::from_str(CATALOG_JSON).unwrap();
+        let components = catalog["components"].as_object().unwrap();
+        let component_names: Vec<&str> = components.keys().map(String::as_str).collect();
+        for (name, c) in components {
+            let description = c["description"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} carries no description"));
+            assert_eq!(
+                description.matches('`').count() % 2,
+                0,
+                "{name}'s description balances its backticks"
+            );
+            let mut declared: Vec<String> = Vec::new();
+            declared_names(&c["props"], &mut declared);
+            declared.extend(component_names.iter().map(|s| (*s).to_string()));
+            let declared: std::collections::HashSet<&str> =
+                declared.iter().map(String::as_str).collect();
+            for token in backtick_tokens(description) {
+                assert!(
+                    declared.contains(token),
+                    "{name}'s description names `{token}` — nothing by that name is declared in its props or the catalog"
+                );
+            }
+        }
+    }
+
+    /// What the agent receives stays bounded. The serialized schema names its
+    /// own budget — 64 KiB, about 2.6× the 24,573 bytes measured at
+    /// declaration (20,409 of them the props projection the descriptions
+    /// joined) — so catalog growth stays headroom, never an open door.
+    #[test]
+    fn the_projected_schema_stays_within_its_declared_budget() {
+        let bytes = serde_json::to_string(&present_view_input_schema())
+            .expect("the schema serializes")
+            .len();
+        let budget = 64 * 1024;
+        assert!(
+            bytes <= budget,
+            "the projected schema is {bytes} bytes, past its {budget}-byte budget"
+        );
     }
 
     /// A prop the catalog does not declare is refused by the wire schema
