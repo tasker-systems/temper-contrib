@@ -194,6 +194,15 @@ bun run tauri build --debug --no-bundle --features webdriver
 uv run -q --with 'selenium>=4.20,<5' scripts/return-witness-macos.py
 '''
 
+[tasks.desktop-present-witness-macos]
+description = "Presentation witness on macOS: a presented view's tab lands unfocused and reopens from its temper record (needs temper credentials)"
+cwd = "${DESKTOP}"
+script = '''
+set -e
+bun run tauri build --debug --no-bundle --features webdriver
+uv run -q --with 'selenium>=4.20,<5' scripts/present-witness-macos.py
+'''
+
 # =============================================================================
 # Python (ruff.toml at the root covers every .py file)
 # =============================================================================
