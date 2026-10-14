@@ -41,7 +41,7 @@ toml = "1.1"
 # as the file carries them.
 toml_edit = "0.25"
 tauri-plugin-opener = "2.5.5"
-agent-client-protocol = "3.2.0"
+agent-client-protocol = { version = "3.2.0", features = ["process"] }
 tokio = { version = "1", features = ["process", "io-util", "rt", "sync", "macros", "time"] }
 # The presentation probe's MCP server: the same dependency shape temper-mcp runs,
 # so the harness-fidelity probe serves the closed catalog exactly as core serves its tools.
