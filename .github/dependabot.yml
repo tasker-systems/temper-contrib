@@ -34,14 +34,35 @@ updates:
     groups:
       bun:
         patterns: ["*"]
+    # The desktop's toolchain majors are adopted by hand, on the desktop and the web together, so
+    # the two surfaces always build on the same majors. The same set is held in
+    # tasker-systems/temper's .github/dependabot.yml for packages/temper-ui; change one, change
+    # both.
     ignore:
       # typescript majors are adopted by hand, together with the tooling that consumes it.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # The framework and its static adapter move as one migration, adopted by hand.
+      # The framework, its static adapter and its Vite plugin move as one migration, adopted by hand.
+      - dependency-name: "svelte"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "@sveltejs/kit"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@sveltejs/adapter-static"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@sveltejs/vite-plugin-svelte"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "svelte-check"
+        update-types: ["version-update:semver-major"]
+      # The bundler, the test runner, the styling engine and the linter.
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@biomejs/biome"
         update-types: ["version-update:semver-major"]
       # The native-module build pin moves deliberately, not with the group.
       - dependency-name: "node-gyp"
