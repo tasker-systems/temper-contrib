@@ -21,9 +21,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol"
-version = "3.3.0"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02898d848a20eb09b8a392e85bb3a4c79dba01d369758185d102b001362a60da"
+checksum = "72adac0ce6b0d0390df9b7a498392b24ebcf9c65c3451e5d618d936f50256289"
 dependencies = [
  "agent-client-protocol-derive",
  "agent-client-protocol-schema",
@@ -43,9 +43,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-derive"
-version = "3.3.0"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26b57a6a7fae5ebd4368712bfcd0a366a20e1370ac3f3fcd83379b37637501c9"
+checksum = "532fa6f1870bb7cb0bfe91fbcb5166393f7046e186bc590d1aa037d306d48716"
 dependencies = [
  "quote",
  "syn 3.0.6",
@@ -53,9 +53,9 @@ dependencies = [
 
 [[package]]
 name = "agent-client-protocol-schema"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d9a84a76a4f44721e0d8dabcd85b219893c43d6171a4a033d84844d85880823"
+checksum = "430e900fdb40a811c1a3e0d85b1134e485d96699f8b90889a15c1da6a0b26c3f"
 dependencies = [
  "anyhow",
  "derive_more",
@@ -1162,7 +1162,7 @@ dependencies = [
  "chrono",
  "dirs 7.0.0",
  "http",
- "jsonschema 0.58.6",
+ "jsonschema 0.59.0",
  "keyring",
  "regex",
  "reqwest 0.13.5",
@@ -2861,9 +2861,9 @@ dependencies = [
 
 [[package]]
 name = "jsonschema"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f622c574a29fb3034a0a90645afee194dfedc75fc124228801b6e77041075bd1"
+checksum = "1b320ad34c177093d21622edc9215bb608294c2333ff296672c0c8265a5ee60c"
 dependencies = [
  "ahash",
  "bytecount",
@@ -2879,7 +2879,7 @@ dependencies = [
  "num-cmp",
  "num-traits",
  "percent-encoding",
- "referencing 0.58.6",
+ "referencing 0.59.0",
  "regex",
  "reqwest 0.13.5",
  "rustls",
@@ -2892,18 +2892,18 @@ dependencies = [
 
 [[package]]
 name = "jsonschema-regex"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a968fffd387b2ab005bf00c1851f5d26e90df05b6f7ad609ed0d620033cca5e7"
+checksum = "1472f7be79026f79e01a9b172263311e829d7c210d57b39cb57037abc0ce0500"
 dependencies = [
  "regex-syntax",
 ]
 
 [[package]]
 name = "jsonschema-value"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "39b7670345e5ce87371339d13705dbb9276b7e3e934bbe1efa2c6734a1f65a96"
+checksum = "e5a7550a7a84787e715ead0b47e01fa8c6bb7c3413630f91a8f2094c06c2078a"
 dependencies = [
  "ahash",
  "bytecount",
@@ -4400,9 +4400,9 @@ dependencies = [
 
 [[package]]
 name = "referencing"
-version = "0.58.6"
+version = "0.59.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "558f3855529c0a7e78a48e409fa653456e55f1b167eab4109c16a255b7727e3f"
+checksum = "473f4dcca28ead7ee0f8e5b5d0bbae2549f4fc4c958fb20af328961b6c174be3"
 dependencies = [
  "ahash",
  "fluent-uri",
@@ -5768,9 +5768,9 @@ checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tauri"
-version = "2.12.2"
+version = "2.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d061d042ccd2df9c9f1508c1e63d835278c0a4c8801eb41764080e51f2eaaf34"
+checksum = "f316751027fc2644221d1a448564d519efb07067fda584879d9cda966391d212"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5842,11 +5842,11 @@ dependencies = [
 
 [[package]]
 name = "tauri-codegen"
-version = "2.7.1"
+version = "2.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e50213e463086ecc283d7e9f51c30cc0fd304ad457425158018be26dbf0d0a80"
+checksum = "a6585c5b536c00f039d12ce70a9755172d5423bbcfd3969863baa70314c3e02f"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "brotli",
  "ico",
  "json-patch",
@@ -5869,9 +5869,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-macros"
-version = "2.7.1"
+version = "2.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8129fb43bb6e0d6b73ad3315cd172beaab17cd28899c594b1b32c80edbbfd99c"
+checksum = "e2e83a0cfa1bae376e8fbbdc0b1692707aed50cd6072ce85cae4789af5d6c19f"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5954,9 +5954,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-runtime"
-version = "2.12.1"
+version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a57a2a9b8c8b7fc00d35b510fe808ded7f9f1b44fc1cdda6aee38632ea5413"
+checksum = "7c55766d99cea69055904d1735b93c2049302b2e09effd462120deb5581d78e9"
 dependencies = [
  "cookie",
  "dpi",
@@ -5979,9 +5979,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-runtime-wry"
-version = "2.12.1"
+version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9e7e0c9f80a5130773cfabb6df4dc924518fb1b2c923726966804634b57d22"
+checksum = "8d61892587aea2a85245bcaec98c6fe46268874c0a0deae5535fb71ca7b93eae"
 dependencies = [
  "gtk",
  "http",
