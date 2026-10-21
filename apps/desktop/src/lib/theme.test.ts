@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { coercePreference, DEFAULT_PREFERENCE, resolveTheme, THEMES } from './theme';
 
 describe('theme discovery', () => {
-	it('finds every theme in themes/, paired as counterparts', () => {
+	it('finds every theme the design package indexes, paired as counterparts', () => {
 		const names = THEMES.map((t) => t.name);
 		expect(names).toContain('quiet-instrument');
 		expect(names).toContain('quiet-instrument-paper');

@@ -1,12 +1,13 @@
-/* The app's styles are the theme contract, read in place from the repository's themes/.
+/* The app's styles are the theme contract, read from @tasker-systems/temper-design at the version
+   package.json pins.
    Components read `--tp-*` roles or `tp-` utilities and never a literal colour
    (`npm run guard:colours` enforces it). The active theme is `data-theme` on <html>. */
 @import "tailwindcss";
-@import "../../../themes/contract/tailwind.css";
-@import "../../../themes/contract/shadcn-bridge.css";
-@import "../../../themes/quiet-instrument/theme.css";
-@import "../../../themes/quiet-instrument-paper/theme.css";
-@import "../../../themes/contract/base.css";
+@import "@tasker-systems/temper-design/contract/tailwind.css";
+@import "@tasker-systems/temper-design/contract/shadcn-bridge.css";
+@import "@tasker-systems/temper-design/quiet-instrument/theme.css";
+@import "@tasker-systems/temper-design/quiet-instrument-paper/theme.css";
+@import "@tasker-systems/temper-design/contract/base.css";
 
 body {
 	margin: 0;

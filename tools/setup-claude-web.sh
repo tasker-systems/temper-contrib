@@ -114,9 +114,8 @@ else
 fi
 
 if has uv; then
-  for dir in plugins/author-tools themes; do
-    if (cd "$dir" && uv sync -q >/dev/null 2>&1); then ok "uv sync: $dir"; else warn "uv sync failed: $dir"; fi
-  done
+  dir=plugins/author-tools
+  if (cd "$dir" && uv sync -q >/dev/null 2>&1); then ok "uv sync: $dir"; else warn "uv sync failed: $dir"; fi
 fi
 
 if [ -d apps/desktop/node_modules ]; then

@@ -6,10 +6,6 @@ import { configDefaults, defineConfig } from 'vitest/config';
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// The theme contract and themes live at the repository root (`themes/`) and are read in place,
-// never copied: one source for every consumer. Vite resolves this against the project root.
-const themes = '../../themes';
-
 // The plugin packages live at the repository root (`plugins/`) too, read in place the same way:
 // the shell's witnesses take the loaded path through the manifest the desktop ships.
 const plugins = '../../plugins';
@@ -76,7 +72,7 @@ export default defineConfig(async () => ({
 			ignored: ['**/src-tauri/**']
 		},
 		fs: {
-			allow: ['.', themes, plugins]
+			allow: ['.', plugins]
 		}
 	},
 

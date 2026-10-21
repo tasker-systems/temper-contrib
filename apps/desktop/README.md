@@ -25,19 +25,34 @@ core in `src-tauri/`.
 
 ## What the UI holds
 
-- **Theme roles** — `src/app.css` imports the repository's `themes/` contract and
-  every theme in place (never copied). Components read `--tp-*` roles or `tp-`
-  utilities only; `bun run guard:colours` fails on a literal colour. Fonts are
-  bundled (`@fontsource-variable/*`), never fetched. `data-theme` on `<html>`
-  selects the theme; "follow system" switches between a theme and its
-  `counterpart` with the OS appearance (`src/lib/theme.ts`).
+- **Theme roles** — `src/app.css` imports the role contract and every theme from
+  `@tasker-systems/temper-design`, at the exact version `package.json` pins, and
+  `src/lib/theme.ts` lists the themes from the package's `themes.json`. Components
+  read `--tp-*` roles or `tp-` utilities only; `bun run guard:colours` fails on a
+  literal colour. Fonts are bundled (`@fontsource-variable/*`), never fetched.
+  `data-theme` on `<html>` selects the theme; "follow system" switches between a
+  theme and its `counterpart` with the OS appearance.
+
+  A contract or theme change is made in the package, in the temper repository,
+  and reaches the desktop as a version bump. To paint from an unreleased change
+  first, link a temper checkout's package in place of the pinned copy:
+
+  ```bash
+  (cd <temper>/packages/temper-design && bun link)
+  bun link @tasker-systems/temper-design      # in apps/desktop; edits show live
+  rm -rf node_modules/@tasker-systems/temper-design && bun install   # back to the pin
+  ```
+
+  Linking changes neither `package.json` nor `bun.lock`, so nothing of it can be
+  committed by accident.
 - **The `temper` catalog** — `src/lib/catalog/temper.catalog.json` is the one
   source for what a json-render spec may name: closed JSON Schema props per
   component, loaded into zod with `z.fromJSONSchema`. `checkSpec` is the gate
   (json-render's own `validate` checks structure and names but not per-component
   props); `TemperView` renders a spec only once it passes, and otherwise shows
   every reason it was refused. The catalog is held for plugin rendering surfaces;
-  no route renders it (`themes/preview/` is where the components are previewed).
+  no route renders it (the design package's `preview/`, in the temper repository, is
+  where the components are previewed).
 - **Rendered markdown** — `src/lib/markdown/` is temper-ui's pipeline, ported by
   copy-with-citation: a bounded parse that refuses rather than throws, core
   highlight.js where an unknown fence language is plaintext, and a client-only

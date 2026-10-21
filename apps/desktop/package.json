@@ -30,6 +30,7 @@
 		"@fontsource-variable/source-serif-4": "^5.3.1",
 		"@json-render/core": "^0.21.1",
 		"@json-render/svelte": "^0.21.1",
+		"@tasker-systems/temper-design": "0.6.2",
 		"@tauri-apps/api": "^2",
 		"@tauri-apps/plugin-opener": "^2.7.2",
 		"agy-acp": "^0.5.2",

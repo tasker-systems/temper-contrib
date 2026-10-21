@@ -9,7 +9,7 @@
 #   python    ruff check + ruff format --check   — a .py file or ruff.toml staged
 #   shell     bash -n + shellcheck               — a .sh file or a githook staged
 #   plugins   author-tools --self-check          — plugins/author-tools/ staged
-#   themes    themes --self-check                — themes/ staged
+#   contract  no copy of the theme contract      — always; it reads git's file list, so it is instant
 #
 # A battery whose tool is not installed skips LOUDLY (an unset-up machine is not a broken
 # commit), and CI runs every gate regardless: this hook is a fast local pre-filter, not the
@@ -40,7 +40,6 @@ DESKTOP="$(staged '^apps/desktop/' | grep -v '^apps/desktop/src-tauri/' || true)
 PYTHON="$(staged '\.py$|^ruff\.toml$')"
 SHELL_FILES="$(staged '\.sh$|^githooks/')"
 PLUGINS="$(staged '^plugins/author-tools/')"
-THEMES="$(staged '^themes/')"
 
 if [ -n "$RUST" ]; then
   echo "  rust: rustfmt + clippy..."
@@ -82,9 +81,7 @@ if [ -n "$PLUGINS" ]; then
   ./plugins/author-tools/scripts/lint.sh --self-check >/dev/null
 fi
 
-if [ -n "$THEMES" ]; then
-  echo "  themes: --self-check..."
-  ./themes/scripts/themes.sh --self-check >/dev/null
-fi
+echo "  contract: no copy of the theme contract..."
+./tools/check-no-design-contract.sh >/dev/null
 
 echo "==> pre-commit: applicable checks passed."

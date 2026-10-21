@@ -1,8 +1,11 @@
 /**
- * Theme selection. Every theme under the repository's `themes/` is discovered at build time, so a
- * new theme needs no code here. The choice is a device fact: the Rust core's settings store holds
- * it (an app-data file behind the settings commands), never webview localStorage.
+ * Theme selection. Every theme the design package publishes is listed in its `themes.json` index,
+ * read at build time, so a new theme needs no code here. The choice is a device fact: the Rust
+ * core's settings store holds it (an app-data file behind the settings commands), never webview
+ * localStorage.
  */
+
+import index from '@tasker-systems/temper-design/themes.json';
 
 export type Appearance = 'dark' | 'light';
 
@@ -18,12 +21,7 @@ export type ThemePreference =
 	| { follow: 'system'; family: string }
 	| { follow: 'fixed'; name: string };
 
-const discovered = import.meta.glob<ThemeMeta>('../../../../themes/*/theme.json', {
-	eager: true,
-	import: 'default'
-});
-
-export const THEMES: ThemeMeta[] = Object.values(discovered)
+export const THEMES: ThemeMeta[] = (index as ThemeMeta[])
 	.map(({ name, title, appearance, counterpart }) => ({ name, title, appearance, counterpart }))
 	.sort((a, b) => a.name.localeCompare(b.name));
 

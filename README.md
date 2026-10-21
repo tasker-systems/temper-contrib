@@ -6,16 +6,18 @@
 
 ## What's Here
 
-temper-contrib ships three kinds of artifacts:
+temper-contrib ships two kinds of artifacts:
 
 - **Plugins** (`plugins/`) — self-contained packages that depend on temper only
   through its public CLI surface: agent skills, JSON Schema vocabularies, and
   operational scripts. Nothing here is required to run temper itself.
-- **Themes** (`themes/`) — data-only visual themes over one role contract, so the
-  desktop, its component primitives, and anything rendered from a plugin or agent
-  spec restyle together. See [themes/README.md](themes/README.md).
 - **Apps** (`apps/`) — desktop applications. `apps/desktop` is temper-desktop,
   a Tauri app that makes temper a native surface.
+
+Themes are not kept here. The role contract and every theme are the
+`@tasker-systems/temper-design` package, published from the temper repository, so
+the desktop, its component primitives, and anything rendered from a plugin or agent
+spec restyle together. The desktop pins the version it paints from.
 
 ```
 temper-contrib/
@@ -24,9 +26,6 @@ temper-contrib/
 │   ├── schemas/                   # JSON Schema draft 2020-12 vocabularies — source of truth
 │   ├── scripts/                   # install.sh, lint.sh, compile.sh, manifest.sh
 │   └── tests/fixtures/            # conforming + hand-broken open_meta payloads
-├── themes/                        # theme contract + themes (data) — see themes/README.md
-│   ├── contract/                  # theme.schema.json, Tailwind + shadcn bridges, base recipes
-│   └── quiet-instrument[-paper]/  # the house theme, dark and light
 ├── apps/desktop/                  # temper-desktop — Tauri app
 │   ├── src/                       # SvelteKit 2 + Svelte 5 UI (SPA)
 │   └── src-tauri/                 # Rust core: temper client + ACP host
@@ -99,9 +98,8 @@ the trees a branch changed. Missing tools skip loudly; CI runs everything.
 | Job | Purpose |
 |-----|---------|
 | Plugin checks | Plugin schemas, lint self-check in both directions, shellcheck |
-| Theme checks | Themes against the contract, contrast floors, generated CSS in sync |
 | Desktop | Biome, svelte-check, vitest, literal colours, frontend build; rustfmt, clippy, cargo test, rustdoc |
-| Repo hygiene | gitleaks, ruff, shellcheck over every script and hook, actionlint |
+| Repo hygiene | gitleaks, ruff, shellcheck over every script and hook, actionlint, no copy of the theme contract |
 | Desktop CSP witness | A production build in WebKitGTK: routes render with no CSP violations; injection probes are refused |
 | CI Success | Fans every job in — the one context the branch ruleset needs to require |
 

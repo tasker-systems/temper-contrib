@@ -5,8 +5,8 @@
 	 * copy-with-citation, per the desktop's rendering-baseline design. The mechanics are the
 	 * baseline's; the `.md-body` styles are rewritten onto `--tp-*` roles (ruling 3): reading
 	 * font for prose, doing font for code, rule/surface/accent roles for structure. Token colours
-	 * for highlighted code are `themes/contract/base.css` (`.hljs .hljs-*`), shared with every
-	 * other code surface.
+	 * for highlighted code are the design package's `contract/base.css` (`.hljs .hljs-*`), shared
+	 * with every other code surface.
 	 */
 	import { browser } from '$app/environment';
 	import { prepareMarkdown } from '$lib/markdown/markdown';

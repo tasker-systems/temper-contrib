@@ -7,9 +7,6 @@
 # Plugins: agent-facing skills, vocabularies (schemas are contracts), scripts
 /plugins/               @jcoletaylor
 
-# Themes: the role contract and the themes that fill it
-/themes/                @jcoletaylor
-
 # Desktop: SvelteKit UI and the Rust core
 /apps/desktop/          @jcoletaylor
 /apps/desktop/src-tauri/ @jcoletaylor
