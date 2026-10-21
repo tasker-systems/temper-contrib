@@ -54,7 +54,7 @@ schemars = "1"
 # The core's own check of a presented spec before it is recorded, against the
 # same projected catalog schema the server advertises. Already in the graph
 # through temperkb-workflow.
-jsonschema = "0.58"
+jsonschema = "0.59"
 # The embedded WebDriver server the CSP witness drives on macOS, where tauri-driver has no
 # WKWebView driver. Behind a feature: the witness builds with `--features webdriver`, so
 # development and release builds never compile an endpoint.
