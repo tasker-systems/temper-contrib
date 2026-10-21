@@ -53,32 +53,6 @@ jobs:
       - name: Lint self-check
         run: ./plugins/author-tools/scripts/lint.sh --self-check
 
-  themes:
-    name: Theme checks (contract + contrast + generated CSS)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Install validators
-        run: |
-          pip install uv
-          cd themes && uv sync
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-
-      - name: Parse-check and shellcheck scripts
-        run: |
-          bash -n themes/scripts/themes.sh
-          shellcheck themes/scripts/themes.sh
-
-      - name: Theme self-check
-        run: ./themes/scripts/themes.sh --self-check
-
   desktop:
     name: Desktop (frontend + cargo check)
     runs-on: ubuntu-latest
@@ -198,6 +172,12 @@ jobs:
 
       - name: Workflows (actionlint)
         run: actionlint
+
+      # The theme contract lives in @tasker-systems/temper-design; this repository holds no copy.
+      - name: No copy of the theme contract (and the check's harness)
+        run: |
+          ./tools/check-no-design-contract.sh
+          ./tools/test-check-no-design-contract.sh
 
   witness-gate:
     name: CSP witness gate (what the diff can move)
@@ -328,7 +308,7 @@ jobs:
   ci-success:
     name: CI Success
     if: always()
-    needs: [verify, themes, desktop, hygiene, witness-gate, csp-witness]
+    needs: [verify, desktop, hygiene, witness-gate, csp-witness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

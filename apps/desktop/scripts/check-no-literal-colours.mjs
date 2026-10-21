@@ -51,7 +51,7 @@ for (const path of files(ROOT)) {
 }
 if (failures) {
 	console.error(
-		`\n${failures} literal colour(s). Components read --tp-* roles only (themes/README.md).`
+		`\n${failures} literal colour(s). Components read --tp-* roles only (@tasker-systems/temper-design).`
 	);
 	process.exit(1);
 }

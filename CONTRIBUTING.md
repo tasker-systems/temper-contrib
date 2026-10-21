@@ -53,14 +53,10 @@ passes its vocabulary, every fixture in `plugins/author-tools/tests/fixtures/bro
 fails its vocabulary, and no tracked file references a private vault or
 prototype path.
 
-Themes verify on their own:
-
-```bash
-cd themes && uv sync && cd ..
-themes/scripts/themes.sh build        # regenerate theme.css + contract/tailwind.css
-themes/scripts/themes.sh --self-check # contract, contrast floors, distinctness,
-                                      # generated files in sync, broken fixtures refused
-```
+The theme contract and the themes are not in this repository. They live in
+`@tasker-systems/temper-design`, published from the temper repository, where
+their checks run; the desktop takes them at the version `apps/desktop/package.json`
+pins. `tools/check-no-design-contract.sh` refuses a copy here.
 
 If you change a schema, change its fixtures with it: a new field needs a
 conforming example, and a rejected shape deserves a broken fixture that
@@ -72,8 +68,8 @@ A plugin package is `plugins/<name>/` — typically `skills/<skill>/SKILL.md`
 plus whatever `schemas/`, `scripts/`, and fixtures it needs. Skills teach
 agent-facing flows; schemas are the source of truth for metadata vocabularies;
 scripts are bash + temper CLI and must stay shellcheck-clean with explicit
-arguments, no ambient assumptions. A theme is `themes/<name>/theme.json` — values for every role in
-`themes/contract/theme.schema.json`, nothing more (see `themes/README.md`).
+arguments, no ambient assumptions. A theme is added in
+`@tasker-systems/temper-design`, not here.
 Desktop apps live under `apps/<name>/`;
 add a new app's gates to `Makefile.toml` and the CI workflow together.
 

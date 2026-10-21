@@ -53,7 +53,7 @@ dependencies = [
   "python-lint",
   "shell-lint",
   "plugins-self-check",
-  "themes-self-check",
+  "design-contract-absent",
   "workflows-lint",
   "secrets",
 ]
@@ -210,9 +210,7 @@ uv run -q --with 'selenium>=4.20,<5' scripts/present-witness-macos.py
 [tasks.python-install]
 description = "uv sync for each package that carries a pyproject.toml"
 script = '''
-for dir in plugins/author-tools themes; do
-  (cd "$dir" && uv sync)
-done
+cd plugins/author-tools && uv sync
 '''
 
 [tasks.python-lint]
@@ -230,7 +228,7 @@ ruff format .
 '''
 
 # =============================================================================
-# Shell, plugin and theme self-checks
+# Shell and plugin self-checks; the theme contract's absence
 # =============================================================================
 
 [tasks.shell-lint]
@@ -248,10 +246,13 @@ description = "author-tools: schemas valid, fixtures pass/fail as declared"
 command = "./plugins/author-tools/scripts/lint.sh"
 args = ["--self-check"]
 
-[tasks.themes-self-check]
-description = "themes: contract, contrast floors, distinctness, generated files in sync"
-command = "./themes/scripts/themes.sh"
-args = ["--self-check"]
+[tasks.design-contract-absent]
+description = "no copy of the theme contract: it lives in @tasker-systems/temper-design (and the check's harness)"
+script = '''
+set -e
+./tools/check-no-design-contract.sh
+./tools/test-check-no-design-contract.sh
+'''
 
 [tasks.workflows-lint]
 description = "actionlint over .github/workflows (skips loudly when actionlint is absent; CI always runs it)"

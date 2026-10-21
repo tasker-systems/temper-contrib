@@ -1,3 +1,6 @@
+import quietInstrument from '@tasker-systems/temper-design/quiet-instrument/theme.json';
+import quietInstrumentPaper from '@tasker-systems/temper-design/quiet-instrument-paper/theme.json';
+import index from '@tasker-systems/temper-design/themes.json';
 import { describe, expect, it } from 'vitest';
 import renderer from '../components/MarkdownRenderer.svelte?raw';
 import palette from '../shell/CommandPalette.svelte?raw';
@@ -17,14 +20,16 @@ import waysIn from '../shell/WaysIn.svelte?raw';
  * same witness — chrome styles through the contract like everything else.
  */
 // Each theme's `theme.json` is its source of truth; its `theme.css` is generated from it. A
-// colour token `x` is the role `--tp-x`; every other group `g` token `x` is `--tp-g-x`.
+// colour token `x` is the role `--tp-x`; every other group `g` token `x` is `--tp-g-x`. The themes
+// come from the design package, imported one by one; the package's index says which exist, and
+// the first test below fails when it lists a theme this file does not import.
 type ThemeTokens = { tokens: Record<string, Record<string, unknown>> };
-const themeFiles = import.meta.glob<ThemeTokens>('../../../../../themes/*/theme.json', {
-	import: 'default',
-	eager: true
-});
-const themes: [string, Set<string>][] = Object.entries(themeFiles).map(([path, theme]) => [
-	path.split('/').at(-2) ?? path,
+const imported: Record<string, ThemeTokens> = {
+	'quiet-instrument': quietInstrument,
+	'quiet-instrument-paper': quietInstrumentPaper
+};
+const themes: [string, Set<string>][] = Object.entries(imported).map(([name, theme]) => [
+	name,
 	new Set(
 		Object.entries(theme.tokens).flatMap(([group, tokens]) =>
 			Object.keys(tokens).map((name) =>
@@ -33,6 +38,12 @@ const themes: [string, Set<string>][] = Object.entries(themeFiles).map(([path, t
 		)
 	)
 ]);
+
+describe('the themes this witness reads', () => {
+	it('are every theme the design package indexes', () => {
+		expect(Object.keys(imported).sort()).toEqual(index.map((t) => t.name).sort());
+	});
+});
 
 const components: [string, string, RegExp][] = [
 	[
