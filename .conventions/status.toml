@@ -4,6 +4,7 @@
 # Read from this repository's own gates (.github/workflows/ci.yml), not from the register. A rule
 # that is not listed has not been examined here. `gated` names the CI job whose step fails on a
 # violation; the comment beside it names the step.
+reviewed_at = "0753eb20a27692c94dd09f3f5fa30d19df111abe"
 [rules]
 
 # --- Rust (apps/desktop/src-tauri: one application package, not a workspace) -------------------

@@ -56,7 +56,9 @@ typescript/
   tsconfig.base.json     the strict compiler base
 skill/           the agent skill projected into each consumer, with that consumer's statuses
 tools/
-  conventions.py         `check` (A–E) and `bump`, run by consumers from their projection
+  conventions.py         `check` (A–F) and `bump`, run by consumers from their projection
+  register.py            generates rules.md's consumer columns from consumers' status.toml
+  consumers.toml         the registered consumers that register.py reads
   slots.toml             where a consumer may hold repo-local content in a `superset` file
   check-config-valid.py  every canonical config parses and still bites
   check-register.py      every doctrine rule has exactly one register row
@@ -66,9 +68,8 @@ sources/         ledgers of external guides read against the baseline — what w
                  adapted or rejected, and why (Google's style guides, 2026-10-23)
 ```
 
-Still to come, each its own change: the tripwire harness and the portable tripwires, reusable
-GitHub workflows for the stage-1 gate, and generating the register's per-consumer columns from
-consumers' `status.toml`.
+Still to come, each its own change: the tripwire harness and the portable tripwires, and reusable
+GitHub workflows for the stage-1 gate.
 
 ## Adopting
 

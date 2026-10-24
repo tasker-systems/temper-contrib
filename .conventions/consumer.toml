@@ -1,7 +1,7 @@
 # This repository's pin on the tasker-systems conventions baseline. Doctrine: CONS-* in
 # .conventions/baseline/doctrine/consuming.md. `revision` is written by `conventions.py bump`.
 name = "temper-contrib"
-revision = "3ccef5d314320210b70e88bef91389b4a659cc23"
+revision = "0753eb20a27692c94dd09f3f5fa30d19df111abe"
 
 # Each adopted canonical file: where it lives here, and how it is compared (exact, extends,
 # table, superset). Not adopted: rust/clippy.toml, rust/deny.toml, rust/audit.toml — this
