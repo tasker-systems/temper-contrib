@@ -12,7 +12,7 @@
 	 */
 	import './tints.css';
 
-	let { label, tint, dot = false }: { label: string; tint?: Tint | null; dot?: boolean } = $props();
+	let { label, tint, dot = false }: { label: string; tint?: Tint | null | undefined; dot?: boolean } = $props();
 </script>
 
 {#if dot}

@@ -40,7 +40,9 @@ export function viewActions(handlers: () => ViewActionHandlers): ViewActions {
 			if (!schema || !Object.hasOwn(handlers(), name)) return;
 			const checked = schema.safeParse(params);
 			if (!checked.success) throw new Error(`${name}: params do not match the catalog`);
-			handlers()[name](checked.data as Record<string, unknown>);
+			const handler = handlers()[name];
+			if (handler === undefined) throw new Error(`${name}: the host's handler is missing`);
+			handler(checked.data as Record<string, unknown>);
 		}
 	};
 }

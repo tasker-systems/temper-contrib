@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { temperViews } from '$lib/temper-views.svelte';
+import { at, defined } from '../../test/at';
 import Room from './ConnectionRoom.svelte';
 
 type Provider = {
@@ -186,7 +187,7 @@ describe('the connection room', () => {
 		gathered = hostedMachine('v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE');
 		applyReply = (request) => ({
 			...hostedMachine('v77CQpR2P5EUNfPAkiPPaHXIQbGG5dsE'),
-			choice: request.choice,
+			choice: defined(request.choice, 'the choice the apply request names'),
 			defaultVaultPath: null,
 			establishedVaultPath: null
 		});
@@ -231,7 +232,7 @@ describe('the connection room', () => {
 			expect(found).toHaveLength(1);
 			return found;
 		});
-		expect(lines[0].textContent).toContain('no desktop client is registered');
+		expect(at(lines, 0).textContent).toContain('no desktop client is registered');
 		expect(button(container, 'Sign in').disabled).toBe(true);
 	});
 

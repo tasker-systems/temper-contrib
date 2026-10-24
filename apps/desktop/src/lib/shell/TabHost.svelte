@@ -8,7 +8,11 @@
 	import type { Tab } from './tabs.svelte';
 
 	let { tab }: { tab: Tab } = $props();
-	const step = $derived(tab.steps[tab.cursor]);
+	const step = $derived.by(() => {
+		const at = tab.steps[tab.cursor];
+		if (at === undefined) throw new Error(`tab ${tab.id} has no step at its cursor`);
+		return at;
+	});
 </script>
 
 {#key step.key}

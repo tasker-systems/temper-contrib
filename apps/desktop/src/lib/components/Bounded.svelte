@@ -29,8 +29,8 @@
 		label: string;
 		state: 'present' | RegionStateName;
 		/** When the view is one page of its total: which rows, and whether more follow. */
-		page?: Page | null;
-		more?: { step: number } | null;
+		page?: Page | null | undefined;
+		more?: { step: number } | null | undefined;
 		onmore?: () => void;
 		/** When the view is a graph read: the read its omissions are composed from. */
 		graph?: GraphOmissions | null;

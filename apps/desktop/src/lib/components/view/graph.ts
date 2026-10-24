@@ -359,12 +359,14 @@ export function pairStroke<E extends Answered>(
 	edges: { edge: E }[]
 ): { role: StrokeRole; dash: string | null; width: number } {
 	const strokes = edges.map(({ edge }) => stroke(edge));
+	const first = strokes[0];
+	if (first === undefined) throw new Error('pairStroke: a pair carries at least one edge');
 	const role = strokes.some((s) => s.role === 'contradicts')
 		? 'contradicts'
 		: strokes.every((s) => s.role === 'derived')
 			? 'derived'
 			: 'structural';
-	const dash = strokes.every((s) => s.dash) ? strokes[0].dash : null;
+	const dash = strokes.every((s) => s.dash) ? first.dash : null;
 	const width = Math.max(...strokes.map((s) => s.width));
 	return { role, dash, width };
 }

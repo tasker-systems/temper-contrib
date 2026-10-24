@@ -14,6 +14,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
 import type { DocOpened } from '$lib/document';
 import { temperViews } from '$lib/temper-views.svelte';
+import { at, defined } from '../../test/at';
 import { shellContributions } from './contributions';
 import { core } from './contributions/core';
 import { pluginPackages } from './contributions/plugin-fixture';
@@ -137,7 +138,7 @@ function boundTable(args?: Record<string, unknown>) {
 		page: { offset: view.offset, size: 2, more: view.offset + rows.length < 5 },
 		sort: view.sort ?? { key: 'updated', order: 'desc' }
 	};
-	spec.elements[binding.element].props = props;
+	defined(spec.elements[binding.element], 'the bound element').props = props;
 	return { spec, refs: [] };
 }
 
@@ -167,7 +168,7 @@ function boundGraph(args?: Record<string, unknown>) {
 			}
 		]
 	};
-	spec.elements[binding.element].props = props;
+	defined(spec.elements[binding.element], 'the bound element').props = props;
 	return { spec, refs: [] };
 }
 
@@ -369,12 +370,15 @@ describe('the shell', () => {
 	async function startedConversationWithParkedAsk(): Promise<void> {
 		agentSession.workingDir = '/tmp/project';
 		await agentSession.start();
-		handlers['acp-ask']({ payload: declaredAsk });
+		defined(handlers['acp-ask'], 'the acp-ask listener')({ payload: declaredAsk });
 		await vi.waitFor(() => expect(agentSession.asks).toHaveLength(1));
 	}
 
 	function streamed(text: string): void {
-		handlers['acp-update']({
+		defined(
+			handlers['acp-update'],
+			'the acp-update listener'
+		)({
 			payload: {
 				conversationId: 'c1',
 				sessionId: 's1',
@@ -422,13 +426,16 @@ describe('the shell', () => {
 				}
 			}
 		} as const;
-		handlers['acp-present']({ payload: presented });
+		defined(handlers['acp-present'], 'the acp-present listener')({ payload: presented });
 		await vi.waitFor(() =>
 			expect(
 				calls.some((c) => c.cmd === 'present_answer' && c.args?.presentedId === 'presented-0')
 			).toBe(true)
 		);
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'resolved',
 				conversationId: 'c1',
@@ -497,7 +504,7 @@ describe('the shell', () => {
 			expect(activeBody(container)?.querySelectorAll('tbody tr')).toHaveLength(2)
 		);
 		const resolves = () => calls.filter((c) => c.cmd === 'lens_resolve');
-		expect(resolves()[0].args).toMatchObject({
+		expect(at(resolves(), 0).args).toMatchObject({
 			binding: { element: 'table', read: 'resource-list' },
 			subject: { context: '+temper-dev/contrib' },
 			view: { offset: 0 }
@@ -552,7 +559,7 @@ describe('the shell', () => {
 		const { container } = render(Shell);
 		await startedConversationWithParkedAsk();
 		const reach = () => container.querySelector('aside[aria-label="Agent"] .reach');
-		const seen: Array<[Element | null, string | undefined]> = [];
+		const seen: [Element | null, string | undefined][] = [];
 
 		seen.push([reach(), reach()?.textContent ?? undefined]);
 		tabs.open({ kind: 'resource', id: A }, { where: 'new' });
@@ -562,11 +569,11 @@ describe('the shell', () => {
 		await waitFor(() => expect(activeBody(container)?.querySelector('svg')).toBeTruthy());
 		seen.push([reach(), reach()?.textContent ?? undefined]);
 
-		expect(seen[0][0]).not.toBeNull();
-		expect(seen[0][1]).toContain('the desktop relays what it asks');
+		expect(at(seen, 0)[0]).not.toBeNull();
+		expect(at(seen, 0)[1]).toContain('the desktop relays what it asks');
 		for (const [node, text] of seen) {
-			expect(node).toBe(seen[0][0]);
-			expect(text).toBe(seen[0][1]);
+			expect(node).toBe(at(seen, 0)[0]);
+			expect(text).toBe(at(seen, 0)[1]);
 		}
 	});
 
@@ -1156,7 +1163,7 @@ describe('the shell', () => {
 			expect(tabs.current(tabs.active).subject).toEqual({ kind: 'resource', id: NEW })
 		);
 		expect(reads('doc_create')).toHaveLength(1);
-		expect(reads('doc_create')[0].args).toEqual({
+		expect(at(reads('doc_create'), 0).args).toEqual({
 			contextId: 'ctx-1',
 			docType: 'task',
 			title: 'A fresh task'
@@ -1233,7 +1240,7 @@ describe('the shell', () => {
 		expect(container.querySelector('.in-view')?.textContent).toContain('not shared');
 		agentSession.draft = 'Hello';
 		await agentSession.send();
-		expect(reads('acp_prompt')[0].args?.references).toEqual([]);
+		expect(at(reads('acp_prompt'), 0).args?.references).toEqual([]);
 	});
 
 	it('a scoped session sends its scope with the first prompt only, before the room in view', async () => {
@@ -1263,7 +1270,7 @@ describe('the shell', () => {
 
 		// The work record links the scope when the session closes.
 		await agentSession.close();
-		const record = reads('temper_write_work_record')[0].args?.facts as { scope: unknown };
+		const record = at(reads('temper_write_work_record'), 0).args?.facts as { scope: unknown };
 		expect(record.scope).toEqual({ kind: 'goal', ref: `a-goal-${C}` });
 	});
 
@@ -1273,9 +1280,9 @@ describe('the shell', () => {
 		await vi.waitFor(() => expect(handlers['doc-close-requested']).toBeDefined());
 
 		// The core prevented a close over a dirty draft and announced it: the person is asked.
-		handlers['doc-close-requested']({ payload: null });
+		defined(handlers['doc-close-requested'], 'the doc-close-requested listener')({ payload: null });
 		await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
-		expect(confirm.mock.calls[0][0]).toContain('unsaved draft');
+		expect(at(confirm.mock.calls, 0)[0]).toContain('unsaved draft');
 
 		// The confirm clears the core's flag and closes past the guard.
 		await vi.waitFor(() => expect(reads('doc_close_confirmed')).toHaveLength(1));
@@ -1287,7 +1294,7 @@ describe('the shell', () => {
 		render(Shell);
 		await vi.waitFor(() => expect(handlers['doc-close-requested']).toBeDefined());
 
-		handlers['doc-close-requested']({ payload: null });
+		defined(handlers['doc-close-requested'], 'the doc-close-requested listener')({ payload: null });
 		await vi.waitFor(() => expect(confirm).toHaveBeenCalled());
 		// Nothing was sent to the core: the draft stands, and so does the dirty flag.
 		expect(reads('doc_close_confirmed')).toHaveLength(0);

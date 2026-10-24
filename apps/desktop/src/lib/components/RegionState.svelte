@@ -17,7 +17,7 @@
 	 *
 	 * ARIA: arriving and gave-up are `status` (neither is a fault); failed is `alert`.
 	 */
-	let { state, label, detail }: { state: RegionStateName; label: string; detail?: string | null } = $props();
+	let { state, label, detail }: { state: RegionStateName; label: string; detail?: string | null | undefined } = $props();
 
 	const named = $derived(label.charAt(0).toUpperCase() + label.slice(1));
 </script>

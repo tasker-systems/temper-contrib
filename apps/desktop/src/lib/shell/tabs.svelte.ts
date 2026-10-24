@@ -147,12 +147,16 @@ export class TabModel {
 	}
 
 	get active(): Tab {
-		return this.tabs.find((t) => t.id === this.activeId) ?? this.tabs[0];
+		const active = this.tabs.find((t) => t.id === this.activeId) ?? this.tabs[0];
+		if (active === undefined) throw new Error('the tab model holds no tabs, not even home');
+		return active;
 	}
 
 	/** The step a tab is showing. */
 	current(tab: Tab): Step {
-		return tab.steps[tab.cursor];
+		const step = tab.steps[tab.cursor];
+		if (step === undefined) throw new Error(`tab ${tab.id} has no step at its cursor`);
+		return step;
 	}
 
 	/** Tabs that count against the bound: every tab but home. */
@@ -305,15 +309,17 @@ export class TabModel {
 	close(id: string): boolean {
 		if (id === HOME_TAB) return false;
 		const index = this.tabs.findIndex((t) => t.id === id);
-		if (index < 0) return false;
 		const tab = this.tabs[index];
+		if (tab === undefined) return false;
 		if (!this.#mayLeave(tab)) return false;
 		this.#left(this.current(tab));
 		this.tabs.splice(index, 1);
 		this.#guards.delete(id);
 		delete this.mounted[id];
 		if (this.activeId === id) {
-			this.activate(this.tabs[Math.min(index, this.tabs.length - 1)].id);
+			const next = this.tabs[Math.min(index, this.tabs.length - 1)];
+			if (next === undefined) throw new Error('closing a tab left no tab, not even home');
+			this.activate(next.id);
 		} else {
 			this.#save();
 		}

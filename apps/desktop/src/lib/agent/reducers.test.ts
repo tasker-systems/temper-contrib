@@ -1,6 +1,7 @@
 // The reducers' witnesses: one behaviour per case, no component. Each
 // carried over from the transcript behaviour that already worked.
 import { describe, expect, it } from 'vitest';
+import { at } from '../../test/at';
 import {
 	type AskedNotice,
 	applyConfigUpdate,
@@ -157,7 +158,7 @@ describe('applyConfigUpdate', () => {
 			configOptions: [selectOption('model', 'Model', 'sonnet')]
 		});
 		applyConfigUpdate(selection, [selectOption('model', 'Model', 'opus')]);
-		expect(selection.configOptions[0].select?.currentValue).toBe('opus');
+		expect(at(selection.configOptions, 0).select?.currentValue).toBe('opus');
 	});
 
 	it('an agent revoking its options clears them — nothing stale is kept', () => {
@@ -253,7 +254,7 @@ describe('applyPresentNotice', () => {
 			[],
 			resolved('p0', { ok: 'refused', catalogVersion: 'temper@1.0.0', reasons })
 		);
-		const text = messages[0].text;
+		const text = at(messages, 0).text;
 		expect(text).not.toContain('\n');
 		expect(text).toContain('y'.repeat(100));
 		expect(text).not.toContain('y'.repeat(200));

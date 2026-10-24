@@ -1,6 +1,7 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
 // for information about these interfaces
 declare global {
+	// biome-ignore lint/style/noNamespace: SvelteKit declares its app-level types by merging into the ambient `App` namespace; there is no module form
 	namespace App {
 		// interface Error {}
 		// interface Locals {}

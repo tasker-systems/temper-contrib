@@ -36,7 +36,7 @@ export interface LensProps {
 	 */
 	shown?: number;
 	/** The host's open answer, for a resource subject: the one read made on opening. */
-	opened?: DocOpened;
+	opened?: DocOpened | undefined;
 	tab: TabHandle;
 	/** The lens this is mounted as — what a bound lens reads its spec and binding from. */
 	lens?: LensDecl;
@@ -61,11 +61,11 @@ export interface LensDecl {
 	accepts: {
 		kinds: Subject['kind'][];
 		/** For rule 2; absent means any doc type of an accepted kind. */
-		docTypes?: string[];
+		docTypes?: string[] | undefined;
 		/** A place lens names the one place it shows. */
-		places?: Place[];
+		places?: Place[] | undefined;
 		/** A query lens may accept only queries that name one of these. */
-		queryBy?: ('context' | 'docType' | 'text')[];
+		queryBy?: ('context' | 'docType' | 'text')[] | undefined;
 	};
 	build: LensBuild;
 	/**
@@ -73,12 +73,12 @@ export interface LensDecl {
 	 * is lenses pinned to it (ruling A): this is the lens contribution point with one declared
 	 * field, not a fifth point.
 	 */
-	pinned?: { home: number };
+	pinned?: { home: number } | undefined;
 	/**
 	 * The heading a pinned section sits under. Consecutive sections in one group share a single
 	 * heading, drawn once by the first of them.
 	 */
-	group?: string;
+	group?: string | undefined;
 }
 
 /**
@@ -124,7 +124,7 @@ export interface DocTypeDecl {
 	 * in every theme; a doc type bound nowhere renders in the neutral role, and a binding
 	 * to anything but a slot is refused at the loader.
 	 */
-	tint?: SlotTint;
+	tint?: SlotTint | undefined;
 	/**
 	 * The open-tier defaults a new resource of this type starts with, asked at the create
 	 * moment — a `date` default is the create-time date, `YYYY-MM-DD`, so the declaration
@@ -132,7 +132,7 @@ export interface DocTypeDecl {
 	 * server's to fill (a task lands in `backlog`, a goal in `active`), and the desktop
 	 * sends none of that.
 	 */
-	defaults?: (today: string) => Record<string, unknown>;
+	defaults?: ((today: string) => Record<string, unknown>) | undefined;
 }
 
 /**
@@ -157,7 +157,7 @@ export interface VocabularyDecl {
 export interface CreateOption {
 	doctype: string;
 	/** Asked with the create-time date. `undefined` where no one has an opinion. */
-	defaults?: Record<string, unknown>;
+	defaults?: Record<string, unknown> | undefined;
 }
 
 /** Typed now, empty in this build: agent skills and stances. */

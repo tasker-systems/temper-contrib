@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { at } from '../../test/at';
 import { core } from './contributions/core';
 import { loadContributions } from './contributions/packages';
 import { pluginManifestText } from './contributions/plugin-fixture';
@@ -6,12 +7,15 @@ import { type Contribution, createMenu, homeSections, lensesFor, resolveLens } f
 import type { Subject } from './subjects';
 
 /** temper-workflows, as the loader now answers for it — the packages' shape, loaded. */
-const temperWorkflows: Contribution = loadContributions([
-	{
-		name: 'temper-workflows',
-		files: [{ path: 'plugin.json', text: pluginManifestText() }]
-	}
-]).contributions[0];
+const temperWorkflows: Contribution = at(
+	loadContributions([
+		{
+			name: 'temper-workflows',
+			files: [{ path: 'plugin.json', text: pluginManifestText() }]
+		}
+	]).contributions,
+	0
+);
 
 const resource: Subject = { kind: 'resource', id: '01a0e020-a6d7-7420-b924-68f5e89f354b' };
 const context: Subject = { kind: 'query', context: '+temper-dev/contrib' };
@@ -232,7 +236,7 @@ describe('the create menu', () => {
 		const menu = createMenu([core, opinionated('task', { date: today })], today);
 		const tasks = menu.filter((option) => option.doctype === 'task');
 		expect(tasks).toHaveLength(1);
-		expect(tasks[0].defaults).toEqual({ date: today });
+		expect(at(tasks, 0).defaults).toEqual({ date: today });
 		// Still the six, and a doctype the plugin stayed silent on keeps the base's plain entry.
 		expect(menu).toHaveLength(6);
 		expect(menu.find((option) => option.doctype === 'goal')?.defaults).toBeUndefined();

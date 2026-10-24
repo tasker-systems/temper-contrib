@@ -81,8 +81,8 @@ export function sourceHeadings(markdown: string): { text: string; index: number 
 	for (const line of markdown.split(/\r?\n/)) {
 		if (/^\s*(```|~~~)/.test(line)) fence = !fence;
 		const match = fence ? null : /^(#{1,6})\s+(.+?)\s*$/.exec(line);
-		if (!match) continue;
-		const text = match[2];
+		const text = match?.[2];
+		if (text === undefined) continue;
 		const index = seen.get(text) ?? 0;
 		seen.set(text, index + 1);
 		headings.push({ text, index });
@@ -101,23 +101,23 @@ export function capture(
 	scrollTop: number,
 	scrollHeight: number
 ): Position {
-	let chosen = -1;
-	let nextIndex = headings.length;
-	for (let i = 0; i < headings.length; i++) {
-		if (headings[i].top <= scrollTop) {
-			chosen = i;
+	let chosen: HeadingOccurrence | undefined;
+	let next: HeadingOccurrence | undefined;
+	for (const heading of headings) {
+		if (heading.top <= scrollTop) {
+			chosen = heading;
 		} else {
-			nextIndex = i;
+			next = heading;
 			break;
 		}
 	}
-	if (chosen < 0) return { heading: null, fraction: 0 };
+	if (chosen === undefined) return { heading: null, fraction: 0 };
 	// The fraction through the chosen section: 0 at its heading, 1 at the next (or, past the
 	// last heading, the bottom of the document).
-	const sectionEnd = nextIndex < headings.length ? headings[nextIndex].top : scrollHeight;
-	const span = Math.max(1, sectionEnd - headings[chosen].top);
-	const through = Math.max(0, Math.min(1, (scrollTop - headings[chosen].top) / span));
-	return { heading: anchorFor(headings[chosen]), fraction: through };
+	const sectionEnd = next !== undefined ? next.top : scrollHeight;
+	const span = Math.max(1, sectionEnd - chosen.top);
+	const through = Math.max(0, Math.min(1, (scrollTop - chosen.top) / span));
+	return { heading: anchorFor(chosen), fraction: through };
 }
 
 /** The anchor a heading occurrence is stored under: its text, always with its ordinal. */
@@ -175,11 +175,9 @@ export function restoreTop(
 	const at = headings.indexOf(heading);
 	// The next heading closes the section — a deeper one too, so a subsection's heading bounds
 	// the fraction the same way temper's section cut does.
-	const nextIndex = at + 1;
+	const next = headings[at + 1];
 	const sectionBottom =
-		nextIndex < headings.length
-			? headings[nextIndex].top
-			: Math.max(scrollHeight, heading.top + clientHeight);
+		next !== undefined ? next.top : Math.max(scrollHeight, heading.top + clientHeight);
 	const span = Math.max(1, sectionBottom - heading.top);
 	const usable = Math.max(1, scrollHeight - clientHeight);
 	const target = heading.top + Math.max(0, Math.min(1, fraction)) * span;

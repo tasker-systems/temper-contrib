@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { at } from '../../../test/at';
 import {
 	degrees,
 	edgeGeometry,
@@ -96,7 +97,7 @@ describe('the graph geometry', () => {
 			'force'
 		);
 		expect(g.edges).toHaveLength(1);
-		const pair = g.edges[0];
+		const pair = at(g.edges, 0);
 		expect(pair.edges.map((e) => e.reversed)).toEqual([false, true]);
 		expect(pairEnds(pair.edges)).toEqual({ atSource: true, atTarget: true });
 		expect(pairStroke(pair.edges).role).toBe('contradicts');
@@ -145,7 +146,7 @@ describe('the graph geometry', () => {
 	});
 
 	it('keeps separate clusters near enough to read', () => {
-		const pairs = Array.from({ length: 20 }, (_, i) => [`p${i}a`, `p${i}b`]);
+		const pairs = Array.from({ length: 20 }, (_, i) => [`p${i}a`, `p${i}b`] as const);
 		const g = settle(
 			pairs.flat().map((id) => ({ id })),
 			pairs.map(([source, target]) => ({ source, target })),

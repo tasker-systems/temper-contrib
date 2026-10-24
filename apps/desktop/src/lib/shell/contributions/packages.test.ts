@@ -9,6 +9,7 @@
  * package name, any file names, no disk, no repo path.
  */
 import { describe, expect, it } from 'vitest';
+import { at } from '../../../test/at';
 import type { Contribution } from '../lenses';
 import { loadContributions } from './packages';
 import { pluginManifestText } from './plugin-fixture';
@@ -121,7 +122,7 @@ describe('the package loader', () => {
 	it('loads what temper-workflows.ts used to export, the component closures apart', () => {
 		const { contributions, refusals } = loadContributions(packageWith(pluginManifestText()));
 		expect(refusals).toEqual([]);
-		expect(withoutClosures(contributions[0])).toEqual(wasTemperWorkflows);
+		expect(withoutClosures(at(contributions, 0))).toEqual(wasTemperWorkflows);
 	});
 
 	it('refuses an unknown component, naming the package and the field path', () => {
@@ -258,7 +259,7 @@ describe('the package loader', () => {
 	it('refuses a lens accepts carrying an extra key', () => {
 		refusesWith(
 			withManifest((m) => {
-				const lens = (m.contributions as { lenses: Record<string, unknown>[] }).lenses[0];
+				const lens = at((m.contributions as { lenses: Record<string, unknown>[] }).lenses, 0);
 				(lens.accepts as Record<string, unknown>).groups = [];
 			}),
 			'refused the temper-workflows package: Unrecognized key: "groups" at contributions.lenses[0].accepts'
@@ -268,8 +269,10 @@ describe('the package loader', () => {
 	it('refuses a way-in filter carrying an extra key', () => {
 		refusesWith(
 			withManifest((m) => {
-				const way = (m.contributions as { waysIn: { filter: Record<string, unknown> }[] })
-					.waysIn[0];
+				const way = at(
+					(m.contributions as { waysIn: { filter: Record<string, unknown> }[] }).waysIn,
+					0
+				);
 				way.filter.plugin = 'core';
 			}),
 			'refused the temper-workflows package: Unrecognized key: "plugin" at contributions.waysIn[0].filter'
@@ -279,11 +282,14 @@ describe('the package loader', () => {
 	it('refuses a vocabulary carrying an extra key', () => {
 		refusesWith(
 			withManifest((m) => {
-				const vocabulary = (
-					m.contributions as {
-						vocabularies: Record<string, unknown>[];
-					}
-				).vocabularies[0];
+				const vocabulary = at(
+					(
+						m.contributions as {
+							vocabularies: Record<string, unknown>[];
+						}
+					).vocabularies,
+					0
+				);
 				vocabulary.defaults = {};
 			}),
 			'refused the temper-workflows package: Unrecognized key: "defaults" at contributions.vocabularies[0]'
@@ -293,7 +299,7 @@ describe('the package loader', () => {
 	it('refuses a lens whose build state is bound — bound is runtime state, not a manifest claim', () => {
 		refusesWith(
 			withManifest((m) => {
-				(m.contributions as { lenses: Record<string, unknown>[] }).lenses[0].build = {
+				at((m.contributions as { lenses: Record<string, unknown>[] }).lenses, 0).build = {
 					state: 'bound',
 					component: 'home-handoff'
 				};
@@ -324,7 +330,7 @@ describe('the package loader', () => {
 		const { contributions, refusals } = loadOne(
 			withManifest((m) => {
 				const lenses = (m.contributions as { lenses: Record<string, unknown>[] }).lenses;
-				lenses[1].id = lenses[0].id;
+				at(lenses, 1).id = at(lenses, 0).id;
 			})
 		);
 		expect(contributions).toEqual([]);
@@ -337,7 +343,7 @@ describe('the package loader', () => {
 		const { contributions, refusals } = loadOne(
 			withManifest((m) => {
 				const waysIn = (m.contributions as { waysIn: Record<string, unknown>[] }).waysIn;
-				waysIn[1].id = waysIn[0].id;
+				at(waysIn, 1).id = at(waysIn, 0).id;
 			})
 		);
 		expect(contributions).toEqual([]);

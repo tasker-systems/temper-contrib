@@ -8,13 +8,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { Resolution } from '$lib/refs';
+import { at } from '../../test/at';
 import ResourceRef from './ResourceRef.svelte';
 
 const id = (n: number) => `01a0e020-a6d7-7420-b924-${String(n).padStart(12, '0')}`;
 
 function answering(answer: (asked: string) => Resolution | 'never' | 'throw'): void {
 	vi.mocked(invoke).mockImplementation((async (_cmd: string, args: { ids: string[] }) => {
-		const asked = args.ids[0];
+		const asked = at(args.ids, 0);
 		const a = answer(asked);
 		if (a === 'never') return new Promise(() => {});
 		if (a === 'throw') throw new Error('temper is not connected');

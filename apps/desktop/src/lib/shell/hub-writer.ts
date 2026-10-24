@@ -37,7 +37,7 @@ const noteToCore: Note = (leave) => invoke('hub_note_left', { leave });
 export function startHubWriter(
 	model: TabModel,
 	note: Note = noteToCore,
-	target: { window?: Window; document?: Document } = {
+	target: { window?: Window | undefined; document?: Document | undefined } = {
 		window: typeof window === 'undefined' ? undefined : window,
 		document: typeof document === 'undefined' ? undefined : document
 	}

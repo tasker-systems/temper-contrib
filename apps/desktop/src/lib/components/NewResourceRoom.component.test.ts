@@ -17,6 +17,7 @@ import { shellContributions } from '$lib/shell/contributions';
 import { pluginPackages } from '$lib/shell/contributions/plugin-fixture';
 import type { TabHandle } from '$lib/shell/lenses';
 import { temperViews } from '$lib/temper-views.svelte';
+import { at } from '../../test/at';
 import Page from './NewResourceRoom.svelte';
 
 const NOTES = {
@@ -164,7 +165,10 @@ describe('the create room', () => {
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(2)
 		);
-		const [, retryArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[1];
+		const [, retryArgs] = at(
+			vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create'),
+			1
+		);
 		expect(retryArgs).toEqual({
 			contextId: 'ctx-1',
 			docType: 'task',
@@ -177,7 +181,10 @@ describe('the create room', () => {
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(3)
 		);
-		const [, landedArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[2];
+		const [, landedArgs] = at(
+			vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create'),
+			2
+		);
 		expect(landedArgs).toEqual({
 			contextId: 'ctx-1',
 			docType: 'task',
@@ -219,7 +226,10 @@ describe('the create room', () => {
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')).toHaveLength(2)
 		);
-		const [, retryArgs] = vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create')[1];
+		const [, retryArgs] = at(
+			vi.mocked(invoke).mock.calls.filter(([cmd]) => cmd === 'doc_create'),
+			1
+		);
 		expect(retryArgs).toMatchObject({ idempotencyKey: NEW });
 	});
 

@@ -8,6 +8,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { temperViews } from '$lib/temper-views.svelte';
+import { at } from '../../test/at';
 import Page from './SettingsRoom.svelte';
 
 // jsdom has no matchMedia; the theme control watches the system preference.
@@ -24,7 +25,7 @@ if (!window.matchMedia) {
 	})) as unknown as typeof window.matchMedia;
 }
 
-const storedAgents: Record<string, { label?: string; command?: string }> = {
+const storedAgents: Record<string, { label?: string | undefined; command?: string | undefined }> = {
 	opencode: { label: 'opencode', command: 'opencode acp' }
 };
 
@@ -68,7 +69,7 @@ describe('the settings room', () => {
 		);
 		// The working directory's save is first, the device label's second, the temper context's last.
 		expect(saves.length).toBe(3);
-		await fireEvent.click(saves[2]);
+		await fireEvent.click(at(saves, 2));
 
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke)).toHaveBeenCalledWith('settings_set_temper_context', {
@@ -98,9 +99,10 @@ describe("this device's label", () => {
 			return found;
 		});
 		await fireEvent.input(input, { target: { value: 'laptop' } });
-		const save = [...container.querySelectorAll('button')].filter(
-			(b) => b.textContent === 'Save'
-		)[1];
+		const save = at(
+			[...container.querySelectorAll('button')].filter((b) => b.textContent === 'Save'),
+			1
+		);
 		await fireEvent.click(save);
 		await vi.waitFor(() =>
 			expect(vi.mocked(invoke)).toHaveBeenCalledWith('settings_set_device_label', {
@@ -208,9 +210,9 @@ describe('agents by configuration', () => {
 			return found as HTMLElement;
 		});
 		const inputs = [...form.querySelectorAll('input')] as HTMLInputElement[];
-		await fireEvent.input(inputs[0], { target: { value: 'cursor' } });
-		await fireEvent.input(inputs[1], { target: { value: 'cursor cli' } });
-		await fireEvent.input(inputs[2], { target: { value: 'cursor-agent --acp' } });
+		await fireEvent.input(at(inputs, 0), { target: { value: 'cursor' } });
+		await fireEvent.input(at(inputs, 1), { target: { value: 'cursor cli' } });
+		await fireEvent.input(at(inputs, 2), { target: { value: 'cursor-agent --acp' } });
 		await fireEvent.click(form.querySelector('button') as HTMLButtonElement);
 
 		await vi.waitFor(() =>

@@ -42,7 +42,7 @@
 		initial: string;
 		value?: string;
 		focused?: boolean;
-		onview?: (view: EditorView | null) => void;
+		onview?: ((view: EditorView | null) => void) | undefined;
 	} = $props();
 
 	let host = $state<HTMLDivElement | null>(null);

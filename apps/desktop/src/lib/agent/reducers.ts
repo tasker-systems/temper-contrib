@@ -56,10 +56,10 @@ export type ChatMessage = {
 	text: string;
 	/** What went with a person's prompt: the name of the room shared with the agent. */
 	with?: string;
-	toolCallId?: string;
+	toolCallId?: string | undefined;
 	status?: string;
 	/** Where a rendered presentation's record lives — the tab line's rebuildable subject. */
-	tab?: { resource: string; artifact: string };
+	tab?: { resource: string; artifact: string } | undefined;
 };
 
 /** The declared selection, established from what the agent declares and

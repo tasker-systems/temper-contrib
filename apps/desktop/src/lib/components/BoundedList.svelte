@@ -16,7 +16,7 @@
 		scope: string;
 		label: string;
 		state: 'present' | RegionStateName;
-		more?: { step: number } | null;
+		more?: { step: number } | null | undefined;
 		onmore?: () => void;
 		children?: Snippet;
 	} = $props();

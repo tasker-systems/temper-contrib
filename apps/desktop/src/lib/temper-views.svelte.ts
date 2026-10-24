@@ -33,12 +33,12 @@ export const RECENT_STEP = 10;
 
 /** What a bounded list read narrows by (the `temper_list_resources` filter). */
 export type ListFilter = {
-	docType?: string;
-	stage?: string;
-	status?: string;
-	contextRef?: string;
+	docType?: string | undefined;
+	stage?: string | undefined;
+	status?: string | undefined;
+	contextRef?: string | undefined;
 	/** `@me` for the person's own resources, or a profile handle. */
-	owner?: string;
+	owner?: string | undefined;
 };
 
 /** One bounded list's read: its page, when it landed, and whether it is this session's. */
