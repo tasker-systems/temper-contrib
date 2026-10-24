@@ -6,7 +6,7 @@ Content-Security-Policy in tauri.conf.json both ways.
    in a tab, a second tab on the bound table lens, a switch between them (the room kept, not
    remounted), a switch to a lens that is not built yet, the palette (opened by its trigger and by Ctrl-K, a lens switched
    from it), the ways-in panel opened from the menu chip and closed and reopened from the
-   panel's own ×, settings and setup opened as tabs, the view catalog in every theme painting
+   panel's own close button, settings and setup opened as tabs, the view catalog in every theme painting
    only from theme roles (`catalog_paint.py`), and home again.
 2. The policy is a backstop: an injected inline script, eval, an inline event handler, an inline
    style attribute, a remote image and a remote fetch are each refused, and each refusal is seen
@@ -264,15 +264,16 @@ def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
     failures: list[str] = []
     report: dict = {}
     driver = None
-    driver_proc = subprocess.Popen(
-        ["tauri-driver", "--port", str(DRIVER_PORT)],
-        # The app is spawned by tauri-driver and its words flow through here: a session
-        # that never answers is diagnosed by what the app said on its way out, so keep
-        # both channels. One file per attempt — a retry must not overwrite the
-        # previous attempt's only words.
-        stdout=open(f"tauri-driver-{n}.log", "w"),
-        stderr=subprocess.STDOUT,
-    )
+    # The app is spawned by tauri-driver and its words flow through here: a session that never
+    # answers is diagnosed by what the app said on its way out, so keep both channels. One file
+    # per attempt — a retry must not overwrite the previous attempt's only words. The child holds
+    # its own descriptor, so this process's copy closes as soon as the driver is spawned.
+    with open(f"tauri-driver-{n}.log", "w") as driver_log:
+        driver_proc = subprocess.Popen(
+            ["tauri-driver", "--port", str(DRIVER_PORT)],
+            stdout=driver_log,
+            stderr=subprocess.STDOUT,
+        )
     os.environ.setdefault("RUST_BACKTRACE", "1")
     try:
         wait_for_port(DRIVER_PORT)
@@ -424,7 +425,7 @@ def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
             )
 
             # The ways-in panel opens from the menu chip's entry, closes and reopens from the
-            # panel's own ×: hidden, never remounted. (The panel is closed by default — the
+            # panel's own close button: hidden, never remounted. (The panel is closed by default — the
             # room is the first thing the window offers.)
             ways = driver.execute_script(
                 "return document.querySelector('nav[aria-label=\"Ways in\"]')"
@@ -442,7 +443,7 @@ def run_attempt(binary: Path, n: int) -> tuple[dict | None, list[str]]:
             ways_open = driver.execute_script(
                 "return document.querySelector('nav[aria-label=\"Ways in\"]')"
             )
-            # The panel closes from its own ×, and reopening it re-reads nothing.
+            # The panel closes from its own close button, and reopening it re-reads nothing.
             driver.find_element(
                 By.CSS_SELECTOR,
                 'nav[aria-label="Ways in"] button[aria-label="Close the ways-in panel"]',
