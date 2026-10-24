@@ -69,9 +69,14 @@ exception reads as a known divergence that no longer exists, the same failure `R
 `.conventions/status.toml` records this repository's status for each rule it has examined, in the
 register's vocabulary. Every status in it must name a rule in the pinned baseline. Every
 `gated: <path>[#job]` must name a file, and optionally a workflow job, that exists. When a pin
-move changes a rule, the author records the rule's status in the same commit. *Why:* the status is
-written beside the gate it describes, where review sees both, and the register's columns can be
-generated from it rather than kept by hand ([tenet 5](tenets.md)).
+move changes a rule, the author records the rule's status in the same commit, and sets the file's
+`reviewed_at` to the new pin: check F fails while `reviewed_at` is not the pin. `bump` sets it
+itself when the move adds, removes or changes no rule. The register's consumer columns are
+generated from these files by [`../tools/register.py`](../tools/register.py), and a scheduled job
+in the baseline fails, naming each cell, where the register and a consumer disagree; the consumer
+wins. *Why:* the status is written beside the gate it describes, where review sees both, and a pin
+move is one reviewed act in one repository. The register is derived from what the consumers say,
+not kept by hand ([tenet 5](tenets.md)).
 
 *Not checked:* that a named gate actually fails on a violation. That is the bite test the gate
 itself owes ([TW-5](tripwires.md)).

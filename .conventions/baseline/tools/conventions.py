@@ -7,17 +7,18 @@ baseline's main, so that the verdict a consumer gets is the one its pin chose:
     python3 -I .conventions/baseline/tools/conventions.py check [--offline]
     python3 -I .conventions/baseline/tools/conventions.py bump --revision <sha|main> [--init --name N]
 
-`check` runs five checks and exits non-zero if any fails:
+`check` runs six checks and exits non-zero if any fails:
 
   A  adopted config matches the projection, apart from recorded exceptions   (CONS-3, CONS-4)
   B  the projection matches the pinned commit, byte for byte                 (CONS-1, CONS-2)
   C  lag behind the baseline's main is reported; it never fails              (CONS-7)
   D  every `gated:` status names a gate that exists                          (CONS-5)
   E  the agent entry files link the projected skill, and the skill is current (CONS-6)
+  F  the statuses were reviewed against the pinned revision                   (CONS-5)
 
 B and C fetch the baseline (it is public; no credential is used or needed). A fetch failure fails
 B: the projection being hand-edited is exactly what B guards, so it never passes unchecked.
-`--offline` runs A, D and E only, and says so.
+`--offline` runs A, D, E and F only, and says so.
 
 NOT CHECKED, by design:
   - that a `gated:` gate actually fails on a violation (that is each consumer's bite test, TW-5);
@@ -180,11 +181,13 @@ def subtable(data: dict[str, Any], dotted: str) -> Any:
 
 
 def rule_rows(rules_md: Path) -> dict[str, str]:
+    """Each rule's id and statement: the register row's first two cells. The per-consumer
+    columns after them are generated and move on their own, so they are not part of the rule."""
     rows: dict[str, str] = {}
     for line in rules_md.read_text(encoding="utf-8").splitlines():
         match = RULE_ROW_RE.match(line)
         if match:
-            rows[match.group(1)] = match.group(2).strip()
+            rows[match.group(1)] = re.split(r"(?<!\\)\|", match.group(2), maxsplit=1)[0].strip()
     return rows
 
 
@@ -311,6 +314,30 @@ def load_statuses(consumer: Consumer) -> dict[str, str]:
         data = tomllib.load(handle)
     rules = data.get("rules", {})
     return {str(k): str(v) for k, v in rules.items()}
+
+
+def load_reviewed_at(root: Path) -> str | None:
+    path = root / CONVENTIONS_DIR / "status.toml"
+    if not path.is_file():
+        return None
+    with path.open("rb") as handle:
+        value = tomllib.load(handle).get("reviewed_at")
+    return value if isinstance(value, str) else None
+
+
+def set_reviewed_at(root: Path, sha: str) -> None:
+    """Write `reviewed_at` above the first table of status.toml, replacing any earlier value."""
+    path = root / CONVENTIONS_DIR / "status.toml"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    line = f'reviewed_at = "{sha}"\n'
+    for index, existing in enumerate(lines):
+        if re.match(r"^reviewed_at\s*=", existing):
+            lines[index] = line
+            break
+    else:
+        first_table = next((i for i, x in enumerate(lines) if x.startswith("[")), len(lines))
+        lines.insert(first_table, line)
+    path.write_text("".join(lines), encoding="utf-8")
 
 
 # --------------------------------------------------------------------------------------------
@@ -607,6 +634,28 @@ def check_guidance(consumer: Consumer, report: Report) -> None:
 
 
 # --------------------------------------------------------------------------------------------
+# Check F — the statuses were reviewed against the pinned revision
+# --------------------------------------------------------------------------------------------
+
+
+def check_reviewed(consumer: Consumer, report: Report) -> None:
+    reviewed = load_reviewed_at(consumer.root)
+    if reviewed is None:
+        report.fail(
+            "F",
+            "status.toml has no `reviewed_at`: name the baseline revision these statuses were "
+            "reviewed against (`bump` writes it when the pin moves without changing a rule)",
+        )
+    elif reviewed != consumer.revision:
+        report.fail(
+            "F",
+            f"status.toml was reviewed at {reviewed}, but the pin is {consumer.revision}: record "
+            "the status of each rule `bump` reported added or changed, then set `reviewed_at` to "
+            "the pin, in the same commit as the pin move",
+        )
+
+
+# --------------------------------------------------------------------------------------------
 # bump
 # --------------------------------------------------------------------------------------------
 
@@ -663,11 +712,13 @@ def bump(root: Path, revision: str, url: str | None, init_name: str | None) -> i
     new_rules = rule_rows(consumer.baseline_dir / "doctrine" / "rules.md")
     print(f"pinned {consumer.name} to {sha}")
     if not old_rules:
+        set_reviewed_at(root, sha)
         print(
             f"  first projection: {len(new_rules)} rules. Each is unexamined here until you record"
             " its status in .conventions/status.toml"
         )
         return 0
+    moved = False
     for label, ids in (
         ("added", sorted(new_rules.keys() - old_rules.keys())),
         ("removed", sorted(old_rules.keys() - new_rules.keys())),
@@ -677,8 +728,16 @@ def bump(root: Path, revision: str, url: str | None, init_name: str | None) -> i
         ),
     ):
         for rule in ids:
+            moved = True
             print(f"  rule {label}: {rule}")
-    print("record each changed rule's status in .conventions/status.toml, in this commit")
+    if not moved:
+        set_reviewed_at(root, sha)
+        print("  no rule was added, removed or changed; status.toml is reviewed at the new pin")
+        return 0
+    print(
+        "record the status of each rule above in .conventions/status.toml, then set its "
+        f'`reviewed_at = "{sha}"`, in this commit (check F fails until you do)'
+    )
     return 0
 
 
@@ -704,6 +763,7 @@ skill = ".claude/skills/tasker-systems-conventions"
 INIT_STATUS = """\
 # This repository's status for each baseline rule, in the register's vocabulary:
 # gated: <path>[#job], partial: …, practiced, convention: …, uncovered, unexamined, n/a.
+# `reviewed_at` is the baseline revision these statuses were reviewed against (check F).
 [rules]
 """
 
@@ -724,9 +784,9 @@ INIT_EXCEPTIONS = """\
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="conventions.py", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    check = sub.add_parser("check", help="run checks A-E against the consumer at --root")
+    check = sub.add_parser("check", help="run checks A-F against the consumer at --root")
     check.add_argument("--root", type=Path, default=Path.cwd())
-    check.add_argument("--offline", action="store_true", help="run A, D and E only, and say so")
+    check.add_argument("--offline", action="store_true", help="run A, D, E and F only, and say so")
     check.add_argument("--baseline-repo", help="override the baseline URL (tests)")
     move = sub.add_parser("bump", help="move the pin and rewrite the projection and skill")
     move.add_argument("--root", type=Path, default=Path.cwd())
@@ -752,6 +812,7 @@ def main(argv: list[str] | None = None) -> int:
             check_pin(consumer, report, args.baseline_repo or consumer.baseline)
         check_statuses(consumer, report)
         check_guidance(consumer, report)
+        check_reviewed(consumer, report)
     except UsageError as error:
         report.fail("config", str(error))
     return report.emit()

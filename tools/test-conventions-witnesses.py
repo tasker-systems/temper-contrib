@@ -23,6 +23,7 @@ Cases, by what they guard:
   - guidance: the projected skill hand-edited; a status changed without re-rendering;
     AGENTS.md no longer linking the skill                                             (check E)
   - statuses: a `gated:` status naming a job that does not exist                      (check D)
+  - a pin move: statuses reviewed against another revision than the pin, or none     (check F)
 
 NOT CHECKED:
   - that a named gate fails on a violation of its rule: each gate owes its own bite test;
@@ -325,6 +326,26 @@ CASES: list[tuple[str, Seed, bool, str | None]] = [
         ),
         True,
         "E: AGENTS.md does not link the projected skill",
+    ),
+    # --- a pin move is one reviewed act (check F) ---
+    (
+        "the statuses were reviewed against another revision than the pin",
+        lambda c: edit(
+            c,
+            ".conventions/status.toml",
+            f'reviewed_at = "{pinned_revision(c)}"',
+            f'reviewed_at = "{"0" * 40}"',
+        ),
+        True,
+        "F: status.toml was reviewed at " + "0" * 40,
+    ),
+    (
+        "the statuses name no revision they were reviewed against",
+        lambda c: edit(
+            c, ".conventions/status.toml", f'reviewed_at = "{pinned_revision(c)}"\n', ""
+        ),
+        True,
+        "F: status.toml has no `reviewed_at`",
     ),
     # --- statuses (check D) ---
     (
