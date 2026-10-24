@@ -54,6 +54,7 @@ dependencies = [
   "shell-lint",
   "plugins-self-check",
   "design-contract-absent",
+  "conventions",
   "workflows-lint",
   "secrets",
 ]
@@ -245,6 +246,11 @@ shellcheck $files
 description = "author-tools: schemas valid, fixtures pass/fail as declared"
 command = "./plugins/author-tools/scripts/lint.sh"
 args = ["--self-check"]
+
+[tasks.conventions]
+description = "the conventions baseline: pin, projection, adopted config, statuses, projected skill"
+command = "python3"
+args = ["-I", ".conventions/baseline/tools/conventions.py", "check"]
 
 [tasks.design-contract-absent]
 description = "no copy of the theme contract: it lives in @tasker-systems/temper-design (and the check's harness)"

@@ -179,6 +179,21 @@ jobs:
           ./tools/check-no-design-contract.sh
           ./tools/test-check-no-design-contract.sh
 
+  conventions:
+    name: Conventions baseline (pin, projection, adopted config, statuses, skill)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The checker is the projected copy, so the verdict is the one the pin chose. It reads the
+      # public baseline to compare the projection with the pinned commit; it uses no secret, so it
+      # runs the same on a fork's pull request.
+      - name: conventions.py check
+        run: python3 -I .conventions/baseline/tools/conventions.py check
+
   witness-gate:
     name: CSP witness gate (what the diff can move)
     runs-on: ubuntu-latest
@@ -308,7 +323,7 @@ jobs:
   ci-success:
     name: CI Success
     if: always()
-    needs: [verify, desktop, hygiene, witness-gate, csp-witness]
+    needs: [verify, desktop, hygiene, conventions, witness-gate, csp-witness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
