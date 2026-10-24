@@ -12,6 +12,7 @@ import type { Connections, DocOpened, History, PanelRead, Related, Sources } fro
 import { SCROLL_STORE_KEY } from '$lib/scroll-position';
 import StepHost from '$lib/shell/StepHost.svelte';
 import { HOME_TAB, tabs } from '$lib/shell/tabs.svelte';
+import { at } from '../../test/at';
 
 const ID = '01a0e020-a6d7-7420-b924-68f5e89f354b';
 const PEER = '01a0e2a1-34a8-7a63-8fd6-cd3220c36191';
@@ -80,7 +81,7 @@ const HISTORY: History = {
 const SOURCES: Sources = { blocks: [] };
 
 type Answers = Partial<Record<string, () => Promise<unknown>>>;
-let calls: { cmd: string; args?: Record<string, unknown> }[] = [];
+let calls: { cmd: string; args?: Record<string, unknown> | undefined }[] = [];
 let answers: Answers = {};
 
 function answering(next: Answers): void {
@@ -270,6 +271,7 @@ describe('the document room', () => {
 		answering({
 			...DEFAULTS,
 			doc_sources: async () => {
+				// biome-ignore lint/style/useThrowOnlyError: a Tauri command rejects with its error string, not an Error; the room must treat that shape as a failure
 				throw 'temper is not connected';
 			}
 		});
@@ -339,8 +341,8 @@ describe('the document room', () => {
 			doc_connections: present<Connections>({
 				total: 2,
 				edges: [
-					{ ...edges(1).edges[0], edgeId: 'r', peerTable: 'kb_resources', peerId: PEER },
-					{ ...edges(1).edges[0], edgeId: 'b', direction: 'incoming' }
+					{ ...at(edges(1).edges, 0), edgeId: 'r', peerTable: 'kb_resources', peerId: PEER },
+					{ ...at(edges(1).edges, 0), edgeId: 'b', direction: 'incoming' }
 				]
 			}),
 			temper_resolve_refs: async () => [
@@ -573,7 +575,7 @@ describe("the document room's save path", () => {
 		view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
 		await fireEvent.click(button(container, 'Save'));
 		await waitFor(() => expect(saveCalls().length).toBe(2));
-		expect(saveCalls()[1].baseHash).toBe('newer');
+		expect(at(saveCalls(), 1).baseHash).toBe('newer');
 	});
 
 	it('a dirty draft holds the tab: beforeLeave answers, and a saved draft releases it (W-draft-guard)', async () => {
@@ -645,7 +647,7 @@ describe("the document room's save path", () => {
 		await fireEvent.input(priorityInput, { target: { value: '3' } });
 		await fireEvent.click(button(container, 'Save'));
 		await waitFor(() => expect(metaCalls()).toHaveLength(1));
-		const sent = metaCalls()[0];
+		const sent = at(metaCalls(), 0);
 		expect(sent.id).toBe(ID);
 		// Only the changed key, and its type survives: a number in, a number out — never "3".
 		expect(sent.patch).toEqual({ openMeta: { priority: 3 } });
@@ -1017,8 +1019,8 @@ describe("the document room's intent handoff (slice 5, W12)", () => {
 		view.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
 		await fireEvent.click(button(container, 'Save'));
 		await waitFor(() => expect(saveCalls().length).toBe(2));
-		expect(saveCalls()[1].baseHash).toBe('newer');
-		expect(saveCalls()[1].content).toBe('# Scope\n\nReconciled.!');
+		expect(at(saveCalls(), 1).baseHash).toBe('newer');
+		expect(at(saveCalls(), 1).content).toBe('# Scope\n\nReconciled.!');
 	});
 
 	it('a turn that ends with no proposal is said — the no-proposal verdict, never a guess', async () => {

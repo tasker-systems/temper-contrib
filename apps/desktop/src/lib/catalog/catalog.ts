@@ -59,10 +59,11 @@ const propsSchemas: Record<string, z.ZodType> = Object.fromEntries(
 );
 
 const components = Object.fromEntries(
-	Object.entries((source as Source).components).map(([name, c]) => [
-		name,
-		{ props: propsSchemas[name], slots: c.slots, description: c.description, example: c.example }
-	])
+	Object.entries((source as Source).components).map(([name, c]) => {
+		const props = propsSchemas[name];
+		if (props === undefined) throw new Error(`catalog: no props schema built for ${name}`);
+		return [name, { props, slots: c.slots, description: c.description, example: c.example }];
+	})
 );
 
 // json-render's own actions stay empty: a spec cannot bind one (`on` is refused at the door), so
@@ -181,7 +182,7 @@ function walk(
 	props: Record<string, unknown>,
 	path: string
 ): unknown[] {
-	const [head, ...rest] = path.split('/');
+	const [head = '', ...rest] = path.split('/');
 	let at: unknown[] = head === '$children' ? [el.children ?? []] : [props[head]];
 	for (const step of rest)
 		at = at.flatMap((v) =>
@@ -326,7 +327,9 @@ export function checkSpec(spec: unknown): SpecCheck {
 
 	for (const [key, el] of Object.entries(elements)) {
 		if (!isRecord(el) || typeof el.type !== 'string' || !has(propsSchemas, el.type)) continue;
-		const props = propsSchemas[el.type].safeParse(el.props);
+		const propsSchema = propsSchemas[el.type];
+		if (propsSchema === undefined) continue;
+		const props = propsSchema.safeParse(el.props);
 		if (!props.success) {
 			for (const i of props.error.issues)
 				errors.push(
@@ -334,7 +337,7 @@ export function checkSpec(spec: unknown): SpecCheck {
 				);
 			continue;
 		}
-		const checks = (source as Source).components[el.type].checks ?? [];
+		const checks = (source as Source).components[el.type]?.checks ?? [];
 		errors.push(
 			...declaredErrors(key, el, props.data as Record<string, unknown>, checks, elements)
 		);

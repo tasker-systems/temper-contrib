@@ -13,7 +13,7 @@ export interface ThemeMeta {
 	name: string;
 	title: string;
 	appearance: Appearance;
-	counterpart?: string;
+	counterpart?: string | undefined;
 }
 
 /** Follow the system's appearance within a family (a theme and its counterpart), or fix one theme. */
@@ -35,6 +35,7 @@ export function resolveTheme(
 ): string {
 	const find = (name: string) => themes.find((t) => t.name === name);
 	const fallback = find('quiet-instrument') ?? themes[0];
+	if (fallback === undefined) throw new Error('resolveTheme: the theme list is empty');
 	if (pref.follow === 'fixed') return (find(pref.name) ?? fallback).name;
 	const base = find(pref.family) ?? fallback;
 	const want: Appearance = systemDark ? 'dark' : 'light';

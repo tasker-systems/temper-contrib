@@ -5,6 +5,7 @@
  * mark the contract gives anything no vocabulary claimed.
  */
 import { describe, expect, it } from 'vitest';
+import { at } from '../../../test/at';
 import type { Contribution } from '../lenses';
 import { boundVocabularies, docTypeTint } from './bindings';
 
@@ -29,8 +30,8 @@ const core = pluginWithTints({});
 describe('the binding merge', () => {
 	it('starts from the core default binding, before any plugin', () => {
 		const bindings = boundVocabularies([core]);
-		expect(bindings[0].id).toBe('core');
-		expect(bindings[0].doctypes['task']).toBe('cat-6');
+		expect(at(bindings, 0).id).toBe('core');
+		expect(at(bindings, 0).doctypes['task']).toBe('cat-6');
 		expect(bindings).toHaveLength(1);
 	});
 

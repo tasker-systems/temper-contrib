@@ -66,7 +66,7 @@
 		/** The reference the tab opened, whatever the read answered. */
 		id: string;
 		/** The host's open answer; absent while it is arriving. */
-		opened?: DocOpened;
+		opened?: DocOpened | undefined;
 		tab?: TabHandle;
 	} = $props();
 

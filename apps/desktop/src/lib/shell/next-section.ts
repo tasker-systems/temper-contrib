@@ -19,19 +19,20 @@ export function nextSection(markdown: string, bound: number = NEXT_BOUND): NextS
 	let level = 0;
 	let heading = '';
 	const body: string[] = [];
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i];
+	for (const [i, line] of lines.entries()) {
 		if (/^\s*(```|~~~)/.test(line)) fence = !fence;
 		const match = fence ? null : HEADING.exec(line);
+		const marks = match?.[1];
+		const title = match?.[2];
 		if (start < 0) {
-			if (match && /^next\b/i.test(match[2])) {
+			if (marks !== undefined && title !== undefined && /^next\b/i.test(title)) {
 				start = i;
-				level = match[1].length;
-				heading = match[2];
+				level = marks.length;
+				heading = title;
 			}
 			continue;
 		}
-		if (match && match[1].length <= level) break;
+		if (marks !== undefined && marks.length <= level) break;
 		body.push(line);
 	}
 	if (start < 0) return null;

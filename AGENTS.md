@@ -25,6 +25,11 @@ tools/check-no-design-contract.sh  # refuses a copy of the theme contract (it li
 
 ## Conventions
 
+- The tasker-systems engineering baseline arrives as a projected skill,
+  [`.claude/skills/tasker-systems-conventions`](.claude/skills/tasker-systems-conventions/SKILL.md),
+  pinned in `.conventions/consumer.toml`: the rules, why each exists, and whether a
+  gate enforces it here. Read it before claiming a rule is enforced. Move the pin
+  with `.conventions/baseline/tools/conventions.py bump`; never edit the projection.
 - Schemas: draft 2020-12, `additionalProperties: false` — the vocabulary
   contract only bites closed.
 - Themes: the role contract and every theme live in `@tasker-systems/temper-design`,

@@ -1,0 +1,147 @@
+# This repository's status for each baseline rule, in the register's vocabulary:
+# gated: <path>[#job], partial: …, practiced, convention: …, uncovered, unexamined, n/a.
+#
+# Read from this repository's own gates (.github/workflows/ci.yml), not from the register. A rule
+# that is not listed has not been examined here. `gated` names the CI job whose step fails on a
+# violation; the comment beside it names the step.
+[rules]
+
+# --- Rust (apps/desktop/src-tauri: one application package, not a workspace) -------------------
+# The canonical lint table is the package's own [lints]; check A compares it with the projection.
+RUST-LINT-1 = "gated: .github/workflows/ci.yml#conventions"
+# Clippy and rustdoc steps, both -D warnings.
+RUST-LINT-2 = "gated: .github/workflows/ci.yml#desktop"
+# allow_attributes and allow_attributes_without_reason, under clippy -D warnings.
+RUST-LINT-3 = "gated: .github/workflows/ci.yml#desktop"
+RUST-LINT-4 = "convention: a review practice; adopting the table here fixed every finding"
+RUST-LINT-5 = "convention: a review practice"
+RUST-FMT-1 = "gated: .github/workflows/ci.yml#desktop"
+# wildcard_imports is held off in the canonical table; no glob import outside `use super::*` in tests.
+RUST-ORG-1 = "practiced"
+RUST-UNSAFE-1 = "partial: unsafe_code = deny is in the gated table and both crate roots declare #![forbid(unsafe_code)], but no tripwire pins the forbid"
+# No unsafe exists; the forbid makes any unsafe block a compile error in the clippy step.
+RUST-UNSAFE-2 = "gated: .github/workflows/ci.yml#desktop"
+RUST-UNSAFE-3 = "n/a: no FFI"
+# unwrap_used is held off in the canonical table.
+RUST-ERR-4 = "uncovered"
+RUST-PANIC-1 = "n/a: no catch_unwind"
+# missing_debug_implementations, under clippy -D warnings.
+RUST-TYPE-1 = "gated: .github/workflows/ci.yml#desktop"
+RUST-API-2 = "n/a: nothing is published (publish = false)"
+RUST-API-3 = "partial: should_implement_trait, new_without_default, len_without_is_empty and derivable_impls are in the gated table; the rest is review"
+RUST-API-4 = "partial: ptr_arg and borrowed_box are in the gated table; Option<&T> over &Option<T> is review"
+RUST-API-5 = "partial: wrong_self_convention is in the gated table; the rest is review"
+RUST-TC-1 = "uncovered: no rust-version and no rust-toolchain file"
+RUST-TC-2 = "n/a: one package; its edition is in its own manifest"
+# CI builds on the runner's stable toolchain, which refuses #![feature].
+RUST-TC-3 = "gated: .github/workflows/ci.yml#desktop"
+RUST-DOC-1 = "n/a: no library crate"
+RUST-MACRO-1 = "practiced"
+RUST-INIT-1 = "practiced"
+RUST-SQL-1 = "n/a: no SQL"
+
+# --- Supply chain ------------------------------------------------------------------------------
+SC-ADV-1 = "uncovered: no cargo audit"
+SC-ADV-2 = "uncovered: no cargo audit"
+SC-DENY-1 = "uncovered: no cargo deny"
+SC-DENY-2 = "uncovered: no cargo deny"
+SC-DENY-3 = "uncovered: no cargo deny"
+SC-GHA-1 = "uncovered: every uses: is a tag"
+SC-GHA-2 = "practiced"
+SC-GHA-3 = "n/a: no release workflow"
+SC-IN-1 = "partial: gitleaks and actionlint are version- and checksum-pinned, ruff and bun version-pinned; uv (pip install) and tauri-driver (cargo install) are not"
+SC-IN-2 = "partial: dependabot covers github-actions, cargo and bun, not the plugin's uv project"
+SC-IN-3 = "partial: bun.lock is gated by bun install --frozen-lockfile; Cargo.lock and uv.lock are not checked"
+SC-SEC-1 = "partial: gitleaks gates in the hygiene job; CodeQL runs on pull requests through the repository's default setup, a setting not readable from this repository"
+
+# --- Security ----------------------------------------------------------------------------------
+SEC-SQL-1 = "n/a: no SQL"
+SEC-SQL-2 = "n/a: no SQL"
+SEC-RPT-1 = "uncovered: no SECURITY.md"
+
+# --- Concurrency -------------------------------------------------------------------------------
+# rust/clippy.toml (disallowed_methods) is not adopted, and acp.rs holds two unbounded_channel calls.
+CONC-BOUND-1 = "uncovered"
+CONC-DB-1 = "n/a: no database"
+CONC-DB-2 = "n/a: no database"
+CONC-DB-3 = "n/a: no database"
+
+# --- Tripwires and tests -----------------------------------------------------------------------
+# tools/test-check-no-design-contract.sh, the one tripwire's harness, runs in the hygiene job.
+TW-5 = "gated: .github/workflows/ci.yml#hygiene"
+TEST-1 = "partial: every #[ignore] carries a reason; no tripwire pins the set"
+TEST-2 = "convention: a review practice"
+TEST-3 = "partial: the hand-run witnesses (#[ignore]) and the parked CSP witness do not run on pull requests"
+TEST-5 = "uncovered: no coverage measured"
+
+# --- CI shape ----------------------------------------------------------------------------------
+CI-1 = "uncovered: every job starts at once; none waits on a cheap stage"
+CI-2 = "partial: the CI Success job fans every job in; whether the ruleset requires it is a repository setting, not readable here"
+# The projection and the projected skill are the committed generated artifacts; checks B and E.
+CI-3 = "gated: .github/workflows/ci.yml#conventions"
+CI-4 = "practiced"
+CI-5 = "uncovered: no merge_group trigger"
+CI-6 = "practiced"
+
+# --- Agent guidance ----------------------------------------------------------------------------
+AG-1 = "uncovered: AGENTS.md holds its content rather than routing to topic files"
+AG-4 = "uncovered: AGENTS.md's layout list is not checked against the tree"
+AG-5 = "gated: .github/workflows/ci.yml#conventions"
+AG-6 = "practiced"
+
+# --- Python ------------------------------------------------------------------------------------
+# The Ruff step runs `ruff check .` and `ruff format --check .` from the root ruff.toml.
+PY-LINT-1 = "gated: .github/workflows/ci.yml#hygiene"
+PY-LINT-2 = "gated: .github/workflows/ci.yml#conventions, .github/workflows/ci.yml#hygiene"
+# PGH and RUF100 are in the canonical selection.
+PY-LINT-3 = "gated: .github/workflows/ci.yml#hygiene"
+PY-TYPE-1 = "n/a: no published Python package"
+PY-TYPE-2 = "n/a: no native module"
+PY-ERR-1 = "gated: .github/workflows/ci.yml#hygiene"
+PY-ERR-2 = "gated: .github/workflows/ci.yml#hygiene"
+PY-DEF-1 = "gated: .github/workflows/ci.yml#hygiene"
+PY-LOG-1 = "gated: .github/workflows/ci.yml#hygiene"
+PY-GEN-1 = "n/a: no generated Python"
+PY-VER-1 = "partial: target-version is the projection's (check A); requires-python in plugins/author-tools/pyproject.toml matches it by hand"
+
+# --- TypeScript (apps/desktop) -----------------------------------------------------------------
+# The Biome and Svelte check steps.
+TS-TOOL-1 = "gated: .github/workflows/ci.yml#desktop"
+TS-TOOL-2 = "partial: the canonical rules are errors; biome.json keeps noUnusedVariables at warn and the recommended set's warnings do not fail"
+TS-TOOL-3 = "practiced"
+TS-CFG-1 = "gated: .github/workflows/ci.yml#conventions, .github/workflows/ci.yml#desktop"
+TS-CFG-2 = "gated: .github/workflows/ci.yml#desktop"
+TS-TYPE-1 = "gated: .github/workflows/ci.yml#desktop"
+TS-TYPE-2 = "partial: noNonNullAssertion gates in the Biome step; type assertions are not checked"
+TS-SUP-1 = "partial: Biome requires a reason on biome-ignore and refuses @ts-ignore; @ts-expect-error is not checked"
+TS-MOD-1 = "gated: .github/workflows/ci.yml#desktop"
+TS-ERR-1 = "gated: .github/workflows/ci.yml#desktop"
+TS-NAME-1 = "uncovered"
+TS-GEN-1 = "n/a: no committed generated TypeScript"
+TS-DOC-1 = "n/a: nothing is published"
+
+# --- Shell -------------------------------------------------------------------------------------
+SH-1 = "practiced"
+SH-2 = "partial: every script but tools/setup-claude-web.sh sets -euo pipefail; nothing checks"
+# ShellCheck over every tracked script and githook.
+SH-3 = "gated: .github/workflows/ci.yml#hygiene"
+SH-4 = "gated: .github/workflows/ci.yml#hygiene"
+
+# --- Markdown and HTTP APIs --------------------------------------------------------------------
+DOC-1 = "uncovered: no Markdown lint"
+DOC-4 = "uncovered: no link check"
+API-JSON-1 = "n/a: no HTTP API"
+API-JSON-2 = "n/a: no HTTP API"
+API-JSON-3 = "n/a: no HTTP API"
+API-JSON-4 = "n/a: no HTTP API"
+API-JSON-5 = "n/a: no HTTP API"
+
+# --- Consuming the baseline (the conventions job) ----------------------------------------------
+CONS-1 = "gated: .github/workflows/ci.yml#conventions"
+CONS-2 = "gated: .github/workflows/ci.yml#conventions"
+CONS-3 = "gated: .github/workflows/ci.yml#conventions"
+CONS-4 = "gated: .github/workflows/ci.yml#conventions"
+CONS-5 = "gated: .github/workflows/ci.yml#conventions"
+CONS-6 = "gated: .github/workflows/ci.yml#conventions"
+CONS-7 = "gated: .github/workflows/ci.yml#conventions"
+CONS-8 = "practiced"

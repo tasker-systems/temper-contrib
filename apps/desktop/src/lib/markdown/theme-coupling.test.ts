@@ -2,6 +2,7 @@ import quietInstrument from '@tasker-systems/temper-design/quiet-instrument/them
 import quietInstrumentPaper from '@tasker-systems/temper-design/quiet-instrument-paper/theme.json';
 import index from '@tasker-systems/temper-design/themes.json';
 import { describe, expect, it } from 'vitest';
+import { at } from '../../test/at';
 import renderer from '../components/MarkdownRenderer.svelte?raw';
 import palette from '../shell/CommandPalette.svelte?raw';
 import masthead from '../shell/Masthead.svelte?raw';
@@ -75,13 +76,13 @@ describe.each(components)('%s', (_name, style, marker) => {
 	});
 
 	it('references only --tp-* roles', () => {
-		const refs = [...style.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)].map((m) => m[1]);
+		const refs = [...style.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)].map((m) => at(m, 1));
 		expect(refs.length).toBeGreaterThan(0);
 		expect(refs.filter((r) => !r.startsWith('--tp-'))).toEqual([]);
 	});
 
 	it.each(themes)('resolves every role it reads in %s', (_theme, roles) => {
-		const refs = new Set([...style.matchAll(/var\(\s*(--tp-[a-z0-9-]+)/g)].map((m) => m[1]));
+		const refs = new Set([...style.matchAll(/var\(\s*(--tp-[a-z0-9-]+)/g)].map((m) => at(m, 1)));
 		expect([...refs].filter((r) => !roles.has(r))).toEqual([]);
 	});
 
@@ -90,7 +91,7 @@ describe.each(components)('%s', (_name, style, marker) => {
 			...style.matchAll(
 				/(?:^|[;{\s])((?:background|border[a-z-]*|color|outline[a-z-]*|fill|stroke)\s*:\s*[^;}]+)/g
 			)
-		].map((m) => m[1]);
+		].map((m) => at(m, 1));
 		const literal = /#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|hwb|color-mix)\(/;
 		expect(painted.filter((decl) => literal.test(decl))).toEqual([]);
 	});

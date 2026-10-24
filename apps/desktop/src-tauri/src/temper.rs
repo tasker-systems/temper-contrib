@@ -1197,7 +1197,10 @@ mod tests {
     // The env serial guard spans the awaits deliberately: it relocates the
     // stores for the whole body, and nothing inside the awaited code takes
     // it, so no other task can be waiting on it.
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     async fn an_unregistered_client_refuses_sign_in_before_any_browser() {
         let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1235,7 +1238,10 @@ mod tests {
     // The env serial guard spans the awaits deliberately: it relocates the
     // stores for the whole body, and nothing inside the awaited code takes
     // it, so no other task can be waiting on it.
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     async fn an_empty_callback_refuses_with_the_published_line() {
         let _order = ENV_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -1259,8 +1265,6 @@ mod tests {
     /// A local OAuth token endpoint: answers every grant with a fresh,
     /// rotated pair. The refresh witness points `refresh_token` at it.
     async fn token_stub() -> (String, tokio::task::JoinHandle<()>) {
-        use axum::routing::post;
-        use axum::{Json, Router};
         async fn grant() -> Json<serde_json::Value> {
             Json(serde_json::json!({
                 "access_token": "refreshed-access-token",
@@ -1288,7 +1292,10 @@ mod tests {
     // The env serial guard spans the awaits deliberately: it relocates the
     // stores for the whole body, and nothing inside the awaited code takes
     // it, so no other task can be waiting on it.
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     async fn a_refresh_lands_in_the_desktops_store() {
         let (token_url, stub) = token_stub().await;
@@ -1428,7 +1435,7 @@ mod tests {
     use axum::extract::{Query, State};
     use axum::response::{IntoResponse, Response};
     use axum::routing::{get, post};
-    use axum::{http, Json, Router};
+    use axum::{Json, Router};
     use temper_client::error::ClientError;
 
     /// The person the stub authority serves — what its API arm's whoami
@@ -1728,7 +1735,10 @@ mod tests {
     /// custody, and the CLI's auth.json was never written.
     ///
     /// Run locally: `cargo test -p desktop -- --ignored hosted_first_run`
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     #[ignore = "hand-run: the person completes the hosted sign-in in the browser the flow opens"]
     async fn a_hosted_first_run_signs_the_person_in_and_sign_out_ends_custody() {
@@ -1822,7 +1832,10 @@ mod tests {
     /// the tab completes the same chain and is a bystander.
     ///
     /// Run locally: `cargo test -p desktop -- --ignored stub_as_first_run`
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     #[ignore = "hand-run: needs a desktop session — the flow opens a browser tab that completes its leg unattended"]
     async fn a_stub_as_first_run_signs_in_resolves_whoami_and_signs_out_clean() {
@@ -1903,7 +1916,10 @@ mod tests {
     /// witness's — automated, unattended.
     ///
     /// Run locally: `cargo test -p desktop -- --ignored expired_token_refreshes`
-    #[allow(clippy::await_holding_lock)]
+    #[expect(
+        clippy::await_holding_lock,
+        reason = "the env serial guard spans the awaits deliberately; nothing awaited takes it"
+    )]
     #[tokio::test]
     #[ignore = "hand-run: needs a desktop session — the flow opens a browser tab that completes its leg unattended"]
     async fn an_expired_access_token_refreshes_through_the_desktops_store() {

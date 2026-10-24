@@ -11,6 +11,7 @@ import { listen } from '@tauri-apps/api/event';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { agentSession } from '$lib/agent/session.svelte';
+import { defined } from '../../test/at';
 import AgentPanel from './AgentPanel.svelte';
 
 type Call = { cmd: string; args: Record<string, unknown> | undefined };
@@ -141,7 +142,7 @@ describe('the agent panel', () => {
 		render(AgentPanel);
 		await startConversation();
 
-		handlers['acp-ask']({ payload: declaredAsk });
+		defined(handlers['acp-ask'], 'the acp-ask listener')({ payload: declaredAsk });
 		await vi.waitFor(() => expect(document.body.textContent).toContain('waiting for your answer'));
 		expect(document.body.textContent).toContain('Write acp-ask-witness.txt');
 		for (const option of declaredAsk.options) {
@@ -166,7 +167,10 @@ describe('the agent panel', () => {
 			)
 		).toBe(true);
 
-		handlers['acp-ask']({
+		defined(
+			handlers['acp-ask'],
+			'the acp-ask listener'
+		)({
 			payload: {
 				kind: 'resolved',
 				conversationId: 'c1',
@@ -186,10 +190,13 @@ describe('the agent panel', () => {
 		render(AgentPanel);
 		await startConversation();
 
-		handlers['acp-ask']({ payload: declaredAsk });
+		defined(handlers['acp-ask'], 'the acp-ask listener')({ payload: declaredAsk });
 		await vi.waitFor(() => expect(document.body.textContent).toContain('waiting for your answer'));
 
-		handlers['acp-ask']({
+		defined(
+			handlers['acp-ask'],
+			'the acp-ask listener'
+		)({
 			payload: {
 				kind: 'resolved',
 				conversationId: 'c1',
@@ -216,7 +223,10 @@ describe('the agent panel', () => {
 				r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
 			}
 		};
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'presented',
 				conversationId: 'c1',
@@ -243,7 +253,10 @@ describe('the agent panel', () => {
 			).toBe(true)
 		);
 
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'resolved',
 				conversationId: 'c1',
@@ -276,7 +289,10 @@ describe('the agent panel', () => {
 				r: { type: 'RegionState', props: { state: 'failed', label: 'history' }, children: [] }
 			}
 		};
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'presented',
 				conversationId: 'c1',
@@ -290,7 +306,10 @@ describe('the agent panel', () => {
 				calls.some((c) => c.cmd === 'present_answer' && c.args?.presentedId === 'presented-0')
 			).toBe(true)
 		);
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'resolved',
 				conversationId: 'c1',
@@ -313,7 +332,7 @@ describe('the agent panel', () => {
 				artifact: '01a0f000-0000-7000-8000-00000000000b'
 			} as const;
 			const showing = tabs.tabs.some(
-				(t) => JSON.stringify(t.steps[t.cursor].subject) === JSON.stringify(subject)
+				(t) => JSON.stringify(tabs.current(t).subject) === JSON.stringify(subject)
 			);
 			expect(showing).toBe(true);
 		});
@@ -344,7 +363,10 @@ describe('the agent panel', () => {
 		await startConversation();
 		await vi.waitFor(() => expect(handlers['acp-present']).toBeDefined());
 
-		handlers['acp-present']({
+		defined(
+			handlers['acp-present'],
+			'the acp-present listener'
+		)({
 			payload: {
 				kind: 'presented',
 				conversationId: 'c1',
@@ -447,7 +469,7 @@ describe('the agent panel', () => {
 		}) as never);
 		const fire = handlers['device-roster-changed'];
 		expect(fire).toBeDefined();
-		fire({ payload: {} });
+		defined(fire, 'the device-roster-changed listener')({ payload: {} });
 
 		await vi.waitFor(() =>
 			expect(

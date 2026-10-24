@@ -26,13 +26,16 @@
 	type Sort = { key: string; order: 'asc' | 'desc' };
 	/** The reader's narrowing, one value per facet; the value in force again widens back. */
 	type Filters = { docType?: string; stage?: string; status?: string };
-	type View = { offset: number; sort?: Sort; filters?: Filters };
+	type View = { offset: number; sort?: Sort | undefined; filters?: Filters | undefined };
 	/** The subject the core is asked for, as the binding read names it. */
-	type Ask = { kind: 'query'; context?: string; docType?: string; text?: string } | {
-		kind: 'neighbourhood';
-		id: string;
-		depth: number;
-	};
+	type Ask =
+		| {
+				kind: 'query';
+				context?: string | undefined;
+				docType?: string | undefined;
+				text?: string | undefined;
+		  }
+		| { kind: 'neighbourhood'; id: string; depth: number };
 
 	let { subject, lens }: LensProps = $props();
 

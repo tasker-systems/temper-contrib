@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import { MAX_SOURCE_LENGTH } from '$lib/markdown/markdown';
 import { WITHHELD_IMAGE } from '$lib/markdown/sanitize';
+import { at } from '../../test/at';
 import MarkdownRenderer from './MarkdownRenderer.svelte';
 
 /**
@@ -89,9 +90,9 @@ describe('MarkdownRenderer', () => {
 		expect(container.querySelector('img')).toBeNull();
 		const withheld = [...container.querySelectorAll('.md-withheld')];
 		expect(withheld).toHaveLength(2);
-		expect(withheld[0].textContent).toBe(`${WITHHELD_IMAGE}: the plan`);
-		expect(withheld[0].getAttribute('title')).toBe('https://example.com/plan.png');
-		expect(withheld[1].textContent).toBe(WITHHELD_IMAGE);
+		expect(at(withheld, 0).textContent).toBe(`${WITHHELD_IMAGE}: the plan`);
+		expect(at(withheld, 0).getAttribute('title')).toBe('https://example.com/plan.png');
+		expect(at(withheld, 1).textContent).toBe(WITHHELD_IMAGE);
 		expect(container.innerHTML).not.toContain('onerror');
 	});
 

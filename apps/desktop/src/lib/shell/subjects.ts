@@ -94,9 +94,9 @@ export function placeHref(place: Place, context?: string): string {
  */
 export function subjectFromAddress(pathname: string, search: URLSearchParams): Subject | null {
 	if (pathname === '/') return { kind: 'place', place: 'home' };
-	const room = pathname.match(/^\/r\/([^/]+)\/?$/);
-	if (room) {
-		const id = refId(decodeURIComponent(room[1]));
+	const room = pathname.match(/^\/r\/([^/]+)\/?$/)?.[1];
+	if (room !== undefined) {
+		const id = refId(decodeURIComponent(room));
 		return id ? { kind: 'resource', id } : null;
 	}
 	// A bare UUID as the whole path — an authored relative citation (`./<uuid>`)
@@ -104,8 +104,8 @@ export function subjectFromAddress(pathname: string, search: URLSearchParams): S
 	// Only the exact 36-character form: anything looser is a guess.
 	const bare = pathname.match(
 		/^\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/?$/i
-	);
-	if (bare) return { kind: 'resource', id: bare[1].toLowerCase() };
+	)?.[1];
+	if (bare !== undefined) return { kind: 'resource', id: bare.toLowerCase() };
 	if (pathname === '/q' || pathname === '/q/') {
 		const query: Subject = { kind: 'query' };
 		const context = search.get('context');

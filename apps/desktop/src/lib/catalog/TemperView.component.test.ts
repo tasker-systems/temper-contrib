@@ -4,11 +4,15 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import { at, defined } from '../../test/at';
 import TemperView from './TemperView.svelte';
 import source from './temper.catalog.json';
 
 type Components = Record<string, { example: Record<string, unknown> }>;
-const example = (name: string) => structuredClone((source.components as Components)[name].example);
+const example = (name: string) =>
+	structuredClone(
+		defined((source.components as Components)[name], `the ${name} component`).example
+	);
 const one = (type: string, props: unknown, children: string[] = [], more = {}) => ({
 	root: 'a',
 	elements: { a: { type, props, children }, ...more }
@@ -111,10 +115,11 @@ describe('the first-wave components through TemperView', () => {
 		expect(hosted.container.textContent).toContain('calm 4');
 		// The value in force is marked; choosing it again is the host's way back.
 		const active = buttons.find((b) => b.getAttribute('aria-pressed') === 'true');
-		expect(active?.textContent?.trim()).toBe('draft 7');
-		await fireEvent.click(buttons[1]);
+		if (!active) throw new Error('no facet value is marked as the one in force');
+		expect(active.textContent?.trim()).toBe('draft 7');
+		await fireEvent.click(at(buttons, 1));
 		expect(filter).toHaveBeenCalledWith({ key: 'status', value: 'complete' });
-		await fireEvent.click(active!);
+		await fireEvent.click(active);
 		expect(filter).toHaveBeenLastCalledWith({ key: 'status', value: 'draft' });
 	});
 

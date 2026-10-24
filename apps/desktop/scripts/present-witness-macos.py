@@ -38,6 +38,7 @@ non-zero, naming what failed.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -518,10 +519,8 @@ def main() -> int:
                     time.sleep(1.0)
             except (WebDriverException, Exception) as e:  # noqa: BLE001 — cleanup reports, never raises
                 failures.append(f"cleanup in the running app failed: {e}")
-            try:
+            with contextlib.suppress(WebDriverException):
                 driver.quit()
-            except WebDriverException:
-                pass
         app.terminate()
         app.wait(timeout=10)
         cleanup_hubs_via_cli(failures)

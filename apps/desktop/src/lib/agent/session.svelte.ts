@@ -457,8 +457,8 @@ class AgentSession {
 			const keyOf = subjectKey(subject);
 			const showing = (s: Subject) => subjectKey(s) === keyOf;
 			if (
-				tabs.tabs.some((t) => showing(t.steps[t.cursor].subject)) ||
-				tabs.setAside.some((t) => showing(t.steps[t.cursor].subject))
+				tabs.tabs.some((t) => showing(tabs.current(t).subject)) ||
+				tabs.setAside.some((t) => showing(tabs.current(t).subject))
 			)
 				continue;
 			tabs.open(subject, { where: 'new', lens: 'core/presentation', focus: false });

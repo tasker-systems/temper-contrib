@@ -177,9 +177,6 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use temper_client::error::ClientError;
-    use temper_core::types::resource_view::ResourceView;
-    use temper_workflow::types::resource::ResourceCreateRequest;
 
     const CONTEXT: &str = "01a0c426-681f-7a90-9382-64288ef57082";
     const KEY: &str = "01a0e020-a6d7-7420-b924-68f5e89f354b";

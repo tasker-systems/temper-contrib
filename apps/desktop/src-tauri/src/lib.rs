@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod acp;
 mod adapters;
 // The connection room's core: the setup/edit half of `temper init` — derive

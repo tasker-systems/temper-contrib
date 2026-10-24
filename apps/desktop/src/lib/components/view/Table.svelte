@@ -64,9 +64,9 @@
 		sort?: Sort;
 		facets?: Facet[];
 		fieldsNotShown?: number;
-		onpage?: (offset: number) => void;
-		onsort?: (sort: Sort) => void;
-		onfilter?: (key: string, value: string) => void;
+		onpage?: ((offset: number) => void) | undefined;
+		onsort?: ((sort: Sort) => void) | undefined;
+		onfilter?: ((key: string, value: string) => void) | undefined;
 	} = $props();
 
 	const RESOURCE =

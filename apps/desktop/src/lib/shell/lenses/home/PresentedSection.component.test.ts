@@ -7,6 +7,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => null) }));
 import { invoke } from '@tauri-apps/api/core';
 import { fireEvent, render } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { at } from '../../../../test/at';
 import type { LensProps, TabHandle } from '../../lenses';
 import { tabs } from '../../tabs.svelte';
 import PresentedSection from './PresentedSection.svelte';
@@ -130,7 +131,7 @@ describe('the presented-views section', () => {
 		try {
 			const { container } = render(PresentedSection, { props: props() });
 			await vi.waitFor(() => expect(container.querySelectorAll('.entry').length).toBe(2));
-			await fireEvent.click(container.querySelectorAll('.entry')[0]);
+			await fireEvent.click(at(container.querySelectorAll('.entry'), 0));
 			// The newest record's own ids — nothing session-carried.
 			expect(spy).toHaveBeenCalledWith(
 				{ kind: 'presentation', resource: RESOURCE, artifact: ARTIFACT },

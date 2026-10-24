@@ -1,9 +1,9 @@
 # Ruff — lint and format for every Python file in the repository (today: the plugin's and the desktop's scripts).
-# One root config so a new package's Python is covered without opting in.
-line-length = 100
-target-version = "py39"   # the floor plugins/author-tools/pyproject.toml declares
+# One root config so a new package's Python is covered without opting in. The rules are the
+# tasker-systems baseline's, projected at the pin in .conventions/consumer.toml; `conventions.py
+# check` fails if this file overrides one of them without a recorded exception.
+extend = ".conventions/baseline/python/ruff.toml"
 
-[lint]
-# pycodestyle, pyflakes, isort, bugbear, pyupgrade. E501 is the formatter's job, not the linter's.
-select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501"]
+# The projection is the baseline's own code at the pin, byte-compared with it by `conventions.py
+# check`; it is linted where it is written, not here, where it cannot be edited.
+extend-exclude = [".conventions/baseline"]

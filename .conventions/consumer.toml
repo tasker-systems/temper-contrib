@@ -1,0 +1,36 @@
+# This repository's pin on the tasker-systems conventions baseline. Doctrine: CONS-* in
+# .conventions/baseline/doctrine/consuming.md. `revision` is written by `conventions.py bump`.
+name = "temper-contrib"
+revision = "3ccef5d314320210b70e88bef91389b4a659cc23"
+
+# Each adopted canonical file: where it lives here, and how it is compared (exact, extends,
+# table, superset). Not adopted: rust/clippy.toml, rust/deny.toml, rust/audit.toml — this
+# repository has no counterpart to any of them yet (see status.toml).
+[[adopted]]
+canonical = "python/ruff.toml"
+path = "ruff.toml"
+mode = "extends"
+
+[[adopted]]
+canonical = "typescript/biome.json"
+path = "apps/desktop/biome.json"
+mode = "extends"
+
+[[adopted]]
+canonical = "typescript/tsconfig.base.json"
+path = "apps/desktop/tsconfig.json"
+mode = "extends"
+
+# The Tauri crate is a single package, not a workspace: the canonical `[workspace.lints]` is held
+# as the package's own `[lints]`.
+[[adopted]]
+canonical = "rust/workspace-lints.toml"
+path = "apps/desktop/src-tauri/Cargo.toml"
+mode = "table"
+table = "lints"
+canonical_table = "workspace.lints"
+
+[guidance]
+# Agent entry files that must link the projected skill, and where the skill is projected.
+entry = ["AGENTS.md"]
+skill = ".claude/skills/tasker-systems-conventions"

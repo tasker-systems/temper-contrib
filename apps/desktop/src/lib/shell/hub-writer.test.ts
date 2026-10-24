@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { at } from '../../test/at';
 import { type HubLeave, leaveOf, startHubWriter } from './hub-writer';
 import type { Subject } from './subjects';
 import { TabModel } from './tabs.svelte';
@@ -61,7 +62,7 @@ describe('the hub writer', () => {
 		clock += 30_000;
 		model.activate('home');
 		expect(noted).toHaveLength(2);
-		expect(noted[1].openedAt).toBe('2026-09-28T10:01:00.000Z');
+		expect(at(noted, 1).openedAt).toBe('2026-09-28T10:01:00.000Z');
 	});
 
 	it('stops when asked', () => {

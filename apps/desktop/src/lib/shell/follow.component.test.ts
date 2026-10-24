@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { at } from '../../test/at';
 
-const invokes: { cmd: string; args?: Record<string, unknown> }[] = [];
+const invokes: { cmd: string; args?: Record<string, unknown> | undefined }[] = [];
 vi.mock('@tauri-apps/api/core', () => ({
 	invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
 		invokes.push({ cmd, args });
@@ -112,9 +113,9 @@ describe("the shell's link follower", () => {
 		const uuid = '01a0d873-59c9-72f0-a31f-23f0da5d8789';
 		follow(clickOn(`https://temperkb.io/vault/r/${uuid}`).event, model);
 		await vi.waitFor(() => expect(opened).toHaveLength(1));
-		expect((opened[0].subject as { kind: string; id: string }).kind).toBe('resource');
-		expect((opened[0].subject as { kind: string; id: string }).id).toBe(uuid);
-		expect(opened[0].where).toBe('here');
+		expect((at(opened, 0).subject as { kind: string; id: string }).kind).toBe('resource');
+		expect((at(opened, 0).subject as { kind: string; id: string }).id).toBe(uuid);
+		expect(at(opened, 0).where).toBe('here');
 		// The browser is never asked for a tempered shape.
 		expect(invokes.some((i) => i.cmd === 'plugin:opener|open_url')).toBe(false);
 	});
@@ -129,7 +130,7 @@ describe("the shell's link follower", () => {
 			model
 		);
 		await vi.waitFor(() => expect(opened).toHaveLength(1));
-		expect(opened[0].where).toBe('new');
+		expect(at(opened, 0).where).toBe('new');
 	});
 
 	it('a temper-shaped path on any other host is not tempered — the browser opens', async () => {
@@ -182,9 +183,9 @@ describe("the shell's link follower", () => {
 		// in-app address is named in full; the app's own origin is what a real document resolves to.
 		follow(clickOn(`http://tauri.localhost/r/${uuid}`).event, model);
 		expect(opened).toHaveLength(1);
-		expect((opened[0].subject as { kind: string; id: string }).kind).toBe('resource');
-		expect((opened[0].subject as { kind: string; id: string }).id).toBe(uuid);
-		expect(opened[0].where).toBe('here');
+		expect((at(opened, 0).subject as { kind: string; id: string }).kind).toBe('resource');
+		expect((at(opened, 0).subject as { kind: string; id: string }).id).toBe(uuid);
+		expect(at(opened, 0).where).toBe('here');
 	});
 
 	it('follows an SVG anchor in place on a plain click', () => {
@@ -192,9 +193,9 @@ describe("the shell's link follower", () => {
 		const uuid = '01a0f000-0000-7000-8000-00000000000a';
 		follow(svgClickOn(`/r/${uuid}`).event, model);
 		expect(opened).toHaveLength(1);
-		expect((opened[0].subject as { kind: string; id: string }).kind).toBe('resource');
-		expect((opened[0].subject as { kind: string; id: string }).id).toBe(uuid);
-		expect(opened[0].where).toBe('here');
+		expect((at(opened, 0).subject as { kind: string; id: string }).kind).toBe('resource');
+		expect((at(opened, 0).subject as { kind: string; id: string }).id).toBe(uuid);
+		expect(at(opened, 0).where).toBe('here');
 	});
 
 	it('a ⌘-click on an SVG anchor opens a new tab, and a middle click too', () => {

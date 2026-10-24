@@ -12,7 +12,11 @@ const components = source.components as Record<string, Entry>;
 
 export type Specimen = { name: string; description: string; spec: Spec };
 
-const example = (name: string) => structuredClone(components[name].example);
+const example = (name: string) => {
+	const component = components[name];
+	if (component === undefined) throw new Error(`specimens: the catalog declares no ${name}`);
+	return structuredClone(component.example);
+};
 const leaf = (type: string, props: Record<string, unknown> = example(type)) => ({
 	type,
 	props,

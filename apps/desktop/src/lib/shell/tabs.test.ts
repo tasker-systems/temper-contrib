@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { at, defined } from '../../test/at';
 import { type Subject, subjectKey } from './subjects';
 import { HOME_TAB, SET_ASIDE_BOUND, TAB_BOUND, TabModel, TRAIL_BOUND } from './tabs.svelte';
 
@@ -56,7 +57,7 @@ describe('the tab model', () => {
 	it('never replaces home: a link followed from home opens a new tab', () => {
 		expect(model.open(doc(1), { where: 'here' })).toBe(true);
 		expect(model.tabs).toHaveLength(2);
-		expect(model.current(model.tabs[0]).subject).toEqual({ kind: 'place', place: 'home' });
+		expect(model.current(at(model.tabs, 0)).subject).toEqual({ kind: 'place', place: 'home' });
 		expect(model.activeId).not.toBe(HOME_TAB);
 	});
 
@@ -92,7 +93,7 @@ describe('the tab model', () => {
 		for (let i = 1; i <= TRAIL_BOUND + 4; i++) model.open(doc(i));
 		const tab = model.active;
 		expect(tab.steps).toHaveLength(TRAIL_BOUND);
-		expect(tab.steps[0].subject).toEqual(doc(5));
+		expect(at(tab.steps, 0).subject).toEqual(doc(5));
 		expect(model.current(tab).subject).toEqual(doc(TRAIL_BOUND + 4));
 	});
 
@@ -125,12 +126,12 @@ describe('the tab model', () => {
 			clock += 1;
 			model.open(doc(i), { where: 'new' });
 		}
-		const oldest = model.tabs[1];
+		const oldest = at(model.tabs, 1);
 		model.setTitle(model.current(oldest).key, 'Chapter 3');
 		// Showing the oldest again makes the second-oldest the least recently used.
 		clock += 1;
 		model.activate(oldest.id);
-		const leastUsed = model.tabs[2];
+		const leastUsed = at(model.tabs, 2);
 		clock += 1;
 		expect(model.open(doc(99), { where: 'new' })).toBe(true);
 
@@ -164,7 +165,8 @@ describe('the tab model', () => {
 			clock += 1;
 			model.open(doc(i), { where: 'new' });
 		}
-		const [, drafting, ...rest] = model.tabs;
+		const [, second, ...rest] = model.tabs;
+		const drafting = defined(second, 'a second tab');
 		model.handle(drafting.id, model.current(drafting).key).beforeLeave(() => 'Unsaved draft.');
 		expect(model.open(doc(50), { where: 'new' })).toBe(true);
 		expect(model.tabs.some((t) => t.id === drafting.id)).toBe(true);
@@ -207,12 +209,13 @@ describe('the tab model', () => {
 		expect(model.openCount).toBe(2);
 		expect(model.activeId).toBe(active);
 		const subject = presentation(1, 2);
-		const tab = model.tabs.find(
-			(t) => subjectKey(t.steps[t.cursor].subject) === subjectKey(subject)
+		const found = model.tabs.find(
+			(t) => subjectKey(model.current(t).subject) === subjectKey(subject)
 		);
-		expect(tab).toBeDefined();
-		expect(tab?.steps[0].lens).toBe('core/presentation');
-		expect(tab?.steps[0].title).toBeNull();
+		expect(found).toBeDefined();
+		const tab = defined(found, 'the presentation tab');
+		expect(at(tab.steps, 0).lens).toBe('core/presentation');
+		expect(at(tab.steps, 0).title).toBeNull();
 	});
 
 	it('a background open does not mount the tab', () => {
@@ -221,7 +224,7 @@ describe('the tab model', () => {
 			lens: 'core/presentation',
 			focus: false
 		});
-		const tab = model.tabs[1];
+		const tab = at(model.tabs, 1);
 		expect(model.mounted[tab.id]).toBeUndefined();
 	});
 
@@ -308,7 +311,7 @@ describe('the tab model', () => {
 	});
 
 	it('tells a listener when a room is left, with when it was entered', () => {
-		const left: Array<[string, number, number]> = [];
+		const left: [string, number, number][] = [];
 		model.onLeave((step, openedAt, leftAt) => left.push([step.subject.kind, openedAt, leftAt]));
 		model.open(doc(1), { where: 'new' });
 		clock = 2000;
@@ -323,7 +326,7 @@ describe('the tab model', () => {
 	});
 
 	it('switching tabs leaves the room switched away from, and returning enters it afresh', () => {
-		const left: Array<[string, number, number]> = [];
+		const left: [string, number, number][] = [];
 		model.open(doc(1), { where: 'new' });
 		const first = model.activeId;
 		clock = 2000;
@@ -353,7 +356,7 @@ describe('the tab model', () => {
 	});
 
 	it('pausing leaves the room in view once, and resuming enters it again', () => {
-		const left: Array<[number, number]> = [];
+		const left: [number, number][] = [];
 		model.open(doc(1), { where: 'new' });
 		model.onLeave((_step, openedAt, leftAt) => left.push([openedAt, leftAt]));
 		clock = 4000;
@@ -386,7 +389,7 @@ describe('restoring the tabs', () => {
 		expect(restored.activeId).toBe(kept);
 		const tab = restored.active;
 		expect(tab.cursor).toBe(0);
-		expect(tab.steps[1].title).toBe('Chapter 2');
+		expect(at(tab.steps, 1).title).toBe('Chapter 2');
 		expect(Object.keys(restored.mounted)).toEqual([kept]);
 	});
 
@@ -397,7 +400,7 @@ describe('restoring the tabs', () => {
 
 		clock = 50_000;
 		const restored = new TabModel(storage, () => clock);
-		const left: Array<[number, number]> = [];
+		const left: [number, number][] = [];
 		restored.onLeave((step, openedAt, leftAt) => {
 			if (step.subject.kind === 'resource') left.push([openedAt, leftAt]);
 		});
@@ -420,7 +423,7 @@ describe('restoring the tabs', () => {
 
 		const restored = new TabModel(storage, () => clock);
 		expect(restored.setAside.map((t) => t.id)).toEqual(aside);
-		expect(restored.reopen(aside[0])).toBe(true);
+		expect(restored.reopen(at(aside, 0))).toBe(true);
 		expect(restored.active.steps.map((s) => s.subject)).toEqual([doc(0), doc(1)]);
 	});
 
@@ -460,7 +463,7 @@ describe('restoring the tabs', () => {
 		);
 		const restored = new TabModel(storage);
 		expect(restored.tabs.map((t) => t.id)).toEqual([HOME_TAB, 'a']);
-		expect(restored.tabs[1].cursor).toBe(0);
+		expect(at(restored.tabs, 1).cursor).toBe(0);
 		expect(restored.activeId).toBe(HOME_TAB);
 	});
 });

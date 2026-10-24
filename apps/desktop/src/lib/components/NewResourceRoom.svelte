@@ -21,7 +21,7 @@
 	import { shellContributions } from '$lib/shell/contributions';
 	import { createMenu, type CreateOption, type TabHandle } from '$lib/shell/lenses';
 
-	let { tab, context }: { tab: TabHandle; context?: string } = $props();
+	let { tab, context }: { tab: TabHandle; context?: string | undefined } = $props();
 
 	let doctype = $state<string | null>(null);
 	let title = $state('');

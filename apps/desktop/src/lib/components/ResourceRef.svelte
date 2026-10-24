@@ -23,8 +23,8 @@
 		hrefFor = (decoratedRef: string) => roomHref(decoratedRef)
 	}: {
 		id: string;
-		titleHint?: string | null;
-		block?: string | null;
+		titleHint?: string | null | undefined;
+		block?: string | null | undefined;
 		hrefFor?: (decoratedRef: string) => string;
 	} = $props();
 

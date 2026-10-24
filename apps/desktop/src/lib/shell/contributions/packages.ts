@@ -172,6 +172,7 @@ function loadPackage(
 	if (!manifest.success) {
 		// One issue names the fault; the refusal is one bounded sentence by design.
 		const issue = manifest.error.issues[0];
+		if (issue === undefined) throw new Error('a failed manifest parse names no issue');
 		refusals.push(
 			refusal(source.name, issue.message, fieldPath(issue.path as (string | number)[]))
 		);
