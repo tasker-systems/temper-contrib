@@ -194,6 +194,11 @@ jobs:
       - name: conventions.py check
         run: python3 -I .conventions/baseline/tools/conventions.py check
 
+      # The check's bite test here: each case seeds one violation into a copy of the tree and must
+      # be refused by name; the unseeded copy must pass in an emptied environment first.
+      - name: Witnesses (each check refuses a seeded violation)
+        run: python3 -I tools/test-conventions-witnesses.py
+
   witness-gate:
     name: CSP witness gate (what the diff can move)
     runs-on: ubuntu-latest

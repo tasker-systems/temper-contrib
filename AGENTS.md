@@ -20,6 +20,7 @@ Makefile.toml                # cargo-make: `check`, `test`, `fix`, `setup` acros
 githooks/                    # selective pre-commit, pre-push test suites (core.hooksPath)
 tools/setup-claude-web.sh    # cloud-session SessionStart hook: toolchain + hooks
 tools/check-no-design-contract.sh  # refuses a copy of the theme contract (it lives in a package)
+tools/test-conventions-witnesses.py  # seeds violations; the conventions check must refuse each
 .github/workflows/ci.yml     # the same gates, fanned into `CI Success`
 ```
 
