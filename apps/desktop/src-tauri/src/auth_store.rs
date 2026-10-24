@@ -68,6 +68,13 @@ pub struct KeychainTokenStore {
     entry: keyring::Entry,
 }
 
+// `keyring::Entry` has no `Debug`; the store shows its kind and nothing it holds.
+impl std::fmt::Debug for KeychainTokenStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeychainTokenStore").finish_non_exhaustive()
+    }
+}
+
 impl KeychainTokenStore {
     /// The store over the app's own keychain entry.
     pub fn new() -> Result<Self, ClientError> {

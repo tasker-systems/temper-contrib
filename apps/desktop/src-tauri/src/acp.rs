@@ -884,8 +884,7 @@ fn expand_cwd(spec: &str) -> Result<PathBuf, String> {
 mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{
-        AgentCapabilities, HttpHeader, McpCapabilities, McpServerHttp, ToolCallContent,
-        ToolCallStatus,
+        HttpHeader, McpCapabilities, McpServerHttp, ToolCallContent, ToolCallStatus,
     };
     use agent_client_protocol::AcpAgentConfig;
 
@@ -1178,8 +1177,6 @@ mod tests {
 
     // --- The prompt's reference ----------------------------------------------
 
-    use super::{prompt_blocks, PromptReference};
-
     #[test]
     fn a_prompt_carries_its_text_and_then_the_room_in_view() {
         let reference = PromptReference {
@@ -1320,7 +1317,6 @@ whole. Change nothing outside it, and write nothing else inside it.";
 
     // --- The permission-ask seam ---------------------------------------------
 
-    use super::{AskAnswer, AskBoard, AskNotice, AskResolution, AskSink};
     use agent_client_protocol::schema::v1::{
         PermissionOption, PermissionOptionKind, ToolCallUpdate, ToolCallUpdateFields,
     };
