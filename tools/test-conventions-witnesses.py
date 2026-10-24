@@ -341,13 +341,21 @@ CASES: list[tuple[str, Seed, bool, str | None]] = [
 ]
 
 
-def conventions_job_secrets() -> list[str]:
-    """Lines of the conventions CI job that reference a secret or token."""
-    text = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    match = re.search(r"^  conventions:\n((?:    .*\n|\n)*)", text, re.MULTILINE)
-    if not match:
-        raise SeedMissed(".github/workflows/ci.yml has no `conventions` job")
-    return [line for line in match.group(1).splitlines() if re.search(r"secrets\.|TOKEN", line)]
+def privileged_lines_in_conventions_job() -> list[int]:
+    """Line numbers (in ci.yml) of the conventions job that reach for a repository secret or token.
+    Numbers, not text: the harness never echoes what such a line holds."""
+    lines = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8").splitlines()
+    try:
+        start = lines.index("  conventions:")
+    except ValueError as error:
+        raise SeedMissed(".github/workflows/ci.yml has no `conventions` job") from error
+    found: list[int] = []
+    for number, line in enumerate(lines[start + 1 :], start=start + 2):
+        if line and not line.startswith("    "):
+            break
+        if re.search(r"secrets\.|TOKEN", line):
+            found.append(number)
+    return found
 
 
 def main() -> int:
@@ -375,9 +383,10 @@ def main() -> int:
             print(out)
         else:
             print("  PASS: the unseeded tree is green, online, with no credential")
-        leaked = conventions_job_secrets()
-        if leaked:
-            failures.append(f"the conventions job references a secret: {leaked}")
+        privileged = privileged_lines_in_conventions_job()
+        if privileged:
+            lines = ", ".join(map(str, privileged))
+            failures.append(f"the conventions job reaches for a secret (ci.yml line {lines})")
         else:
             print("  PASS: the conventions job references no secret")
 
