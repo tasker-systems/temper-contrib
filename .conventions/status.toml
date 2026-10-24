@@ -67,8 +67,9 @@ CONC-DB-2 = "n/a: no database"
 CONC-DB-3 = "n/a: no database"
 
 # --- Tripwires and tests -----------------------------------------------------------------------
-# tools/test-check-no-design-contract.sh, the one tripwire's harness, runs in the hygiene job.
-TW-5 = "gated: .github/workflows/ci.yml#hygiene"
+# Each check here carries its harness: tools/test-check-no-design-contract.sh in the hygiene job,
+# tools/test-conventions-witnesses.py in the conventions job.
+TW-5 = "gated: .github/workflows/ci.yml#hygiene, .github/workflows/ci.yml#conventions"
 TEST-1 = "partial: every #[ignore] carries a reason; no tripwire pins the set"
 TEST-2 = "convention: a review practice"
 TEST-3 = "partial: the hand-run witnesses (#[ignore]) and the parked CSP witness do not run on pull requests"

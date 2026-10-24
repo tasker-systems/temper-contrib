@@ -248,9 +248,12 @@ command = "./plugins/author-tools/scripts/lint.sh"
 args = ["--self-check"]
 
 [tasks.conventions]
-description = "the conventions baseline: pin, projection, adopted config, statuses, projected skill"
-command = "python3"
-args = ["-I", ".conventions/baseline/tools/conventions.py", "check"]
+description = "the conventions baseline: pin, projection, adopted config, statuses, projected skill (and the check's witnesses)"
+script = '''
+set -e
+python3 -I .conventions/baseline/tools/conventions.py check
+python3 -I tools/test-conventions-witnesses.py
+'''
 
 [tasks.design-contract-absent]
 description = "no copy of the theme contract: it lives in @tasker-systems/temper-design (and the check's harness)"

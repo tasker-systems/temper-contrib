@@ -149,6 +149,6 @@ Statuses for **temper-contrib**:
 | TS-TOOL-3 | practiced |
 | TS-TYPE-1 | gated: .github/workflows/ci.yml#desktop |
 | TS-TYPE-2 | partial: noNonNullAssertion gates in the Biome step; type assertions are not checked |
-| TW-5 | gated: .github/workflows/ci.yml#hygiene |
+| TW-5 | gated: .github/workflows/ci.yml#hygiene, .github/workflows/ci.yml#conventions |
 
 <!-- consumer-status:end -->
