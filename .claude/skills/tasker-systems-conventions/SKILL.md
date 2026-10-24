@@ -124,7 +124,7 @@ Statuses for **temper-contrib**:
 | SC-IN-1 | partial: gitleaks and actionlint are version- and checksum-pinned, ruff and bun version-pinned; uv (pip install) and tauri-driver (cargo install) are not |
 | SC-IN-2 | partial: dependabot covers github-actions, cargo and bun, not the plugin's uv project |
 | SC-IN-3 | partial: bun.lock is gated by bun install --frozen-lockfile; Cargo.lock and uv.lock are not checked |
-| SC-SEC-1 | partial: gitleaks gates in the hygiene job; no CodeQL |
+| SC-SEC-1 | partial: gitleaks gates in the hygiene job; CodeQL runs on pull requests through the repository's default setup, a setting not readable from this repository |
 | SEC-RPT-1 | uncovered: no SECURITY.md |
 | SEC-SQL-1 | n/a: no SQL |
 | SEC-SQL-2 | n/a: no SQL |
