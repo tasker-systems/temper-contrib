@@ -29,7 +29,14 @@ In CI, inside the required aggregate check:
 
 ```bash
 python3 -I .conventions/baseline/tools/conventions.py check
+python3 -I .conventions/baseline/tools/conventions.py witness
 ```
+
+`witness` is the checks' bite test inside the consumer ([TW-5](tripwires.md)). It seeds one
+violation per case into a copy of the consumer, and requires `check` to refuse each one by name.
+The cases are generated from the consumer's own adoption map and statuses, so every consumer runs
+the same witness against its own files. It also requires the unseeded copy to pass online with no
+credential (CONS-8), and requires every workflow job that runs `check` to reference no secret.
 
 ## Rules
 

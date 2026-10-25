@@ -9,7 +9,7 @@
 # the existing findings first. Do not add a blanket per-file ignore to get green.
 
 # The floor every consumer targets today. Raise it together with `requires-python` (PY-VER-1).
-target-version = "py310"
+target-version = "py311"
 # The formatter owns line length; E501 is not selected (PY-FMT-1).
 line-length = 100
 

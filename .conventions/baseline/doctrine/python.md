@@ -88,6 +88,12 @@ ruff's `target-version` and mypy's `python_version` equal that floor. *Why:* thr
 must agree, and drift between them means the linter rewrites code into syntax the floor cannot run
 (or holds back syntax it can).
 
+The floor is **3.11**, the value of `target-version` in [`../python/ruff.toml`](../python/ruff.toml).
+*Why 3.11:* 3.10 reaches end of life in October 2026, so a 3.10 floor promises support CPython no
+longer gives. And 3.11 is the first release with `tomllib`. The baseline's own tools read TOML,
+must stay standard-library only, and run in every consumer's CI, so they share the floor rather
+than carrying an exception to it.
+
 ## Not specified
 
 - **Layout** — indentation, wrapping, quotes, blank lines, trailing commas: `ruff format` decides.

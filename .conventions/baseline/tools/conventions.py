@@ -6,6 +6,7 @@ baseline's main, so that the verdict a consumer gets is the one its pin chose:
 
     python3 -I .conventions/baseline/tools/conventions.py check [--offline]
     python3 -I .conventions/baseline/tools/conventions.py bump --revision <sha|main> [--init --name N]
+    python3 -I .conventions/baseline/tools/conventions.py witness
 
 `check` runs six checks and exits non-zero if any fails:
 
@@ -20,6 +21,15 @@ B and C fetch the baseline (it is public; no credential is used or needed). A fe
 B: the projection being hand-edited is exactly what B guards, so it never passes unchecked.
 `--offline` runs A, D, E and F only, and says so.
 
+`witness` is the checks' bite test in a consumer (TW-5). It seeds one violation per case into a copy
+of the consumer and requires `check` to refuse it, naming what was seeded. The cases are built from
+the consumer's own `consumer.toml` and `status.toml`: an override and an addition (or a dropped
+reference) for each adopted file, the exception rules, the pin, the skill and each entry file, the
+statuses, `reviewed_at`, and lag. The unseeded copy runs first, online, in an environment with no
+token, credential helper or git configuration: that is the control, and the witness that the check
+needs nothing an outsider lacks. Every workflow job that runs `check` must reference no secret. A
+seed that finds nothing to edit fails rather than passing vacuously.
+
 NOT CHECKED, by design:
   - that a `gated:` gate actually fails on a violation (that is each consumer's bite test, TW-5);
   - that a consumer's own guidance does not restate or contradict the doctrine (judged in review);
@@ -33,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -777,6 +788,463 @@ INIT_EXCEPTIONS = """\
 
 
 # --------------------------------------------------------------------------------------------
+# witness — each check shown red on a seeded violation in a copy of this consumer
+# --------------------------------------------------------------------------------------------
+
+WITNESS_VALUE = "conventions-witness"
+ZERO_SHA = "0" * 40
+
+# What survives into the emptied environment the checks run in: where programs are, and (when a
+# network proxy is in use) how to reach the network. No token, no credential, no git configuration.
+PASSED_THROUGH = ("PATH", "HTTPS_PROXY", "https_proxy", "SSL_CERT_FILE", "GIT_SSL_CAINFO")
+
+
+class SeedMissed(Exception):
+    """A seed did not find what it edits: the case would pass without testing anything."""
+
+
+def toml_dumps(data: dict[str, Any]) -> str:
+    """Every leaf as a quoted dotted key at the root: valid TOML for anything tomllib returns, and
+    enough for a copy whose content, not its layout, is what the checks read."""
+
+    def key(parts: list[str]) -> str:
+        return ".".join(json.dumps(part, ensure_ascii=False) for part in parts)
+
+    def value(item: Any) -> str:
+        if isinstance(item, bool):
+            return "true" if item else "false"
+        if isinstance(item, float):
+            if math.isnan(item):
+                return "nan"
+            if item in (float("inf"), float("-inf")):
+                return "inf" if item > 0 else "-inf"
+            return repr(item)
+        if isinstance(item, int):
+            return str(item)
+        if isinstance(item, str):
+            return json.dumps(item, ensure_ascii=False).replace("\x7f", "\\u007f")
+        if isinstance(item, list):
+            return "[" + ", ".join(value(x) for x in item) + "]"
+        if isinstance(item, dict):
+            return "{" + ", ".join(f"{key([k])} = {value(v)}" for k, v in item.items()) + "}"
+        return item.isoformat()  # datetime, date, time
+
+    lines: list[str] = []
+
+    def walk(node: dict[str, Any], parts: list[str]) -> None:
+        for name, child in node.items():
+            if isinstance(child, dict) and child:
+                walk(child, [*parts, name])
+            else:
+                lines.append(f"{key([*parts, name])} = {value(child)}")
+
+    walk(data, [])
+    return "\n".join(lines) + "\n"
+
+
+def rewrite(path: Path, change: Any) -> None:
+    """Parse a TOML or JSON(C) file, let `change` edit the data, and write it back."""
+    data = load_structured(path)
+    if data is None:
+        raise SeedMissed(f"{path.name} is not TOML or JSON")
+    change(data)
+    if path.suffix == ".toml":
+        path.write_text(toml_dumps(data), encoding="utf-8")
+    else:
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def set_path(data: dict[str, Any], dotted: str, item: Any) -> None:
+    *parents, last = dotted.split(".")
+    node = data
+    for part in parents:
+        child = node.get(part)
+        if not isinstance(child, dict):
+            child = node[part] = {}
+        node = child
+    node[last] = item
+
+
+def edit_text(path: Path, old: str, new: str) -> None:
+    text = path.read_text(encoding="utf-8")
+    if old not in text:
+        raise SeedMissed(f"{path.name} does not contain {old!r}")
+    path.write_text(text.replace(old, new), encoding="utf-8")
+
+
+def append_text(path: Path, text: str) -> None:
+    if not path.is_file():
+        raise SeedMissed(f"{path} does not exist")
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def conventions_jobs(root: Path) -> list[tuple[str, str, list[str]]]:
+    """(workflow, job, lines) for each workflow job that runs `conventions.py check`."""
+    found: list[tuple[str, str, list[str]]] = []
+    workflows = root / ".github" / "workflows"
+    for path in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        job, body = "", []
+        for line in [*lines, "end-of-file:"]:
+            match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if match or (line and not line.startswith(" ")):
+                if job and any("conventions.py check" in x for x in body):
+                    found.append((path.relative_to(root).as_posix(), job, body))
+                job, body = (match.group(1) if match else ""), []
+            elif job:
+                body.append(line)
+    return found
+
+
+@dataclass
+class Case:
+    name: str
+    seed: Any
+    expected: str | None  # the text the red verdict must contain; None for a case that stays green
+    offline: bool = True
+
+
+def first_leaf(adopted: Adopted, consumer: Consumer) -> str | None:
+    """The first canonical key a seed can override: a leaf outside any declared local slot. None
+    when every canonical key is a slot (audit.toml's ignore list), where only an addition bites."""
+    canon = load_structured(consumer.baseline_dir / adopted.canonical) or {}
+    if adopted.mode == "table" and adopted.canonical_table:
+        canon = subtable(canon, adopted.canonical_table) or {}
+    slots = local_slots(consumer, adopted.canonical) if adopted.mode == "superset" else []
+    skip = {adopted.key or "extend", "extends", "$schema", "$comment"}
+    for leaf in flatten(canon):
+        if leaf and leaf not in skip and not _in_slot(leaf, slots):
+            return leaf
+    return None
+
+
+def adopted_cases(consumer: Consumer) -> list[Case]:
+    cases: list[Case] = []
+    for adopted in consumer.adopted:
+        rel = adopted.path
+        if load_structured(consumer.baseline_dir / adopted.canonical) is None:
+            cases.append(
+                Case(
+                    f"{rel} differs from its canonical bytes",
+                    lambda c, rel=rel: append_text(c / rel, "\n"),
+                    f"A: {rel}: (content differs)",
+                )
+            )
+            continue
+        leaf = first_leaf(adopted, consumer)
+        if leaf is None and adopted.mode != "superset":
+            raise SeedMissed(f"{adopted.canonical} has no key a seed can override")
+        if leaf is not None:
+            local_key = _join(adopted.table, leaf) if adopted.mode == "table" else leaf
+            cases.append(
+                Case(
+                    f"{rel} overrides canonical {local_key}",
+                    lambda c, rel=rel, k=local_key: rewrite(
+                        c / rel, lambda d: set_path(d, k, WITNESS_VALUE)
+                    ),
+                    f"A: {rel}: {local_key} (canonical",
+                )
+            )
+        if adopted.mode == "extends":
+            ref_key = adopted.key or ("extend" if rel.endswith(".toml") else "extends")
+            cases.append(
+                Case(
+                    f"{rel} stops referencing the projection",
+                    lambda c, rel=rel, k=ref_key: rewrite(c / rel, lambda d: d.pop(k, None)),
+                    f"A: {rel}: {ref_key} (does not reference",
+                )
+            )
+        else:
+            extra = _join(adopted.table if adopted.mode == "table" else "", WITNESS_VALUE)
+            cases.append(
+                Case(
+                    f"{rel} adds a key the baseline does not hold",
+                    lambda c, rel=rel, k=extra: rewrite(c / rel, lambda d: set_path(d, k, "x")),
+                    f"A: {rel}: {extra} (not in canonical",
+                )
+            )
+    return cases
+
+
+def exception_cases(consumer: Consumer) -> list[Case]:
+    if not consumer.adopted:
+        raise SeedMissed("nothing is adopted, so no exception can be seeded")
+    seedable = [
+        (a, leaf)
+        for a in consumer.adopted
+        if load_structured(consumer.baseline_dir / a.canonical)
+        and (leaf := first_leaf(a, consumer)) is not None
+    ]
+    if not seedable:
+        raise SeedMissed("no adopted file has a canonical key to diverge from")
+    adopted, leaf = seedable[0]
+    rel = adopted.path
+    key = _join(adopted.table, leaf) if adopted.mode == "table" else leaf
+
+    def diverge(copy: Path) -> None:
+        rewrite(copy / rel, lambda d: set_path(d, key, WITNESS_VALUE))
+
+    def record(copy: Path, reason: str | None) -> None:
+        entry = f"\n[[exception]]\npath = {json.dumps(rel)}\nkey = {json.dumps(key)}\n"
+        if reason is not None:
+            entry += f"reason = {json.dumps(reason)}\n"
+        path = copy / CONVENTIONS_DIR / "exceptions.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(entry)
+
+    return [
+        Case(
+            "a reasoned exception covers the divergence it records",
+            lambda c: (diverge(c), record(c, "a seeded, reasoned divergence")),
+            None,
+        ),
+        Case(
+            "an exception carries no reason",
+            lambda c: (diverge(c), record(c, None)),
+            "has no reason",
+        ),
+        Case(
+            "an exception matches no difference",
+            lambda c: record(c, "a divergence that does not exist"),
+            f"exception {rel}:{key} matches no difference",
+        ),
+    ]
+
+
+def status_cases(consumer: Consumer, workflow: str) -> list[Case]:
+    statuses = load_statuses(consumer)
+    rules = rule_rows(consumer.baseline_dir / "doctrine" / "rules.md")
+    rule = min(statuses) if statuses else min(rules, default="")
+    if not rule:
+        raise SeedMissed("the projection names no rule to seed a status for")
+    current = statuses.get(rule, "unexamined").partition(":")[0].strip()
+    other = "uncovered" if current == "practiced" else "practiced"
+    status_path = f"{CONVENTIONS_DIR}/status.toml"
+
+    def set_status(copy: Path, rule_id: str, status: str) -> None:
+        rewrite(copy / status_path, lambda d: set_path(d, f"rules.{rule_id}", status))
+
+    def drop_reviewed(copy: Path) -> None:
+        rewrite(copy / status_path, lambda d: d.pop("reviewed_at"))
+
+    missing_file = ".github/workflows/conventions-witness-absent.yml"
+    cases = [
+        Case(
+            "a status changes without the skill being re-rendered",
+            lambda c: set_status(c, rule, other),
+            f"E: {consumer.skill} is not the skill rendered from the projection and status.toml",
+        ),
+        Case(
+            "a status names a rule the pinned baseline does not have",
+            lambda c: set_status(c, "WITNESS-0", "practiced"),
+            "D: status.toml: WITNESS-0 is not a rule in the pinned baseline",
+        ),
+        Case(
+            "a gated status names a file that does not exist",
+            lambda c: set_status(c, rule, f"gated: {missing_file}"),
+            f"D: status.toml: {rule} names gate '{missing_file}', which does not exist",
+        ),
+        Case(
+            "a gated status names a job that does not exist",
+            lambda c: set_status(c, rule, f"gated: {workflow}#{WITNESS_VALUE}"),
+            f"D: status.toml: {rule} names gate '{workflow}#{WITNESS_VALUE}', which does not exist",
+        ),
+        Case(
+            "the statuses were reviewed against another revision than the pin",
+            lambda c: rewrite(c / status_path, lambda d: d.update(reviewed_at=ZERO_SHA)),
+            f"F: status.toml was reviewed at {ZERO_SHA}",
+        ),
+        Case(
+            "the statuses name no revision they were reviewed against",
+            drop_reviewed,
+            "F: status.toml has no `reviewed_at`",
+        ),
+    ]
+    return cases
+
+
+def witness_cases(consumer: Consumer, workflow: str) -> list[Case]:
+    base = BASELINE_DIR
+    skill = consumer.skill.rstrip("/")
+    cases = [
+        Case(
+            "the pin names a branch, not a commit",
+            lambda c: edit_text(
+                c / CONVENTIONS_DIR / "consumer.toml",
+                f'"{consumer.revision}"',
+                '"main"',
+            ),
+            "`revision` must be a full 40-character commit SHA",
+        ),
+        Case(
+            "a projected doctrine file is edited",
+            lambda c: append_text(c / base / "doctrine/tenets.md", "\nA local amendment.\n"),
+            f"B: {base}/doctrine/tenets.md differs from the pinned commit",
+            offline=False,
+        ),
+        Case(
+            "a file is added to the projection",
+            lambda c: (c / base / "doctrine/local.md").write_text("# Local\n"),
+            f"B: {base}/doctrine/local.md is not in the baseline at the pin",
+            offline=False,
+        ),
+        Case(
+            "a file is removed from the projection",
+            lambda c: (c / base / "LICENSE").unlink(),
+            f"B: {base}/LICENSE is missing from the projection",
+            offline=False,
+        ),
+        *adopted_cases(consumer),
+        *exception_cases(consumer),
+        Case(
+            "the projected skill is hand-edited",
+            lambda c: append_text(c / skill / "SKILL.md", "\nA local rule.\n"),
+            f"E: {consumer.skill} is not the skill rendered from the projection and status.toml",
+        ),
+    ]
+    for entry in consumer.entries:
+        cases.append(
+            Case(
+                f"{entry} stops linking the skill",
+                lambda c, entry=entry: edit_text(c / entry, skill, "the conventions skill"),
+                f"E: {entry} does not link the projected skill",
+            )
+        )
+    cases += status_cases(consumer, workflow)
+    return cases
+
+
+def witness_copy(consumer: Consumer, dest: Path) -> None:
+    """Copy what the checks read, and nothing else: `.conventions/`, the adopted files, the agent
+    entry files and skill, the workflows, and every file a `gated:` status names. The verdict on
+    this copy is the verdict on the tree, and a large repository is not copied once per case."""
+    names = {CONVENTIONS_DIR, consumer.skill.rstrip("/"), ".github/workflows"}
+    names |= {a.path for a in consumer.adopted} | set(consumer.entries)
+    for status in load_statuses(consumer).values():
+        word, _, rest = status.partition(":")
+        if word.strip() == "gated":
+            names |= {r.strip().partition("#")[0] for r in rest.split(",") if r.strip()}
+    for name in sorted(names):
+        source = consumer.root / name
+        target = dest / name
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        elif source.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+
+def witness(root: Path, url: str | None) -> int:
+    """Seed one violation per case into a copy of this consumer and require the checks to refuse
+    it, naming what was seeded. The unseeded copy runs first, online, in an emptied environment."""
+    try:
+        consumer = load_consumer(root)
+    except UsageError as error:
+        print(f"conventions: {error}", file=sys.stderr)
+        return 2
+    url = url or consumer.baseline
+    tool = Path(__file__).resolve()
+    failures: list[str] = []
+    passed = 0
+
+    def report(ok: bool, line: str, out: str = "") -> None:
+        nonlocal passed
+        print(f"  {'PASS' if ok else 'FAIL'}: {line}")
+        if ok:
+            passed += 1
+        else:
+            failures.append(line)
+            print("\n".join("      " + x for x in out.splitlines()))
+
+    jobs = conventions_jobs(root)
+    if not jobs:
+        failures.append("no workflow job runs `conventions.py check`")
+        workflow = ".github/workflows/ci.yml"
+    else:
+        workflow = jobs[0][0]
+        for path, job, body in jobs:
+            privileged = [x for x in body if re.search(r"secrets\.|TOKEN", x)]
+            report(not privileged, f"{path}#{job} runs the check and references no secret")
+
+    try:
+        cases = witness_cases(consumer, workflow)
+    except SeedMissed as error:
+        print(f"FAIL  the cases could not be built: {error}", file=sys.stderr)
+        return 1
+
+    with tempfile.TemporaryDirectory(prefix="conventions-witness-") as tmp:
+        scratch = Path(tmp)
+        home = scratch / "home"
+        home.mkdir()
+        env = {k: os.environ[k] for k in PASSED_THROUGH if k in os.environ}
+        env.update(
+            HOME=str(home), GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+            GIT_TERMINAL_PROMPT="0",
+        )  # fmt: skip
+        pristine = scratch / "pristine"
+        witness_copy(consumer, pristine)
+
+        def fresh(name: str) -> Path:
+            copy = scratch / name
+            shutil.copytree(pristine, copy)
+            return copy
+
+        def run(copy: Path, *args: str) -> tuple[int, str]:
+            command = [sys.executable, "-I", str(tool), *args, "--root", str(copy)]
+            command += ["--baseline-repo", url]
+            result = subprocess.run(command, capture_output=True, text=True, env=env, check=False)
+            return result.returncode, result.stdout + result.stderr
+
+        code, out = run(fresh("control"), "check")
+        lag_line = f"C: {consumer.name} is"
+        report(
+            code == 0 and lag_line in out,
+            "the unseeded copy is green, online, with no credential, and names its lag",
+            out,
+        )
+
+        for index, case in enumerate(cases):
+            copy = fresh(f"case-{index}")
+            try:
+                case.seed(copy)
+            except (SeedMissed, OSError, KeyError) as error:
+                report(False, f"{case.name}: the seed did not apply ({error})")
+                continue
+            code, out = run(copy, "check", *(["--offline"] if case.offline else []))
+            if case.expected is None:
+                ok, verdict = code == 0, "stays green" if code == 0 else "was refused"
+            elif code != 0 and case.expected in out:
+                ok, verdict = True, "is refused"
+            else:
+                ok = False
+                verdict = "was accepted" if code == 0 else f"was refused without {case.expected!r}"
+            report(ok, f"{case.name} {verdict}", out)
+
+        copy = fresh("lag")
+        fetched = Fetched(url)
+        try:
+            parent = fetched.resolve(f"{consumer.revision}^1")
+        finally:
+            fetched.close()
+        if not parent:
+            report(False, "the pin has no parent on the baseline's main to seed lag with")
+        else:
+            run(copy, "bump", "--revision", parent)
+            _, out = run(copy, "check")
+            behind = re.search(rf"C: {re.escape(consumer.name)} is [1-9][0-9]* commit\(s\)", out)
+            report(bool(behind), "a pin behind the baseline's main is named as lag", out)
+
+    for failure in failures:
+        print(f"FAIL  {failure}", file=sys.stderr)
+    if failures:
+        return 1
+    print(f"conventions witness: {passed} cases held")
+    return 0
+
+
+# --------------------------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------------------------
 
@@ -795,11 +1263,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     move.add_argument("--baseline-repo", help="override the baseline URL (tests)")
     move.add_argument("--init", metavar="NAME", help="create .conventions/ for consumer NAME first")
+    seeded = sub.add_parser("witness", help="show each check red on a seeded violation (TW-5)")
+    seeded.add_argument("--root", type=Path, default=Path.cwd())
+    seeded.add_argument("--baseline-repo", help="override the baseline URL (tests)")
     args = parser.parse_args(argv)
 
     root = args.root.resolve()
     if args.command == "bump":
         return bump(root, args.revision, args.baseline_repo, args.init)
+    if args.command == "witness":
+        return witness(root, args.baseline_repo)
 
     report = Report()
     try:
