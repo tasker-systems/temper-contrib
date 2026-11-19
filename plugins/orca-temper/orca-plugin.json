@@ -31,9 +31,8 @@
       {
         "key": "apiUrl",
         "title": "Temper API origin",
-        "description": "The origin of the temper API the worker reads, with no trailing path.",
-        "type": "string",
-        "default": "https://temper-cloud.vercel.app"
+        "description": "Override for the temper API origin. Leave unset to use the origin the temper CLI is configured for (TEMPER_API_URL, else [cloud] api_url in its config), so the token and the API always come from the same deployment.",
+        "type": "string"
       }
     ]
   },

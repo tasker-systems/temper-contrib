@@ -15,6 +15,17 @@ export interface GoalsSource {
   fetch: FetchLike
 }
 
+/**
+ * The grant was minted and presented, and temper still refused it with a 401 — the same
+ * signed-out refusal as a failed mint: no goal data answers.
+ */
+export class GrantLostError extends Error {
+  constructor() {
+    super('temper refused the borrowed grant (HTTP 401) during the read')
+    this.name = 'GrantLostError'
+  }
+}
+
 export async function activeGoals(
   source: GoalsSource
 ): Promise<{ goals: GoalSummary[]; truncated: boolean }> {
@@ -23,7 +34,7 @@ export async function activeGoals(
     credentials: source.credentials,
     fetch: source.fetch
   })
-  const { data, error } = await client.GET('/api/resources', {
+  const { data, error, response } = await client.GET('/api/resources', {
     params: {
       query: {
         doc_type_name: 'goal',
@@ -34,6 +45,9 @@ export async function activeGoals(
     }
   })
   if (error || !data) {
+    if (response.status === 401) {
+      throw new GrantLostError()
+    }
     throw new Error(`temper refused the goals read: ${JSON.stringify(error)}`)
   }
   return {

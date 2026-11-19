@@ -40,6 +40,7 @@ const originalDeps = { ...deps }
 afterEach(() => {
   deps.run = originalDeps.run
   deps.fetch = originalDeps.fetch
+  deps.readTextFile = originalDeps.readTextFile
 })
 
 test('orca_worker_refuses_without_the_persons_grant', async () => {
@@ -75,9 +76,41 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
   await worker.deactivate()
 })
 
+test('losing the grant mid-read is the same refusal', async () => {
+  // The mint at the gate succeeds, the API refuses the token it presents, and the re-mint the
+  // client tries discovers the CLI signed out — the answer is still the refusal, no goal data.
+  let runs = 0
+  deps.run = async () => {
+    runs += 1
+    return runs === 1 ? { code: 0, stdout: `${TOKEN}\n`, stderr: '' } : SIGNED_OUT
+  }
+  deps.fetch = async () =>
+    new Response(
+      JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'bad token' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } }
+    )
+
+  const host = mockHost({
+    settings: { contextRef: '@me/temper', apiUrl: 'https://temper.example' }
+  })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.goals.active')
+
+  assert.equal(answer.connected, false)
+  assert.match(answer.message, /temper is not connected/)
+  assert.equal(JSON.stringify(answer).includes('Goal one'), false)
+  assert.equal(runs, 2, 'the gate minted once; the 401 re-mint found the CLI signed out')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
 test('answers the person\'s active goals on the CLI\'s borrowed grant', async () => {
   const requests: Request[] = []
-  deps.run = async () => ({ code: 0, stdout: `${TOKEN}\n`, stderr: 'export-token: heads-up\n' })
+  let runs = 0
+  deps.run = async () => {
+    runs += 1
+    return { code: 0, stdout: `${TOKEN}\n`, stderr: 'export-token: heads-up\n' }
+  }
   deps.fetch = async (input: Request) => {
     requests.push(input)
     return new Response(JSON.stringify(GOALS_RESPONSE), {
@@ -112,6 +145,45 @@ test('answers the person\'s active goals on the CLI\'s borrowed grant', async ()
   assert.ok(url.searchParams.get('limit') !== null, 'the list call must carry an explicit limit')
   // … and the request rode the borrowed grant, not an anonymous or invented token.
   assert.equal(request.headers.get('authorization'), `Bearer ${TOKEN}`)
+
+  // One strategy per worker: a second read rides the cached token — no second export-token run.
+  const again = await worker.request('temper.goals.active')
+  assert.equal(again.connected, true)
+  assert.equal(requests.length, 2)
+  assert.equal(runs, 1, 'two reads, one mint: the cached token carried the second')
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()
+})
+
+test('reads at the origin the CLI is configured for when the setting is unset', async () => {
+  const hadEnv = 'TEMPER_API_URL' in process.env
+  const envValue = process.env.TEMPER_API_URL
+  delete process.env.TEMPER_API_URL
+  try {
+    deps.run = async () => ({ code: 0, stdout: `${TOKEN}\n`, stderr: '' })
+    deps.readTextFile = () => '[cloud]\napi_url = "https://temper-configured.example"\n'
+    const requests: Request[] = []
+    deps.fetch = async (input: Request) => {
+      requests.push(input)
+      return new Response(JSON.stringify(GOALS_RESPONSE), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+
+    const host = mockHost({ settings: { contextRef: '@me/temper' } })
+    const worker = await mountWorker(main, { host })
+    const answer = await worker.request('temper.goals.active')
+
+    assert.equal(answer.connected, true)
+    assert.equal(requests.length, 1)
+    const request = requests[0]
+    assert.ok(request)
+    assert.equal(new URL(request.url).origin, 'https://temper-configured.example')
+    await worker.deactivate()
+  } finally {
+    if (hadEnv) {
+      process.env.TEMPER_API_URL = envValue
+    }
+  }
 })

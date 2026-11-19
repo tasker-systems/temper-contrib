@@ -3,15 +3,21 @@
 The person's temper in view from Orca, on the person's own grant and nothing else.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.goals.active`,
-  `src/protocol.ts`), it mints a credential by running `temper auth export-token`
-  (`src/credentials.ts`, trusting stdout only on exit 0, taking expiry from the JWT's `exp`)
-  and reads the person's active goals from the temper API through `@tasker-systems/temper-ts`
-  (`src/goals.ts`, vendored to `vendor/temper-ts.mjs` so no `node_modules` ships).
+  `src/protocol.ts`), the worker's one credential strategy (`src/credentials.ts`, created at
+  `activate`, cached across reads) supplies a token minted by `temper auth export-token` —
+  stdout trusted only on exit 0, expiry from the JWT's `exp` — and the read goes through
+  `@tasker-systems/temper-ts` (`src/goals.ts`, vendored to `vendor/temper-ts.mjs` so no
+  `node_modules` ships). The API origin is the one the CLI is configured for
+  (`src/origin.ts`: `TEMPER_API_URL`, else `[cloud] api_url` in its config), so the token and
+  the API come from the same deployment; the plugin setting can override it.
+- Losing the grant mid-read (a 401, or a re-mint that finds the CLI signed out) is the same
+  refusal as never having it: "temper is not connected" and no goal data.
 - Signed out, the same request refuses — "temper is not connected" and no goal data, neither
   partial nor cached. `orca_worker_refuses_without_the_persons_grant` in `src/worker.test.ts`
   is the executable witness for that.
 - `src/panel.tsx` is a components panel: the goals, or the refusal text.
-- The context ref and API origin are plugin settings (Settings → Temper).
+- The context ref is a plugin setting (Settings → Temper); the API origin follows the CLI
+  unless the setting overrides it.
 
 ## Develop
 

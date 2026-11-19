@@ -4,8 +4,9 @@ Contrib home for temper: plugin packages (`plugins/<pkg>/`) and desktop apps
 (`apps/<app>/`) that compose with the temper CLI. Data plugins depend on temper
 only through its public CLI surface; code-bearing plugins (today
 `plugins/orca-temper`, an Orca plugin) read through `@tasker-systems/temper-ts`,
-vendored and rebuilt from a pinned npm version, and mint credentials only by
-borrowing the CLI's grant (`temper auth export-token`). The desktop app depends
+vendored and rebuilt from a pinned npm version. Today they mint credentials only
+by borrowing the CLI's grant (`temper auth export-token`); a native person login
+is decided for later. The desktop app depends
 on temper through crates.io (`temperkb-client`). This repo ships no temper code.
 temper itself lives in the sibling `tasker-systems/temper`.
 

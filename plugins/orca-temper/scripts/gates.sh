@@ -27,6 +27,8 @@ fi
 
 bun install --frozen-lockfile
 bun run build
+# The committed bundle is the one this pinned toolchain builds — no drift, no hand edit.
+git diff --exit-code -- vendor/
 
 if command -v orca >/dev/null 2>&1; then
   orca plugin types .
