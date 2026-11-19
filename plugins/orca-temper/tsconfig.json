@@ -1,0 +1,16 @@
+{
+  "extends": "./.orca/types/tsconfig.json",
+  "compilerOptions": {
+    "typeRoots": ["./.orca/types", "./node_modules/@types"],
+    "types": [
+      "node",
+      "orca",
+      "orca-host",
+      "orca-frame",
+      "orca-worker",
+      "orca-services",
+      "orca-testing"
+    ]
+  },
+  "include": ["src", "vendor/temper-ts.d.mts"]
+}

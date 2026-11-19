@@ -1,0 +1,45 @@
+{
+  "manifestVersion": 2,
+  "id": "orca-temper",
+  "name": "Temper",
+  "version": "0.1.0",
+  "description": "The person's temper in view from Orca: active goals read through the temper API on a credential borrowed from the temper CLI.",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "orca-temper",
+        "title": "Temper",
+        "icon": "flag",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "settings": [
+      {
+        "key": "contextRef",
+        "title": "Temper context",
+        "description": "The context ref the panel reads active goals from, such as @me/temper.",
+        "type": "string",
+        "default": "@me/temper"
+      },
+      {
+        "key": "apiUrl",
+        "title": "Temper API origin",
+        "description": "The origin of the temper API the worker reads, with no trailing path.",
+        "type": "string",
+        "default": "https://temper-cloud.vercel.app"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    }
+  ]
+}

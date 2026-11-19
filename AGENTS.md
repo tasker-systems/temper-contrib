@@ -1,19 +1,24 @@
 # temper-contrib — agent fundamentals
 
 Contrib home for temper: plugin packages (`plugins/<pkg>/`) and desktop apps
-(`apps/<app>/`) that compose with the temper CLI. Plugins depend on temper
-only through its public CLI surface; the desktop app depends on temper through
-crates.io (`temperkb-client`). This repo ships no temper code. temper itself
-lives in the sibling `tasker-systems/temper`.
+(`apps/<app>/`) that compose with the temper CLI. Data plugins depend on temper
+only through its public CLI surface; code-bearing plugins (today
+`plugins/orca-temper`, an Orca plugin) read through `@tasker-systems/temper-ts`,
+vendored and rebuilt from a pinned npm version, and mint credentials only by
+borrowing the CLI's grant (`temper auth export-token`). The desktop app depends
+on temper through crates.io (`temperkb-client`). This repo ships no temper code.
+temper itself lives in the sibling `tasker-systems/temper`.
 
 ## Layout
 
 ```
 plugins/<pkg>/               # self-contained plugin packages
-  skills/<skill>/SKILL.md    # agent-facing create/compile flows
+  skills/<skill>/SKILL.md    # agent-facing create/compile flows (data plugins)
   schemas/*.json             # JSON Schema draft 2020-12 vocabularies — source of truth
   scripts/*.sh               # bash + temper CLI; environment-specific, CI-able
   tests/fixtures/            # conforming/ + broken/ open_meta payloads
+plugins/orca-temper/         # Orca plugin (code-bearing): orca-plugin.json, src/, vendor/,
+                             # scripts/gates.sh; node_modules/ and .orca/ never committed
 apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src/, Rust core in src-tauri/)
 docker/                      # local Linux environments matching CI jobs (see docker/*/README.md)
 Makefile.toml                # cargo-make: `check`, `test`, `fix`, `setup` across every package
