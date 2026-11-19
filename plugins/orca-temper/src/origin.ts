@@ -4,6 +4,9 @@
 // always come from the same deployment. A plugin setting may override it; the refusal to guess
 // is deliberate: without a configured origin the worker cannot know which instance is the
 // person's. (This reads config.toml only — never auth.json.)
+//
+// Interim: once `temper auth status --format json` reports the API origin, the worker takes it
+// from there (through the same `deps.run` seam as `export-token`) and this parser is deleted.
 
 /** The path the CLI loads its global config from: $TEMPER_GLOBAL_CONFIG, else the default. */
 export function globalConfigPath(env: NodeJS.ProcessEnv): string {
