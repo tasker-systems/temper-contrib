@@ -53,6 +53,52 @@ jobs:
       - name: Lint self-check
         run: ./plugins/author-tools/scripts/lint.sh --self-check
 
+  orca-temper:
+    name: Orca plugin (orca-temper types, tsc, plugin test, vendor reproducibility)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ORCA_VERSION: 1.4.264
+      ORCA_DEB_SHA512: 8870e66a02e859adfab168d5659e7c145669be08abc00b1694aced5d431262e5072589a74579349ef291880a96a05752541bbc48a0fbc684ae4be5f65dd10dd3
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3.11'
+
+      - name: Install the Orca CLI (pinned desktop .deb, checksum-verified)
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/orca.deb "https://github.com/stablyai/orca/releases/download/v${ORCA_VERSION}/orca-ide_${ORCA_VERSION}_amd64.deb"
+          echo "${ORCA_DEB_SHA512}  /tmp/orca.deb" | sha512sum -c -
+          sudo apt-get update
+          sudo apt-get install -y /tmp/orca.deb
+          orca-ide --version
+
+      - name: Install dependencies (frozen lockfile)
+        run: bun install --frozen-lockfile --verbose
+        working-directory: plugins/orca-temper
+
+      - name: Vendored bundle is reproducible
+        run: |
+          set -euo pipefail
+          bun run build
+          git diff --exit-code -- vendor/
+        working-directory: plugins/orca-temper
+
+      - name: Generate Orca typings (generated in CI, never committed)
+        run: orca-ide plugin types .
+        working-directory: plugins/orca-temper
+
+      - name: Type-check (tsc -p .)
+        run: bun run typecheck
+        working-directory: plugins/orca-temper
+
+      - name: orca plugin test
+        run: orca-ide plugin test .
+        working-directory: plugins/orca-temper
+
   desktop:
     name: Desktop (frontend + cargo check)
     runs-on: ubuntu-latest
@@ -328,7 +374,7 @@ jobs:
   ci-success:
     name: CI Success
     if: always()
-    needs: [verify, desktop, hygiene, conventions, witness-gate, csp-witness]
+    needs: [verify, orca-temper, desktop, hygiene, conventions, witness-gate, csp-witness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
