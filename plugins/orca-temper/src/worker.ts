@@ -17,6 +17,7 @@ import {
 import { TemperOriginRefusedError } from './origin'
 import type {
   ActiveGoalsOutput,
+  CapabilitiesOutput,
   InProgressTasksOutput,
   LatestHandoffOutput
 } from './protocol'
@@ -125,4 +126,10 @@ export default function activate(orca: OrcaWorkerApi): void {
       throw error
     }
   })
+
+  // The consents the host has granted, handed to the panel as they stand — the host re-checks
+  // every call itself; the panel uses this to light and name actions, never to authorize one.
+  orca.panels.handle('temper.capabilities', async (): Promise<CapabilitiesOutput> => ({
+    granted: [...orca.grantedCapabilities]
+  }))
 }

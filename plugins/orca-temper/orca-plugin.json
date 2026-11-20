@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "description": "The person's temper in view from Orca: active goals, tasks in progress and the latest handoff, read through the temper API on a credential borrowed from the temper CLI.",
   "engines": {
-    "orca": ">=1.4.246"
+    "orca": ">=1.4.259"
   },
   "execution": "trusted-worker",
   "pluginApi": 1,
@@ -51,8 +51,12 @@
     ]
   },
   "capabilities": [
-    {
-      "kind": "settings:own"
-    }
+    { "kind": "settings:own" },
+    { "kind": "workspace:read" },
+    { "kind": "workspace:create" },
+    { "kind": "agent:launch" },
+    { "kind": "agent:read" },
+    { "kind": "storage:own" },
+    { "kind": "workspace:write" }
   ]
 }

@@ -6,6 +6,8 @@
 //   temper.tasks.in-progress  — tasks whose stage is in-progress in the work contexts
 //   temper.handoff.latest     — the most recently updated session note in the work contexts,
 //                               with its Next steps section
+//   temper.capabilities       — the capability kinds the host has granted the plugin; the
+//                               panel lights actions with them and names those it may not run
 //
 // One summary carries how each group was asked: the context refs it read and, on the lists,
 // an explicit limit and whether it truncated.
@@ -55,6 +57,11 @@ export type LatestHandoffOutput =
   | { connected: true; contexts: string[]; truncated: boolean; handoff: HandoffSummary | null }
   | { connected: false; contexts: string[]; message: string }
 
+/** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
+export type CapabilitiesOutput = {
+  granted: readonly string[]
+}
+
 declare module 'orca' {
   interface PluginRequests {
     /** The person's active goals in the goals contexts, or a signed-out refusal. */
@@ -63,5 +70,7 @@ declare module 'orca' {
     'temper.tasks.in-progress': { output: InProgressTasksOutput }
     /** The latest session note's Next steps in the work contexts, or a signed-out refusal. */
     'temper.handoff.latest': { output: LatestHandoffOutput }
+    /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
+    'temper.capabilities': { output: CapabilitiesOutput }
   }
 }
