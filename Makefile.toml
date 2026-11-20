@@ -53,6 +53,7 @@ dependencies = [
   "python-lint",
   "shell-lint",
   "plugins-self-check",
+  "orca-temper-check",
   "design-contract-absent",
   "conventions",
   "workflows-lint",
@@ -61,7 +62,7 @@ dependencies = [
 
 [tasks.test]
 description = "Run every test suite"
-dependencies = ["rust-test", "desktop-test"]
+dependencies = ["rust-test", "desktop-test", "orca-temper-test"]
 
 [tasks.fix]
 description = "Apply every auto-fix"
@@ -69,7 +70,7 @@ dependencies = ["rust-fmt-fix", "rust-clippy-fix", "desktop-lint-fix", "python-f
 
 [tasks.setup]
 description = "Install dependencies and the git hooks"
-dependencies = ["desktop-install", "python-install", "hooks"]
+dependencies = ["desktop-install", "python-install", "orca-temper-install", "hooks"]
 
 [tasks.hooks]
 description = "Use the repository's git hooks (githooks/)"
@@ -246,6 +247,22 @@ shellcheck $files
 description = "author-tools: schemas valid, fixtures pass/fail as declared"
 command = "./plugins/author-tools/scripts/lint.sh"
 args = ["--self-check"]
+
+[tasks.orca-temper-install]
+description = "bun install (frozen lockfile) for the orca-temper plugin"
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/plugins/orca-temper"
+command = "bun"
+args = ["install", "--frozen-lockfile"]
+
+[tasks.orca-temper-check]
+description = "orca-temper: vendor build, Orca typings, tsc type-check (skips loudly when bun/orca are absent)"
+command = "./plugins/orca-temper/scripts/gates.sh"
+args = ["--check"]
+
+[tasks.orca-temper-test]
+description = "orca-temper: orca plugin test (skips loudly when bun/orca are absent)"
+command = "./plugins/orca-temper/scripts/gates.sh"
+args = ["--test"]
 
 [tasks.conventions]
 description = "the conventions baseline: pin, projection, adopted config, statuses, projected skill (and the check's witnesses)"

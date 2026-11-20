@@ -1,0 +1,44 @@
+{
+  "manifestVersion": 2,
+  "id": "orca-temper",
+  "name": "Temper",
+  "version": "0.1.0",
+  "description": "The person's temper in view from Orca: active goals read through the temper API on a credential borrowed from the temper CLI.",
+  "engines": {
+    "orca": ">=1.4.246"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "contributes": {
+    "panels": [
+      {
+        "id": "orca-temper",
+        "title": "Temper",
+        "icon": "flag",
+        "entry": "src/panel.tsx",
+        "ui": "components"
+      }
+    ],
+    "settings": [
+      {
+        "key": "contextRef",
+        "title": "Temper context",
+        "description": "The context ref the panel reads active goals from, such as @me/temper.",
+        "type": "string",
+        "default": "@me/temper"
+      },
+      {
+        "key": "apiUrl",
+        "title": "Temper API origin",
+        "description": "Override for the temper API origin. Leave unset to use the origin the temper CLI is configured for (TEMPER_API_URL, else [cloud] api_url in its config), so the token and the API always come from the same deployment.",
+        "type": "string"
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "kind": "settings:own"
+    }
+  ]
+}
