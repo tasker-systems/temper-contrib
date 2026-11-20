@@ -1,70 +1,92 @@
-// Where the temper API lives, answered the way the CLI answers it: `TEMPER_API_URL` first, then
-// `[cloud] api_url` in the global config ($TEMPER_GLOBAL_CONFIG or ~/.config/temper/config.toml).
-// The token is minted by the CLI and presented to the API the CLI is configured for — the two
-// always come from the same deployment. A plugin setting may override it; the refusal to guess
-// is deliberate: without a configured origin the worker cannot know which instance is the
-// person's. (This reads config.toml only — never auth.json.)
-//
-// Interim: once `temper auth status --format json` reports the API origin, the worker takes it
-// from there (through the same `deps.run` seam as `export-token`) and this parser is deleted.
+// Where the temper API lives, answered by the CLI itself: `temper auth status --format json`
+// reports the origin at top level as `api_url` — the client's base URL with any trailing `/`
+// trimmed, present signed in and signed out, never omitted. The token is minted by the CLI and
+// presented to the API the CLI names, so asking the CLI is the whole story; the plugin never
+// reads temper's own config or auth store to answer it. A plugin setting may override the
+// origin; the refusal to guess is deliberate — the worker never invents an instance.
 
-/** The path the CLI loads its global config from: $TEMPER_GLOBAL_CONFIG, else the default. */
-export function globalConfigPath(env: NodeJS.ProcessEnv): string {
-  return env.TEMPER_GLOBAL_CONFIG ?? `${env.HOME}/.config/temper/config.toml`
+import type { RunCli } from './deps'
+
+/**
+ * The origin question's refusal: the CLI cannot name the API the borrowed grant is presented
+ * to. The plugin setting answers the question instead — without it, the panel shows this.
+ */
+export class TemperOriginRefusedError extends Error {
+  constructor(detail: string) {
+    super(detail)
+    this.name = 'TemperOriginRefusedError'
+  }
 }
 
-/** One TOML basic or literal string's value. Minimal on purpose: config.toml writers use these. */
-function tomlStringValue(raw: string): string | null {
-  const basic = /^"((?:[^"\\]|\\.)*)"/.exec(raw)
-  if (basic) {
-    // A TOML basic string unescapes exactly as JSON's string body does.
-    return JSON.parse(`"${basic[1]}"`) as string
-  }
-  const literal = /^'([^']*)'/.exec(raw)
-  if (literal) {
-    return literal[1]
-  }
-  return null
-}
+export const TOO_OLD_MESSAGE =
+  'this temper CLI is too old to name its API origin: `temper auth status` answers no api_url. ' +
+  'A temper CLI built from main on or after 2026-11-19 (temper 98de84dc) does — upgrade temper, ' +
+  'or set this plugin\'s "Temper API origin" setting.'
 
-/** The `api_url` under the `[cloud]` table of temper's config.toml, or null. */
-export function apiUrlFromConfigToml(content: string): string | null {
-  let inCloud = false
-  for (const rawLine of content.split('\n')) {
-    const line = rawLine.trim()
-    if (line === '' || line.startsWith('#')) {
-      continue
-    }
-    if (line.startsWith('[')) {
-      inCloud = /^\[\s*cloud\s*\]$/.test(line)
-      continue
-    }
-    if (inCloud) {
-      const assignment = /^api_url\s*=\s*(.+)$/.exec(line)
-      if (assignment) {
-        return tomlStringValue(assignment[1])
-      }
-    }
-  }
-  return null
+const NULL_URL_MESSAGE =
+  'temper auth status reports api_url null — this CLI answers in-process, with no wire origin. ' +
+  'Set this plugin\'s "Temper API origin" setting to name the instance the worker reads.'
+
+/**
+ * The env the CLI is asked in: `TEMPER_TOKEN` and `TEMPER_AUTH` dropped, exactly as the
+ * export-token mint does, so the status answers from the person's on-disk grant — the grant
+ * the token mint mints, and the origin that mint is presented to.
+ */
+function childEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const child = { ...env }
+  delete child.TEMPER_TOKEN
+  delete child.TEMPER_AUTH
+  return child
 }
 
 /**
- * The CLI's precedence: `TEMPER_API_URL` takes priority over `[cloud] api_url`
- * (temper-client's `api_url()`), so the plugin's read and the CLI's mint name the same instance.
+ * The `api_url` the auth-status JSON reports, or a refusal that says why: absent means a CLI
+ * too old to carry the field, null means an in-process client with no wire origin, anything
+ * else unexpected means the CLI's answer cannot be trusted as an origin.
  */
-export function resolveApiOrigin(
-  env: NodeJS.ProcessEnv,
-  readFile: (path: string) => string | null
-): string | null {
-  const fromEnv = env.TEMPER_API_URL
-  if (typeof fromEnv === 'string' && fromEnv.trim() !== '') {
-    return fromEnv.trim()
+export function apiUrlFromAuthStatus(authStatus: string): string {
+  let parsed: { api_url?: unknown }
+  try {
+    parsed = JSON.parse(authStatus) as { api_url?: unknown }
+  } catch {
+    throw new TemperOriginRefusedError(
+      'temper auth status --format json answered no JSON — the temper CLI is broken or too old'
+    )
   }
-  const content = readFile(globalConfigPath(env))
-  if (content === null) {
-    return null
+  if (!('api_url' in parsed)) {
+    throw new TemperOriginRefusedError(TOO_OLD_MESSAGE)
   }
-  const fromConfig = apiUrlFromConfigToml(content)
-  return fromConfig !== null && fromConfig.trim() !== '' ? fromConfig.trim() : null
+  const value = parsed.api_url
+  if (value === null) {
+    throw new TemperOriginRefusedError(NULL_URL_MESSAGE)
+  }
+  if (typeof value !== 'string') {
+    throw new TemperOriginRefusedError(
+      `temper auth status reports api_url as ${typeof value}, not a string or null`
+    )
+  }
+  const url = value.trim().replace(/\/+$/, '')
+  if (url === '') {
+    throw new TemperOriginRefusedError('temper auth status reports api_url empty')
+  }
+  return url
+}
+
+/**
+ * The origin the CLI itself names: `temper auth status --format json` through the same `run`
+ * seam as the token mint. stdout is trusted only on exit 0; a non-zero exit is a refusal naming
+ * the CLI's answer, never a guess at the instance.
+ */
+export async function resolveApiOrigin(
+  run: RunCli,
+  env: NodeJS.ProcessEnv
+): Promise<string> {
+  const { code, stdout, stderr } = await run(['auth', 'status', '--format', 'json'], childEnv(env))
+  if (code !== 0) {
+    const lines = stderr.trim().split('\n')
+    throw new TemperOriginRefusedError(
+      `temper auth status failed: ${lines[lines.length - 1] ?? `the CLI exited ${code}`}`
+    )
+  }
+  return apiUrlFromAuthStatus(stdout)
 }

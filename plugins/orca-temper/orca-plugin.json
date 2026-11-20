@@ -45,7 +45,7 @@
       {
         "key": "apiUrl",
         "title": "Temper API origin",
-        "description": "Override for the temper API origin. Leave unset to use the origin the temper CLI is configured for (TEMPER_API_URL, else [cloud] api_url in its config), so the token and the API always come from the same deployment.",
+        "description": "Override for the temper API origin. Leave unset to use the origin temper auth status reports (the API the temper CLI presents the borrowed token to), so the token and the API always come from the same deployment.",
         "type": "string"
       }
     ]
