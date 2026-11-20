@@ -1,11 +1,16 @@
 // No build step: Orca strips the types and compiles the JSX when the panel loads. The rail is
 // one panel: Home / Explore / Search sub-tabs on top, and a detail stack in an atom underneath
 // — pressing an item pushes a detail view inside the same panel (no Orca method opens another
-// panel), Back pops it. The panel never talks to temper itself — the worker does, on the
-// borrowed grant — and Home mirrors temper-ui's home for the same person, list by list: resume,
-// the latest handoff with its Next section quoted (plain text, as the surfaces render it —
-// never temper-design's `sanitize`, which needs a DOM), the standing ways in with Show more,
-// the places the person works in, and recently updated.
+// panel), Back pops it. The detail shows the item's meta in temper-ui's order and its way out,
+// never its body: the record read asks no sections, so no body crosses the read, and a muted
+// line says the full record opens in temper. On a goal it lists the linked tasks the `advances`
+// edges recorded — pressing one pushes its detail. The way out is the "Temper web address"
+// setting the person sets (`webUrl`): press it and Orca opens `<webUrl>/vault/r/<id>` in the
+// browser, over https only, never derived from the API origin. The panel never talks to temper
+// itself — the worker does, on the borrowed grant — and Home mirrors temper-ui's home for the
+// same person, list by list: resume, the latest handoff with its Next section quoted (plain
+// text, as the surfaces render it — never temper-design's `sanitize`, which needs a DOM), the
+// standing ways in with Show more, the places the person works in, and recently updated.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -16,6 +21,8 @@ import {
   Button,
   EmptyState,
   Heading,
+  host,
+  KeyValue,
   List,
   ListItem,
   plugin,
@@ -23,6 +30,7 @@ import {
   RelativeTime,
   Row,
   set,
+  settings,
   Spinner,
   Stack,
   Tab,
@@ -41,13 +49,16 @@ import {
 import { refreshGrantedCapabilities } from './capabilities'
 import type {
   LatestHandoffOutput,
+  LinkedTasksOutput,
   PlacesOutput,
   RecentOutput,
+  RecordDetailOutput,
   RegionFailure,
   ResourceSummary,
   ResumeOutput,
   WayInOutput
 } from './protocol'
+import { LINKED_TASKS_BOUND } from './protocol'
 
 // Interim, ruled by Pete 2026-11-20: temper-design does not yet export the Show-more cap
 // (WAY_IN_MAX lives only in temper-ui's first-view), so Home ships this local constant until
@@ -82,15 +93,98 @@ interface DetailEntry {
   docType: string
 }
 
-/** The in-panel detail stack: pressing an item pushes, Back pops. Held here, in full. */
-const detailStack = atom('detail-stack', [] as DetailEntry[])
+/** The in-panel detail stack: pressing an item pushes, Back pops. Held here, in full, across
+ * the panel's runs within this Orca session — device-local view state (Rulings Q2), so the
+ * rail reopens where the person was, and a check run can stand a detail up from a seeded run. */
+const detailStack = atom('detail-stack', [] as DetailEntry[], { persist: 'plugin' })
+
+/** The detail's answer per pushed id, null while its request is out. */
+const detailResults = atom('detail-results', {} as Record<string, RecordDetailOutput | null>)
+/** A goal's linked-tasks answer per goal id, null while its request is out. */
+const linkedTaskResults = atom('linked-task-results', {} as Record<string, LinkedTasksOutput | null>)
+/** The person's "Temper web address" setting, as the plugin holds it now; null until read. */
+const webUrlSetting = atom('web-url-setting', null as string | null)
 
 function pushDetail(entry: DetailEntry): void {
   set(detailStack, [...read(detailStack), entry])
+  loadDetail(entry)
+  loadLinkedTasks(entry)
 }
 
 function popDetail(): void {
   set(detailStack, read(detailStack).slice(0, -1))
+}
+
+/** The record read behind one pushed entry, once per id — null marks the request as out. */
+async function loadDetail(entry: DetailEntry): Promise<void> {
+  if (read(detailResults)[entry.id] !== undefined) {
+    return
+  }
+  set(detailResults, { ...read(detailResults), [entry.id]: null })
+  try {
+    const answer = await plugin.request('temper.resource.detail', { id: entry.id })
+    set(detailResults, { ...read(detailResults), [entry.id]: answer })
+  } catch (error) {
+    set(detailResults, {
+      ...read(detailResults),
+      [entry.id]: {
+        state: 'failed',
+        message: `the record read never answered: ${error instanceof Error ? error.message : String(error)}`
+      }
+    })
+  }
+}
+
+/** The linked-tasks read behind a goal, once per id. A non-goal takes no read at all. */
+async function loadLinkedTasks(entry: DetailEntry): Promise<void> {
+  if (entry.docType !== 'goal') {
+    return
+  }
+  if (read(linkedTaskResults)[entry.id] !== undefined) {
+    return
+  }
+  set(linkedTaskResults, { ...read(linkedTaskResults), [entry.id]: null })
+  try {
+    const answer = await plugin.request('temper.goal.tasks', {
+      id: entry.id,
+      bound: LINKED_TASKS_BOUND
+    })
+    set(linkedTaskResults, { ...read(linkedTaskResults), [entry.id]: answer })
+  } catch (error) {
+    set(linkedTaskResults, {
+      ...read(linkedTaskResults),
+      [entry.id]: {
+        state: 'failed',
+        message: `the linked-tasks read never answered: ${error instanceof Error ? error.message : String(error)}`
+      }
+    })
+  }
+}
+
+/**
+ * The way out opens through the person's own setting, over https only, and is never derived
+ * from the API origin (they differ: the API is not where temper-ui is served). Unset, not
+ * https://, or a bare `https://` hostless value: null, and the button names the setting.
+ */
+function wayOutBase(setting: string | null | undefined): string | null {
+  if (typeof setting !== 'string') {
+    return null
+  }
+  const trimmed = setting.trim()
+  if (!/^https:\/\/[^\s/]+/.test(trimmed)) {
+    return null
+  }
+  return trimmed.replace(/\/+$/, '')
+}
+
+function wayOutUrl(setting: string | null | undefined, id: string): string | null {
+  const base = wayOutBase(setting)
+  return base === null ? null : `${base}/vault/r/${id}`
+}
+
+/** Opens the way out in the person's browser; Orca asks the person once per new host. */
+async function openInTemper(url: string): Promise<void> {
+  await host.call('shell.openExternal', { url })
 }
 
 /** The bound a way in is currently asked at: the default, or where Show more carried it. */
@@ -135,7 +229,27 @@ async function showMore(id: string): Promise<void> {
 }
 
 /** Runs once before the first render. */
-export function setup(_ctx: PanelContext): void {
+export function setup(ctx: PanelContext): void {
+  // The way-out setting, read once and followed as the person changes it.
+  void settings
+    .get('webUrl')
+    .then((value) => set(webUrlSetting, typeof value === 'string' ? value : null))
+  ctx.subscriptions.push(
+    settings.onDidChange((change) => {
+      if (change.key === 'webUrl') {
+        void settings
+          .get('webUrl')
+          .then((value) => set(webUrlSetting, typeof value === 'string' ? value : null))
+      }
+    })
+  )
+  // A detail stack carried over from the panel's last run (device-local view state) owes its
+  // reads: the entry arrived without the panel pressing it, so its loads must fire here.
+  const carried = read(detailStack)[read(detailStack).length - 1]
+  if (carried !== undefined) {
+    void loadDetail(carried)
+    void loadLinkedTasks(carried)
+  }
   void refresh()
 }
 
@@ -511,8 +625,11 @@ function Frame() {
   )
 }
 
-/** A pushed detail view: back out, then the item's type word, title and ref. */
+/** A pushed detail view: out, refused, failed, or answered with its meta and its way out. */
 function DetailView(props: { entry: DetailEntry }) {
+  const answer = read(detailResults)[props.entry.id] ?? null
+  const ok = answer !== null && answer.state === 'ok'
+  const detail = ok ? answer.detail : null
   return (
     <Stack gap="md">
       <Row>
@@ -524,11 +641,101 @@ function DetailView(props: { entry: DetailEntry }) {
         <Text muted size="xs">
           {props.entry.docType}
         </Text>
-        <Heading>{props.entry.title}</Heading>
+        <Heading>{detail === null ? props.entry.title : detail.title}</Heading>
         <Text muted size="xs">
-          {props.entry.ref}
+          {detail === null ? props.entry.ref : detail.ref}
         </Text>
       </Stack>
+      <RecordDetailRegion answer={answer} fallbackRef={props.entry.ref} />
+      {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
+        <LinkedTasksRegion goal={props.entry} />
+      ) : undefined}
+      <WayOut id={props.entry.id} />
+    </Stack>
+  )
+}
+
+/** The meta region of a pushed detail: its own state, then the rows in temper-ui's order. */
+function RecordDetailRegion(props: { answer: RecordDetailOutput | null; fallbackRef: string }) {
+  const answer = props.answer
+  if (answer === null) {
+    return <Text muted size="xs">◌ Loading the record…</Text>
+  }
+  if (answer.state === 'not-connected') {
+    // The existing signed-out refusal: no item data answers it on any surface.
+    return <EmptyState title="temper is not connected" description={answer.message} icon="warning" />
+  }
+  if (answer.state === 'failed') {
+    return (
+      <Stack gap="xs">
+        <Text tone="warning">⚠ the record is unavailable — nothing here was read.</Text>
+        <Text muted size="xs">{answer.message}</Text>
+      </Stack>
+    )
+  }
+  return <KeyValue label="meta" items={answer.detail.properties} />
+}
+
+/** A goal's linked tasks: the `advances` edges, labelled "linked tasks", never "all tasks". */
+const LINKED_TASKS_SCOPE = 'linked tasks'
+
+function LinkedTasksRegion(props: { goal: DetailEntry }) {
+  const answer = read(linkedTaskResults)[props.goal.id] ?? null
+  if (answer === null) {
+    return <Text muted size="xs">◌ Loading {LINKED_TASKS_SCOPE}…</Text>
+  }
+  if (answer.state === 'not-connected') {
+    return undefined
+  }
+  if (answer.state === 'failed') {
+    return (
+      <Stack gap="xs">
+        <Text tone="warning">{`⚠ ${LINKED_TASKS_SCOPE} unavailable — nothing here was read.`}</Text>
+        <Text muted size="xs">{answer.message}</Text>
+      </Stack>
+    )
+  }
+  return (
+    <Stack gap="sm">
+      <Heading level={3}>{`${LINKED_TASKS_SCOPE} (${answer.total})`}</Heading>
+      {answer.rows.length === 0 ? (
+        <Text muted size="xs">{`— No ${LINKED_TASKS_SCOPE}.`}</Text>
+      ) : (
+        <Stack gap="xs">
+          <List label={LINKED_TASKS_SCOPE}>
+            {answer.rows.map((task) => (
+              <ResourceRow key={task.id} item={task} />
+            ))}
+          </List>
+          <Text muted size="xs">
+            {omissionSentence(answer.total, answer.rows.length, LINKED_TASKS_SCOPE)}
+          </Text>
+        </Stack>
+      )}
+    </Stack>
+  )
+}
+
+/** The way out: opens the record in temper through the person's web-address setting. */
+function WayOut(props: { id: string }) {
+  const url = wayOutUrl(read(webUrlSetting), props.id)
+  return (
+    <Stack gap="xs">
+      <Text muted size="xs">The full record opens in temper — only the meta shows here.</Text>
+      {url === null ? (
+        <Stack gap="xs">
+          <Button disabled variant="outline">
+            Open in temper
+          </Button>
+          <Text muted size="xs">
+            Set 'Temper web address' in the plugin's settings — the address is never guessed.
+          </Text>
+        </Stack>
+      ) : (
+        <Button variant="outline" onPress={() => void openInTemper(url)}>
+          Open in temper
+        </Button>
+      )}
     </Stack>
   )
 }

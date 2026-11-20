@@ -26,6 +26,12 @@
         "title": "Temper API origin",
         "description": "Override for the temper API origin. Leave unset to use the origin temper auth status reports (the API the temper CLI presents the borrowed token to), so the token and the API always come from the same deployment.",
         "type": "string"
+      },
+      {
+        "key": "webUrl",
+        "title": "Temper web address",
+        "description": "The https:// address temper-ui is served at. \"Open in temper\" on a record's detail opens that record in web temper through it. Leave unset (or keep it not https) and the button stays disabled: the address is never guessed, and it is not the API origin.",
+        "type": "string"
       }
     ]
   },

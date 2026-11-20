@@ -11,9 +11,11 @@ import { createCliCredentials, TemperNotConnectedError } from './credentials'
 import { deps } from './deps'
 import {
   GrantLostError,
+  goalLinkedTasks,
   latestHandoff,
   placesInUse,
   recentlyUpdated,
+  resourceDetail,
   resumeItem,
   wayIn,
   type TemperRead
@@ -22,8 +24,12 @@ import { TemperOriginRefusedError } from './origin'
 import type {
   CapabilitiesOutput,
   LatestHandoffOutput,
+  LinkedTasksInput,
+  LinkedTasksOutput,
   PlacesOutput,
   RecentOutput,
+  RecordDetailInput,
+  RecordDetailOutput,
   RegionFailure,
   ResumeOutput,
   WayInInput,
@@ -92,6 +98,21 @@ export default function activate(orca: OrcaWorkerApi): void {
     'temper.home.way-in',
     async (input: WayInInput): Promise<WayInOutput> =>
       answer(async (read) => ({ state: 'ok' as const, ...(await wayIn(read, input.id, input.bound)) }))
+  )
+
+  orca.panels.handle(
+    'temper.resource.detail',
+    async (input: RecordDetailInput): Promise<RecordDetailOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, detail: await resourceDetail(read, input.id) }))
+  )
+
+  orca.panels.handle(
+    'temper.goal.tasks',
+    async (input: LinkedTasksInput): Promise<LinkedTasksOutput> =>
+      answer(async (read) => ({
+        state: 'ok' as const,
+        ...(await goalLinkedTasks(read, input.id, input.bound))
+      }))
   )
 
   orca.panels.handle('temper.home.places', async (): Promise<PlacesOutput> =>
