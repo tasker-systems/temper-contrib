@@ -3,7 +3,7 @@
   "id": "orca-temper",
   "name": "Temper",
   "version": "0.1.0",
-  "description": "The person's temper in view from Orca: active goals read through the temper API on a credential borrowed from the temper CLI.",
+  "description": "The person's temper in view from Orca: active goals, tasks in progress and the latest handoff, read through the temper API on a credential borrowed from the temper CLI.",
   "engines": {
     "orca": ">=1.4.246"
   },
@@ -22,9 +22,23 @@
     ],
     "settings": [
       {
+        "key": "goalsContexts",
+        "title": "Temper goals contexts",
+        "description": "Comma-separated context refs the Active goals group reads, such as @me/temper, +team/contrib. Leave unset to read the Temper context setting.",
+        "type": "string",
+        "placeholder": "@me/temper"
+      },
+      {
+        "key": "workContexts",
+        "title": "Temper work contexts",
+        "description": "Comma-separated context refs the Tasks in progress and Latest handoff groups read, such as +team/contrib-workflows. Leave unset to read the Temper context setting.",
+        "type": "string",
+        "placeholder": "@me/temper"
+      },
+      {
         "key": "contextRef",
         "title": "Temper context",
-        "description": "The context ref the panel reads active goals from, such as @me/temper.",
+        "description": "The context ref both groups read when the goals-contexts and work-contexts settings are left unset, such as @me/temper.",
         "type": "string",
         "default": "@me/temper"
       },
