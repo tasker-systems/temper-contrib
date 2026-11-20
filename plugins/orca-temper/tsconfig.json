@@ -12,5 +12,5 @@
       "orca-testing"
     ]
   },
-  "include": ["src", "vendor/temper-ts.d.mts", "vendor/temper-design.d.mts"]
+  "include": ["src", "editor", "vendor/temper-ts.d.mts", "vendor/temper-design.d.mts"]
 }

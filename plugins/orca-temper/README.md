@@ -49,6 +49,19 @@ person works in, and recently updated — every list with its omission sentence 
   own storage (`launch-links`, for the launch hook a later item adds). No press writes to temper
   (Rulings Q3). Consents gate per Q9's table — a lit action needs every consent it uses, a
   missing one is named and never attempted — and a refused launch shows what Orca said.
+- **Open body** on a record's detail (lit by `workspace:read`, `workspace:write` and
+  `storage:own`) opens the record's body in an Orca editor tab of the focused workspace, beside
+  the person's view (`src/editor-room/`). The worker reads the record with its body and
+  `body_token`, writes `.temper-views/<ref>.temper.md` (meta as frontmatter, the body below),
+  adds `.temper-views/` once to `info/exclude` in the repository's common git dir (so every
+  linked worktree is covered and `git status` stays clean), holds the base
+  `{id, body_token, base, read_at, path}` in plugin storage, and calls `editor.open` — never
+  `workspace.open`. No focused workspace, one on another host, a folder without git, a tracked
+  file under `.temper-views/`, a body not stored verbatim, or a view already changed on disk
+  refuses in the panel, naming why, and writes nothing. The `temper-body` custom editor
+  (`editor/`, `priority: default`) draws the view read-only: a header naming the record and when
+  its base was read, then the body; editing, the difference and Save are later work.
+  `orca_body_opens_in_an_editor_tab` in `src/editor-room/open-body.test.ts` is its witness.
 - The settings are the API origin override and the "Temper web address" (`webUrl`); the
   context-scoped settings and reads were retired when Home became person-scoped (the design
   record's Rulings, Q1).

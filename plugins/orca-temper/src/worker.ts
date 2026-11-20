@@ -22,6 +22,7 @@ import {
   type TemperRead
 } from './reads'
 import { TemperOriginRefusedError } from './origin'
+import { registerEditorRoom } from './editor-room/open-body'
 import type {
   CapabilitiesOutput,
   LatestHandoffOutput,
@@ -138,6 +139,8 @@ export default function activate(orca: OrcaWorkerApi): void {
     async (input: TaskHandoffInput): Promise<TaskHandoffOutput> =>
       answer(async (read) => ({ state: 'ok' as const, ...(await taskHandoff(read, input.id)) }))
   )
+  // The editor room (Open body): its own module, gated on the same grant.
+  registerEditorRoom(orca, answer)
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
