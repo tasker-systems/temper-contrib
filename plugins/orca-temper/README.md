@@ -41,7 +41,9 @@ person works in, and recently updated — every list with its omission sentence 
   remembered per context in local view state — or this workspace), the agent (what
   `orca agent installed` says the host can launch), and the first prompt in full before it is
   sent: harness-agnostic text naming the temper skill and CLI, the item's full ref and context,
-  and — for a task — the latest handoff's Next section (design record, Rulings Q4/Q4a). Confirm
+  and — for a task — the task's own latest linked session's Next section (design record,
+  Rulings Q4/Q4a; Review 1: never the person's newest session, which belongs to other work; a
+  task with no linked session gets "no handoff yet", quoted nothing). Confirm
   sends `temper.launch.go` to the worker: `workspace.create { projectId, agent, prompt }` or
   `agent.launch { workspaceId, agent, prompt }`, then the workspace ↔ item link in the plugin's
   own storage (`launch-links`, for the launch hook a later item adds). No press writes to temper

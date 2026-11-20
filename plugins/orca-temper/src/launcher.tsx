@@ -12,7 +12,11 @@
 // rail remembers the last pick per context in local view state. Defaults: Start defaults to
 // a new workspace; Resume defaults to this workspace when the task is already linked here
 // (the launch links in plugin storage name it). The agent is picked from what Orca can launch
-// on this host (`orca agent installed` — the host API has no enumeration).
+// on this host (`orca agent installed` — the host API has no enumeration). A task's prompt
+// quotes the task's own newest linked session's Next section — the session→task `advances`
+// edge — and says so when none exists; the person's newest session is never quoted in a
+// task's place (Review 1). The Home card's Resume keeps the person's newest session: it is
+// the card's own subject.
 import {
   atom,
   Button,
@@ -41,7 +45,8 @@ import {
   handoffResumePrompt,
   taskResumePrompt,
   taskStartPrompt,
-  type PromptItem
+  type PromptItem,
+  type TaskHandoffInfo
 } from './prompts'
 import type {
   LaunchAgentsOutput,
@@ -74,8 +79,10 @@ interface LaunchCompose {
 /** What the sheet is composing; null while nothing was pressed. */
 const launchCompose = atom<LaunchCompose | null>('launch-compose', null)
 
-/** The handoff's Next section behind the prompt, null while its read is out or absent. */
-const launchHandoff = atom<NextSummary | null>('launch-handoff', null)
+/** The handoff behind the prompt; null while its read is out or it failed. For a task this is
+ *  the task's own newest linked session (`temper.launch.task-handoff`) — never the person's
+ *  latest session, which belongs to whatever work that session did (Review 1). */
+const launchHandoff = atom<TaskHandoffInfo | null>('launch-handoff', null)
 
 /** The picks the sheet stands over; null while the launch reads are still out. */
 interface LaunchChoices {
@@ -117,23 +124,25 @@ const KIND_LABEL: Record<LaunchKind, string> = {
   'handoff-resume': 'Resume'
 }
 
-/** A task's start and resume name the latest handoff's Next section in their prompt. */
+/** A task's start and resume name the task's own latest linked session in their prompt;
+ *  the handoff card's Resume names the person's latest session — its subject. */
 function wantsHandoff(kind: LaunchKind): boolean {
   return kind === 'task-start' || kind === 'task-resume' || kind === 'handoff-resume'
 }
 
 /** The prompt as it stands now — re-rendered when the handoff read lands under it. */
-function promptFor(compose: LaunchCompose, next: NextSummary | null): string {
+function promptFor(compose: LaunchCompose): string {
   const item: PromptItem = compose.item
+  const handoff = read(launchHandoff)
   switch (compose.kind) {
     case 'task-start':
-      return taskStartPrompt(item, next)
+      return taskStartPrompt(item, handoff)
     case 'task-resume':
-      return taskResumePrompt(item, next)
+      return taskResumePrompt(item, handoff)
     case 'goal-work':
       return goalWorkPrompt(item)
     case 'handoff-resume':
-      return handoffResumePrompt(item, next)
+      return handoffResumePrompt(item, handoff?.next ?? null)
   }
 }
 
@@ -153,7 +162,7 @@ async function openLaunch(
   set(launchOutcome, null)
   set(launchSending, false)
   set(launchChoices, null)
-  set(launchHandoff, kind === 'handoff-resume' ? handoffNext : null)
+  set(launchHandoff, kind === 'handoff-resume' ? { hasSession: true, session: null, next: handoffNext } : null)
   set(launchPick, {
     destination: 'new-workspace',
     projectId: null,
@@ -161,7 +170,7 @@ async function openLaunch(
   })
 
   const orNull = (promise: Promise<unknown>): Promise<null | unknown> => promise.catch(() => null)
-  const [projects, agents, workspace, links, handoff] = await Promise.all([
+  const [projects, agents, workspace, links, taskRead] = await Promise.all([
     plugin.request('temper.launch.projects').catch(
       (): LaunchProjectsOutput => ({
         state: 'failed',
@@ -176,10 +185,10 @@ async function openLaunch(
     ),
     orNull(host.call('workspace.readContext')),
     orNull(storage.get(LAUNCH_LINKS_KEY)),
-    // The handoff next was handed in for a handoff resume; task start and resume read the
-    // person's latest handoff — the one the Home card shows.
-    wantsHandoff(kind) && kind !== 'handoff-resume'
-      ? plugin.request('temper.home.handoff').catch(() => null)
+    // A task's prompt quotes the task's own newest linked session — the session→task
+    // `advances` edge — never the person's latest (Review 1).
+    kind === 'task-start' || kind === 'task-resume'
+      ? plugin.request('temper.launch.task-handoff', { id: item.id }).catch(() => null)
       : Promise.resolve(null)
   ])
 
@@ -198,8 +207,13 @@ async function openLaunch(
     linkRows.some((link) => link.itemId === item.id && link.workspaceId === focused.id)
   set(launchChoices, { projects, agents, workspace: focused, linkedHere })
 
-  if (kind !== 'handoff-resume' && handoff !== null && handoff.state === 'ok') {
-    set(launchHandoff, handoff.handoff?.next ?? null)
+  if (taskRead !== null && (taskRead as { state?: string }).state === 'ok') {
+    const handoff = (taskRead as { handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null }).handoff
+    set(launchHandoff, {
+      hasSession: handoff !== null,
+      session: handoff === null ? null : { id: handoff.id, ref: handoff.ref, title: handoff.title },
+      next: handoff?.next ?? null
+    })
   }
 
   const pick = read(launchPick)
@@ -261,7 +275,7 @@ async function confirmLaunch(): Promise<void> {
       ? { workspaceId: choices.workspace?.id ?? undefined }
       : {}),
     agent: pick.agent,
-    prompt: promptFor(compose, read(launchHandoff)),
+    prompt: promptFor(compose),
     item: compose.item
   }
   set(launchSending, true)
@@ -425,11 +439,11 @@ function LauncherRegion(props: { from: 'detail' | 'home' }): OrcaNode {
       <Text muted size="xs">
         The first prompt — sent when you confirm, written to nothing but the agent.
       </Text>
-      <Code block>{promptFor(compose, read(launchHandoff))}</Code>
-      {wantsHandoff(compose.kind) && compose.kind !== 'handoff-resume' && read(launchChoices) === null && read(launchHandoff) === null ? (
+      <Code block>{promptFor(compose)}</Code>
+      {wantsHandoff(compose.kind) && compose.kind !== 'handoff-resume' && read(launchChoices) === null ? (
         <Text muted size="xs">
-          ◌ the latest handoff's Next section rides along once it answers; without one, the
-          prompt goes without it.
+          ◌ the task's own latest handoff rides along once it answers; with none linked, the
+          prompt says the task has no handoff yet.
         </Text>
       ) : undefined}
       <RadioGroup

@@ -16,7 +16,8 @@ import type {
   LaunchInput,
   LaunchOutput,
   RecordDetailInput,
-  RecordDetailOutput
+  RecordDetailOutput,
+  TaskHandoffOutput
 } from './protocol'
 
 let mounted: TestPanel | undefined
@@ -32,6 +33,19 @@ const TASK_CONTEXT = '+temper-dev/contrib-workflows'
 
 const NEXT = { heading: 'Next steps', text: '- Record the witness runs\n- Run the live check', truncated: false }
 
+/** The task's own newest linked session — its Next names this task's work, not someone else's. */
+const TASK_NEXT = { heading: 'Next steps', text: '- Land the launcher gates\n- Keep the witness green', truncated: false }
+const TASK_HANDOFF = {
+  state: 'ok' as const,
+  handoff: {
+    id: '00000000-0000-7000-8000-0000000000b2',
+    ref: 'the-tasks-session-00000000-0000-7000-8000-0000000000b2',
+    title: "The task's session",
+    next: TASK_NEXT
+  }
+}
+
+/** The person's newest session — it worked ANOTHER task, and a task's prompt never quotes it. */
 const HANDOFF = {
   state: 'ok' as const,
   sessionCount: 4,
@@ -118,6 +132,7 @@ function servedHost(options: {
   detail?: unknown
   links?: readonly object[]
   handoff?: unknown
+  taskHandoff?: unknown
 }): { host: ReturnType<typeof mockHost>; served: Served } {
   const served: Served = { launches: [] }
   const host = mockHost({
@@ -142,6 +157,7 @@ function servedHost(options: {
       'temper.goal.tasks': () => ({ state: 'ok', rows: [], total: 0, bound: 8 }),
       'temper.launch.projects': () => PROJECTS,
       'temper.launch.agents': () => AGENTS,
+      'temper.launch.task-handoff': () => (options.taskHandoff ?? TASK_HANDOFF) as TaskHandoffOutput,
       'temper.launch.go': (input: LaunchInput): LaunchOutput => {
         served.launches.push(input)
         return { state: 'launched', workspaceId: 'ws-new', terminalId: 't-new', linkError: null }
@@ -192,8 +208,13 @@ test('orca_start_names_the_task_and_its_handoff', async () => {
     'the sheet says what the prompt is'
   )
   assert.ok(
+    mounted.find({ text: /Land the launcher gates/ }),
+    'the prompt quotes the task\'s OWN latest linked session\'s Next, before any send'
+  )
+  assert.equal(
     mounted.find({ text: /Record the witness runs/ }),
-    'the prompt quotes the latest handoff\'s Next section as written, before any send'
+    null,
+    'the person\'s latest session — another task\'s work — is never quoted'
   )
   assert.equal(served.launches.length, 0, 'nothing is sent until the person confirms')
 
@@ -211,8 +232,12 @@ test('orca_start_names_the_task_and_its_handoff', async () => {
   assert.ok(launch.prompt.includes(`ref \`${TASK_REF}\``), 'the prompt names the task\'s full ref')
   assert.ok(launch.prompt.includes(TASK_CONTEXT), 'the prompt names the task\'s context')
   assert.ok(
-    launch.prompt.includes('- Record the witness runs'),
-    'the prompt names the latest handoff\'s Next section'
+    launch.prompt.includes('- Land the launcher gates'),
+    'the prompt names the task\'s own latest handoff\'s Next section'
+  )
+  assert.ok(
+    !launch.prompt.includes('Record the witness runs'),
+    'the person\'s latest session is never quoted in the task\'s place'
   )
   assert.ok(
     launch.prompt.includes('temper skill check'),
@@ -259,7 +284,36 @@ test('resume on a task linked here defaults to this workspace and calls for an a
   assert.equal(launch.destination, 'this-workspace', 'Resume defaults here when the task is linked here')
   assert.equal(launch.workspaceId, 'ws-current', 'the launch lands in this workspace')
   assert.ok(launch.prompt.includes('Resume the task:'), 'the resume prompt asks for the task-resume flow')
-  assert.ok(launch.prompt.includes('- Record the witness runs'), 'the handoff\'s Next section rides')
+  assert.ok(launch.prompt.includes('- Land the launcher gates'), 'the task\'s own Next section rides')
+  assert.deepEqual(mounted.errors, [])
+  assert.deepEqual(mounted.refusals, [])
+})
+
+test('a task with no linked session has no handoff quoted — the prompt says so', async () => {
+  const { host, served } = servedHost({
+    taskHandoff: { state: 'ok' as const, handoff: null }
+  })
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+
+  await mounted.press(mounted.find({ type: 'Button', text: 'Start agent' })!)
+  await mounted.settled()
+
+  assert.ok(
+    mounted.find({ text: /The task has no handoff yet/ }),
+    'the sheet\'s prompt says the task has no handoff yet'
+  )
+  assert.equal(mounted.find({ text: /Record the witness runs/ }), null, 'no other session is quoted')
+
+  await mounted.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  assert.equal(served.launches.length, 1)
+  assert.ok(served.launches[0].prompt.includes('The task has no handoff yet'), 'the sent prompt says it too')
+  assert.ok(!served.launches[0].prompt.includes('Record the witness runs'))
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })

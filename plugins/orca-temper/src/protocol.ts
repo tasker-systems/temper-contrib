@@ -18,6 +18,8 @@
 //                           panel's bound — labelled "linked tasks", never "all tasks"
 //   temper.launch.projects — the projects Orca lists, for the launcher's project pick
 //   temper.launch.agents   — the agents Orca can launch on this host (`orca agent installed`)
+//   temper.launch.task-handoff — the task's own newest linked session and its Next section —
+//                           never the person's latest (Review 1); feeds the task prompts
 //   temper.launch.go      — the launch itself: workspace.create or agent.launch with the
 //                           prompt the person saw; stores the workspace ↔ item link in the
 //                           plugin's own storage on success. No temper write happens here
@@ -265,7 +267,24 @@ export const LAUNCH_NEW_WORKSPACE_NEEDS = [
   'agent:launch'
 ] as const
 export const LAUNCH_THIS_WORKSPACE_NEEDS = ['workspace:read', 'agent:launch'] as const
-/** What a Start/Resume press needs at minimum — the this-workspace path stays open without
+/**
+ * `temper.launch.task-handoff`: the task's own newest linked session and its Next section —
+ * the session→task `advances` edge. null says the task has no handoff yet; it never falls
+ * back to the person's latest, which belongs to whatever work that session did.
+ */
+export interface TaskHandoffInput {
+  /** The task's id, a bare UUID. */
+  id: string
+}
+
+export type TaskHandoffOutput =
+  | {
+      state: 'ok'
+      handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null
+    }
+  | RegionFailure
+
+/** What the launcher's press needs at minimum — the this-workspace path stays open without
  *  `workspace:create` (Q9: declining one consent leaves the others working). */
 export const LAUNCH_PRESS_NEEDS = ['workspace:read', 'agent:launch'] as const
 
@@ -293,5 +312,7 @@ declare module 'orca' {
     'temper.launch.agents': { output: LaunchAgentsOutput }
     /** One launch: workspace.create or agent.launch, then the local link; never a temper write. */
     'temper.launch.go': { input: LaunchInput; output: LaunchOutput }
+    /** The task's own newest linked session and its Next section — never the person's latest. */
+    'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
   }
 }

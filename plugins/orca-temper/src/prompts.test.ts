@@ -8,7 +8,8 @@ import {
   handoffResumePrompt,
   taskResumePrompt,
   taskStartPrompt,
-  type PromptItem
+  type PromptItem,
+  type TaskHandoffInfo
 } from './prompts'
 
 const ITEM: PromptItem = {
@@ -20,8 +21,19 @@ const ITEM: PromptItem = {
 
 const NEXT = { heading: 'Next steps', text: '- Record the witness runs', truncated: false }
 
+/** The task's own latest session, linked by its `advances` edge. */
+const TASK_HANDOFF: TaskHandoffInfo = {
+  hasSession: true,
+  session: {
+    id: '00000000-0000-7000-8000-0000000000b1',
+    ref: 'the-tasks-session-00000000-0000-7000-8000-0000000000b1',
+    title: 'The task session'
+  },
+  next: NEXT
+}
+
 test('task start names the skill, the ref, the context, the read and the fallback', () => {
-  const prompt = taskStartPrompt(ITEM, null)
+  const prompt = taskStartPrompt(ITEM, { hasSession: false, session: null, next: null })
   assert.ok(prompt.startsWith('You are starting work on a temper task.'), 'the draft leads')
   assert.ok(prompt.includes('Use the temper skill with the `temper` CLI if you have it.'))
   assert.ok(prompt.includes(`Start the task: ref \`${ITEM.ref}\`, in context \`${ITEM.contextRef}\`.`))
@@ -29,21 +41,41 @@ test('task start names the skill, the ref, the context, the read and the fallbac
   assert.ok(prompt.includes('"How to hold this item" section'))
   assert.ok(prompt.includes('temper skill check'), 'the fallback rides')
   assert.ok(!prompt.includes('/temper'), 'never a slash command')
-  assert.ok(!prompt.includes('Next steps'), 'no handoff is invented')
 })
 
-test('the handoff Next section is quoted as written when one was read', () => {
-  const prompt = taskStartPrompt(ITEM, NEXT)
-  assert.ok(prompt.includes('- Record the witness runs'), 'the Next text rides verbatim')
-  assert.ok(prompt.indexOf('Next section') < prompt.indexOf('- Record the witness runs'), 'it is introduced before quoted')
+test('a task with no linked session says it has no handoff yet and quotes nothing', () => {
+  const prompt = taskStartPrompt(ITEM, { hasSession: false, session: null, next: null })
+  assert.ok(prompt.includes('The task has no handoff yet'), 'the absence is said')
+  assert.ok(!prompt.includes('Next section'), 'nothing is quoted or invented')
 })
 
-test('task resume asks for the task-resume flow from the latest session', () => {
-  const prompt = taskResumePrompt(ITEM, NEXT)
+test('the task\'s own handoff Next section is quoted as written — never the person\'s latest', () => {
+  const otherNext = { heading: 'Next steps', text: '- Someone else\'s leftovers', truncated: false }
+  const prompt = taskStartPrompt(ITEM, { ...TASK_HANDOFF, next: otherNext })
+  assert.ok(prompt.includes("- Someone else's leftovers"), 'the task\'s own session is quoted')
+  assert.ok(prompt.includes('The task\'s latest handoff names what is next'), 'it is named as the task\'s own')
+  assert.ok(!prompt.includes('- Record the witness runs'), 'another session\'s Next is not quoted')
+})
+
+test('a session without a Next heading says so and names the session', () => {
+  const prompt = taskResumePrompt(ITEM, { ...TASK_HANDOFF, next: null })
+  assert.ok(prompt.includes('carries no Next section'))
+  assert.ok(prompt.includes(TASK_HANDOFF.session!.ref), 'the session\'s ref is named')
+  assert.ok(prompt.includes(`temper resource show ${TASK_HANDOFF.session!.id}`))
+})
+
+test('a failed handoff read leaves the clause out rather than claiming', () => {
+  const prompt = taskStartPrompt(ITEM, null)
+  assert.ok(!prompt.includes('handoff'), 'no clause claims a handoff state')
+  assert.ok(!prompt.includes('Next section'))
+})
+
+test('task resume asks for the task-resume flow from its latest session', () => {
+  const prompt = taskResumePrompt(ITEM, TASK_HANDOFF)
   assert.ok(prompt.includes('You are resuming work on a temper task.'))
   assert.ok(prompt.includes(`Resume the task: ref \`${ITEM.ref}\``))
   assert.ok(prompt.includes('task-resume flow'))
-  assert.ok(prompt.includes('- Record the witness runs'))
+  assert.ok(prompt.includes('- Record the witness runs'), 'the task\'s own Next is quoted')
 })
 
 test('the handoff resume names the session and starts from its Next section', () => {

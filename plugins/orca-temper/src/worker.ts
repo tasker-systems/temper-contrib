@@ -17,6 +17,7 @@ import {
   recentlyUpdated,
   resourceDetail,
   resumeItem,
+  taskHandoff,
   wayIn,
   type TemperRead
 } from './reads'
@@ -36,6 +37,8 @@ import type {
   RecordDetailOutput,
   RegionFailure,
   ResumeOutput,
+  TaskHandoffInput,
+  TaskHandoffOutput,
   WayInInput,
   WayInOutput
 } from './protocol'
@@ -126,6 +129,14 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.panels.handle('temper.home.recent', async (): Promise<RecentOutput> =>
     answer(async (read) => ({ state: 'ok' as const, ...(await recentlyUpdated(read)) }))
+  )
+
+  // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;
+  // it names the task's newest linked session and never the person's latest (Review 1).
+  orca.panels.handle(
+    'temper.launch.task-handoff',
+    async (input: TaskHandoffInput): Promise<TaskHandoffOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await taskHandoff(read, input.id)) }))
   )
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks

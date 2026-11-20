@@ -902,3 +902,115 @@ test('a goal ref that is not a bare UUID is the caller\'s error, never a read', 
   assert.equal(requests.length, 0)
   await worker.deactivate()
 })
+
+// Review 1: a task's prompt quotes the task's OWN latest linked session — the session→task
+// `advances` edge — never the person's newest session. The read walks the task's connections
+// for incoming advances rows, scopes sessions by those ids, and quotes the newest's Next.
+const TASK_FOR_HANDOFF = '66666666-6666-7666-8666-666666666666'
+const LINKED_SESSION = row('c1', 'The task session', 'session')
+const FAR_SESSION = row('c2', 'The other task session', 'session')
+
+/** One connections page for the task: two advancing sessions, plus the task's goal edge. */
+function connectionsPage(ids: string[]) {
+  return {
+    limit: 200,
+    returned: ids.length + 1,
+    truncated: false,
+    total: ids.length + 1,
+    rows: [
+      ...ids.map((peerId) => ({
+        edge_id: `eeeeeeee-0000-7000-8000-000000000${peerId.slice(-2)}`,
+        edge_kind: 'leads_to',
+        label: 'advances',
+        direction: 'incoming',
+        polarity: 'forward',
+        peer_table: 'kb_resources',
+        peer_id: peerId,
+        peer_slug: `peer-${peerId}`,
+        peer_title: 'a linked session',
+        weight: 1,
+        created: '2026-11-20T01:00:00Z'
+      })),
+      {
+        edge_id: 'eeeeeeee-0000-7000-8000-0000000000f0',
+        edge_kind: 'leads_to',
+        label: 'advances',
+        direction: 'outgoing',
+        polarity: 'forward',
+        peer_table: 'kb_resources',
+        peer_id: GOAL_DETAIL_ID,
+        peer_slug: 'the-goal',
+        peer_title: 'The goal',
+        weight: 1,
+        created: '2026-11-20T00:00:00Z'
+      }
+    ]
+  }
+}
+
+test('a task\'s handoff is its own newest linked session, never the person\'s latest', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    const url = new URL(input.url)
+    if (url.pathname === `/api/resources/${TASK_FOR_HANDOFF}/connections`) {
+      return new Response(JSON.stringify(connectionsPage([LINKED_SESSION.id, FAR_SESSION.id])), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    if (url.pathname === '/api/resources') {
+      // The ids scope: ONLY the task's advancing sessions, never a person-wide newest.
+      assert.equal(url.searchParams.get('ids'), `${LINKED_SESSION.id},${FAR_SESSION.id}`)
+      assert.equal(url.searchParams.get('doc_type_name'), 'session')
+      return new Response(JSON.stringify(listResponse([LINKED_SESSION], 2)), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    assert.equal(url.pathname, `/api/resources/${LINKED_SESSION.id}`)
+    assert.equal(url.searchParams.get('sections'), 'body')
+    return new Response(
+      JSON.stringify({ ...LINKED_SESSION, content: '# The task session\n\n## Next steps\n\n- Land the launcher gates\n' }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    )
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.launch.task-handoff', { id: TASK_FOR_HANDOFF })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.handoff?.id, LINKED_SESSION.id)
+  assert.equal(answer.handoff?.next?.text, '- Land the launcher gates')
+  const list = new URL(requests[1]?.url ?? '')
+  assert.equal(list.searchParams.get('limit'), '1')
+  assert.equal(list.searchParams.get('sort'), 'updated')
+  assert.equal(list.searchParams.get('owner'), null, 'no person scope rides a task\'s handoff')
+  assert.equal(requests.length, 3, 'connections, the scoped session pick, the body')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a task with no advancing session has no handoff — and no list or body read follows', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    return new Response(JSON.stringify(connectionsPage([])), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.launch.task-handoff', { id: TASK_FOR_HANDOFF })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.handoff, null, 'nothing is quoted or invented')
+  assert.equal(requests.length, 1, 'only the connections read ran')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
