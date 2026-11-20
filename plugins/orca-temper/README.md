@@ -3,21 +3,25 @@
 The person's temper in view from Orca, on the person's own grant and nothing else.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.goals.active`,
-  `src/protocol.ts`), the worker's one credential strategy (`src/credentials.ts`, created at
-  `activate`, cached across reads) supplies a token minted by `temper auth export-token` —
-  stdout trusted only on exit 0, expiry from the JWT's `exp` — and the read goes through
-  `@tasker-systems/temper-ts` (`src/goals.ts`, vendored to `vendor/temper-ts.mjs` so no
-  `node_modules` ships). The API origin is the one the CLI is configured for
-  (`src/origin.ts`: `TEMPER_API_URL`, else `[cloud] api_url` in its config), so the token and
-  the API come from the same deployment; the plugin setting can override it.
+  `temper.tasks.in-progress`, `temper.handoff.latest`, `src/protocol.ts`), the worker's one
+  credential strategy (`src/credentials.ts`, created at `activate`, cached across reads)
+  supplies a token minted by `temper auth export-token` — stdout trusted only on exit 0, expiry
+  from the JWT's `exp` — and the read goes through `@tasker-systems/temper-ts` (`src/reads.ts`,
+  vendored to `vendor/temper-ts.mjs` so no `node_modules` ships). An explicit limit rides every
+  list call; the latest handoff also reads the newest session note's body and shows its Next
+  steps. The API origin is the one the CLI is configured for (`src/origin.ts`:
+  `TEMPER_API_URL`, else `[cloud] api_url` in its config), so the token and the API come from
+  the same deployment; the plugin setting can override it.
 - Losing the grant mid-read (a 401, or a re-mint that finds the CLI signed out) is the same
-  refusal as never having it: "temper is not connected" and no goal data.
-- Signed out, the same request refuses — "temper is not connected" and no goal data, neither
+  refusal as never having it: "temper is not connected" and no group data.
+- Signed out, every request refuses — "temper is not connected" and no group data, neither
   partial nor cached. `orca_worker_refuses_without_the_persons_grant` in `src/worker.test.ts`
   is the executable witness for that.
-- `src/panel.tsx` is a components panel: the goals, or the refusal text.
-- The context ref is a plugin setting (Settings → Temper); the API origin follows the CLI
-  unless the setting overrides it.
+- `src/panel.tsx` is a components panel: three groups — active goals, tasks in progress and the
+  latest handoff, each with a count — or the refusal text.
+- Each group reads its own comma-separated context list (Settings → Temper: goals contexts for
+  active goals, work contexts for tasks and the handoff); a group whose list is unset reads the
+  "Temper context" setting, and the API origin follows the CLI unless the setting overrides it.
 
 ## Develop
 
