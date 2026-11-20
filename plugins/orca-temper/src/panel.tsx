@@ -2,13 +2,15 @@
 // one panel: Home / Explore / Search sub-tabs on top, and a detail stack in an atom underneath
 // — pressing an item pushes a detail view inside the same panel (no Orca method opens another
 // panel), Back pops it. The panel never talks to temper itself — the worker does, on the
-// borrowed grant — and shows either the in-force state on Home or the signed-out refusal,
-// which stands over every tab. The handoff's Next steps render as Markdown; the lists carry
-// the ids and titles the worker answered, with counts, nothing more.
+// borrowed grant — and Home mirrors temper-ui's home for the same person, list by list: resume,
+// the latest handoff with its Next section quoted (plain text, as the surfaces render it —
+// never temper-design's `sanitize`, which needs a DOM), the standing ways in with Show more,
+// the places the person works in, and recently updated.
 //
-// Text is temper-design's job: region states carry their own words (◌ loading, — empty,
-// ⚠ failed, ⊘ gave up — the last waits for a state that gives up), the doc-type word appears
-// on rows instead of icons, and everything reads in sentence case.
+// Text is temper-design's job and is imported from it, never copied: the ways in, their bound
+// and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
+// Region states carry their own words (◌ loading, — empty, ⚠ failed), the doc-type word
+// appears on rows instead of icons, and every list states its omission sentence and its order.
 import {
   atom,
   Button,
@@ -16,9 +18,9 @@ import {
   Heading,
   List,
   ListItem,
-  Markdown,
   plugin,
   read,
+  RelativeTime,
   Row,
   set,
   Spinner,
@@ -26,21 +28,47 @@ import {
   Tab,
   Tabs,
   Text,
+  type OrcaNode,
   type PanelContext
 } from 'orca'
+import {
+  HANDOFF_LABEL,
+  omissionSentence,
+  WAY_IN_BOUND,
+  WAY_IN_ORDER,
+  WAYS_IN
+} from '../vendor/temper-design.mjs'
 import { refreshGrantedCapabilities } from './capabilities'
 import type {
-  ActiveGoalsOutput,
-  InProgressTasksOutput,
   LatestHandoffOutput,
-  ResourceSummary
+  PlacesOutput,
+  RecentOutput,
+  RegionFailure,
+  ResourceSummary,
+  ResumeOutput,
+  WayInOutput
 } from './protocol'
 
+// Interim, ruled by Pete 2026-11-20: temper-design does not yet export the Show-more cap
+// (WAY_IN_MAX lives only in temper-ui's first-view), so Home ships this local constant until
+// the follow-up task "orca-temper imports the Show-more cap from temper-design" swaps it for
+// the package's export.
+const WAY_IN_MAX = 200
+
+/** Where a way in starts from, and what recently updated and places cover, in their own words. */
+const RECENT_SCOPE = 'resources you can read'
+const PLACES_SCOPE = 'places you changed something in'
+const PLACES_ORDER = 'by your latest change in each'
+
 /** The worker's last answers; null while each request is out. */
-const goalsResult = atom<ActiveGoalsOutput | null>(null)
-const tasksResult = atom<InProgressTasksOutput | null>(null)
+const resumeResult = atom<ResumeOutput | null>(null)
 const handoffResult = atom<LatestHandoffOutput | null>(null)
-/** True while any request is out. */
+const placesResult = atom<PlacesOutput | null>(null)
+const recentResult = atom<RecentOutput | null>(null)
+const wayInResults = atom('way-in-results', {} as Record<string, WayInOutput | null>)
+/** How far each way in has grown, device-local view state: a step of WAY_IN_BOUND at a press. */
+const wayInShown = atom('way-in-shown', {} as Record<string, number>)
+/** True while the first refresh is out. */
 const loading = atom('loading', false)
 
 /** Which sub-tab holds. */
@@ -51,7 +79,7 @@ interface DetailEntry {
   id: string
   ref: string
   title: string
-  docType: 'goal' | 'task'
+  docType: string
 }
 
 /** The in-panel detail stack: pressing an item pushes, Back pops. Held here, in full. */
@@ -65,17 +93,32 @@ function popDetail(): void {
   set(detailStack, read(detailStack).slice(0, -1))
 }
 
+/** The bound a way in is currently asked at: the default, or where Show more carried it. */
+function wayInBound(id: string): number {
+  return read(wayInShown)[id] ?? WAY_IN_BOUND
+}
+
 async function refresh(): Promise<void> {
   set(loading, true)
   try {
-    const [goals, tasks, handoff] = await Promise.all([
-      plugin.request('temper.goals.active'),
-      plugin.request('temper.tasks.in-progress'),
-      plugin.request('temper.handoff.latest')
+    const [resume, handoff, places, recent, ...ways] = await Promise.all([
+      plugin.request('temper.home.resume'),
+      plugin.request('temper.home.handoff'),
+      plugin.request('temper.home.places'),
+      plugin.request('temper.home.recent'),
+      ...WAYS_IN.map((way) =>
+        plugin.request('temper.home.way-in', { id: way.id, bound: wayInBound(way.id) })
+      )
     ])
-    set(goalsResult, goals)
-    set(tasksResult, tasks)
+    set(resumeResult, resume)
     set(handoffResult, handoff)
+    set(placesResult, places)
+    set(recentResult, recent)
+    const results: Record<string, WayInOutput | null> = {}
+    WAYS_IN.forEach((way, index) => {
+      results[way.id] = ways[index] ?? null
+    })
+    set(wayInResults, results)
     // The consents ride along so actions draw lit or named from the start.
     await refreshGrantedCapabilities()
   } finally {
@@ -83,14 +126,29 @@ async function refresh(): Promise<void> {
   }
 }
 
+/** Show more: grow the one list in place by the shared step, up to its cap — never a grid. */
+async function showMore(id: string): Promise<void> {
+  const bound = Math.min(wayInBound(id) + WAY_IN_BOUND, WAY_IN_MAX)
+  set(wayInShown, { ...read(wayInShown), [id]: bound })
+  const answer = await plugin.request('temper.home.way-in', { id, bound })
+  set(wayInResults, { ...read(wayInResults), [id]: answer })
+}
+
 /** Runs once before the first render. */
 export function setup(_ctx: PanelContext): void {
   void refresh()
 }
 
-// The three answers' shared shape, read together below.
-function readAnswers(): [ActiveGoalsOutput | null, InProgressTasksOutput | null, LatestHandoffOutput | null] {
-  return [read(goalsResult), read(tasksResult), read(handoffResult)]
+/** Every region's answer, read together below. */
+function readAnswers(): (ResumeOutput | LatestHandoffOutput | PlacesOutput | RecentOutput | WayInOutput | null)[] {
+  const ways = read(wayInResults)
+  return [
+    read(resumeResult),
+    read(handoffResult),
+    read(placesResult),
+    read(recentResult),
+    ...WAYS_IN.map((way) => ways[way.id] ?? null)
+  ]
 }
 
 /** Nothing has been read yet — the first request set is still out. */
@@ -98,24 +156,28 @@ function nothingReadYet(): boolean {
   return readAnswers().every((answer) => answer === null)
 }
 
-/** Every group refused: temper was never reached, so no group claims anything. */
+/** Every settled region refused the grant: temper was never reached, so no region claims it. */
 function allRefused(): boolean {
-  return readAnswers().every((answer) => answer !== null && !answer.connected)
+  const answers = readAnswers().filter((answer) => answer !== null)
+  return answers.length > 0 && answers.every((answer) => answer.state === 'not-connected')
+}
+
+/** The refusal message any refused region carries — they share the one credential strategy. */
+function refusalMessage(): string {
+  const refused = readAnswers().find((answer) => answer !== null && answer.state === 'not-connected')
+  return refused !== null && refused !== undefined && refused.state === 'not-connected'
+    ? refused.message
+    : 'temper is not connected'
 }
 
 /**
  * The signed-out refusal, shared by whichever tab holds: nothing here was read, on any tab.
  */
 function Refusal() {
-  const [goals, tasks, handoff] = readAnswers()
-  if (
-    goals === null || goals.connected ||
-    tasks === null || tasks.connected ||
-    handoff === null || handoff.connected
-  ) {
+  if (!allRefused()) {
     return undefined
   }
-  return <EmptyState title="temper is not connected" description={goals.message} icon="warning" />
+  return <EmptyState title="temper is not connected" description={refusalMessage()} icon="warning" />
 }
 
 /** The loading region, for every tab: reads happen once, on the panel's behalf. */
@@ -128,166 +190,277 @@ function LoadingRegion() {
   )
 }
 
-/**
- * One list group: a counted heading, the contexts it read, its rows or its empty text. Rows
- * open a detail view in the panel; the doc-type word leads each row's description — no icons.
- */
-function ResourceList(props: {
-  label: string
-  docType: 'goal' | 'task'
-  count: number
-  contexts: string[]
-  items: ResourceSummary[]
-  empty: string
-  truncatedNotice: string | null
-}) {
+/** A region whose read failed: it names what failed and shows nothing in its place. */
+function FailedRegion(props: { label: string; message: string }) {
   return (
-    <Stack gap="sm">
-      <Heading>{`${props.label} (${props.count})`}</Heading>
+    <Stack gap="xs">
+      <Heading level={3}>{props.label}</Heading>
+      <Text tone="warning">{`⚠ ${props.label} unavailable — nothing here was read.`}</Text>
       <Text muted size="xs">
-        {props.contexts.join(', ')}
+        {props.message}
       </Text>
-      {props.items.length === 0 ? (
-        <Text muted size="xs">
-          {props.empty}
-        </Text>
-      ) : (
-        <List label={props.label}>
-          {props.items.map((item) => (
-            <ListItem
-              key={item.id}
-              title={item.title}
-              description={props.docType}
-              onPress={() =>
-                pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: props.docType })
-              }
-            />
-          ))}
-        </List>
-      )}
-      {props.truncatedNotice === null ? undefined : (
-        <Text muted size="xs">
-          {props.truncatedNotice}
-        </Text>
-      )}
     </Stack>
   )
 }
 
-function GoalsGroup() {
-  const goals = read(goalsResult)
-  if (goals === null || !goals.connected || allRefused()) {
-    return undefined
-  }
+/** One resource row: the doc-type word leads its description — no icons. */
+function ResourceRow(props: { item: ResourceSummary; description?: string }) {
+  const item = props.item
   return (
-    <ResourceList
-      label="Active goals"
-      docType="goal"
-      count={goals.goals.length}
-      contexts={goals.contexts}
-      items={goals.goals}
-      empty={`— No active goals in ${goals.contexts.join(', ')}.`}
-      truncatedNotice={goals.truncated ? 'More goals than fit this page — narrow the context.' : null}
+    <ListItem
+      title={item.title}
+      description={props.description ?? item.docType}
+      onPress={() =>
+        pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: item.docType })
+      }
     />
   )
 }
 
-function TasksGroup() {
-  const tasks = read(tasksResult)
-  if (tasks === null || !tasks.connected || allRefused()) {
+/**
+ * One region's shell: its own state — still out, failed, refused (drawn over by the panel's
+ * refusal, so not here) or answered. The children render the answered case.
+ */
+function Region(props: {
+  answer: { state: string } | null
+  label: string
+  children?: OrcaNode
+}): OrcaNode {
+  const answer = props.answer
+  if (answer === null) {
+    return (
+      <Stack gap="sm">
+        <Heading level={3}>{props.label}</Heading>
+        <Text muted size="xs">{`◌ Loading ${props.label}…`}</Text>
+      </Stack>
+    )
+  }
+  if (answer.state === 'not-connected') {
     return undefined
   }
-  return (
-    <ResourceList
-      label="Tasks in progress"
-      docType="task"
-      count={tasks.tasks.length}
-      contexts={tasks.contexts}
-      items={tasks.tasks}
-      empty={`— No tasks in progress in ${tasks.contexts.join(', ')}.`}
-      truncatedNotice={tasks.truncated ? 'More tasks than fit this page — narrow the context.' : null}
-    />
-  )
+  if (answer.state === 'failed') {
+    return <FailedRegion label={props.label} message={(answer as RegionFailure & { state: 'failed' }).message} />
+  }
+  return props.children
 }
 
-function HandoffGroup() {
-  const handoff = read(handoffResult)
-  if (handoff === null || !handoff.connected || allRefused()) {
-    return undefined
-  }
+/** Resume: the one resource the person last changed — nothing stands in its place if none. */
+function ResumeRegion() {
+  const answer = read(resumeResult)
+  const resume = answer !== null && answer.state === 'ok' ? answer.resume : null
   return (
-    <Stack gap="sm">
-      <Heading>{`Latest handoff (${handoff.handoff === null ? 0 : 1})`}</Heading>
-      <Text muted size="xs">
-        {handoff.contexts.join(', ')}
-      </Text>
-      {handoff.handoff === null ? (
-        <Text muted size="xs">
-          {`— No session notes in ${handoff.contexts.join(', ')}.`}
-        </Text>
-      ) : (
+    <Region answer={answer} label="resume">
+      {resume === null ? undefined : (
         <Stack gap="sm">
-          <Text>{handoff.handoff.title}</Text>
-          {handoff.handoff.nextSteps === null ? (
-            <Text muted size="xs">
-              The latest note carries no Next steps section.
-            </Text>
+          <Heading level={3}>resume</Heading>
+          <Text muted size="xs">
+            the one resource you last changed
+          </Text>
+          <List label="resume">
+            <ListItem
+              title={resume.resource.title}
+              description={resume.resource.docType}
+              onPress={() =>
+                pushDetail({
+                  id: resume.resource.id,
+                  ref: resume.resource.ref,
+                  title: resume.resource.title,
+                  docType: resume.resource.docType
+                })
+              }
+            >
+              <Row gap="xs" align="center">
+                <Text muted size="xs">
+                  you changed it
+                </Text>
+                <RelativeTime at={Date.parse(resume.changedAt)} muted />
+              </Row>
+            </ListItem>
+          </List>
+        </Stack>
+      )}
+    </Region>
+  )
+}
+
+/** The latest handoff, beside the lists as the desktop shows it: the session and its Next. */
+function HandoffRegion() {
+  const answer = read(handoffResult)
+  const ok = answer !== null && answer.state === 'ok'
+  const handoff = ok ? answer.handoff : null
+  const sessionScope = WAYS_IN.find((way) => way.id === 'sessions')?.scope ?? 'sessions of yours'
+  return (
+    <Region answer={answer} label={HANDOFF_LABEL}>
+      {answer === null || answer.state !== 'ok' ? undefined : (
+        <Stack gap="sm">
+          <Heading level={3}>{HANDOFF_LABEL}</Heading>
+          {handoff === null ? (
+            <Text muted size="xs">{`— No ${sessionScope}.`}</Text>
           ) : (
-            <Markdown content={handoff.handoff.nextSteps} />
+            <Stack gap="sm">
+              <List label={HANDOFF_LABEL}>
+                <ListItem
+                  title={handoff.title}
+                  description="session"
+                  onPress={() =>
+                    pushDetail({
+                      id: handoff.id,
+                      ref: handoff.ref,
+                      title: handoff.title,
+                      docType: 'session'
+                    })
+                  }
+                />
+              </List>
+              {handoff.next === null ? undefined : (
+                <Stack gap="xs">
+                  <Text muted size="xs">{`excerpt · ${handoff.next.heading}`}</Text>
+                  <Text>{handoff.next.text}</Text>
+                  {handoff.next.truncated ? (
+                    <Text muted size="xs">
+                      … continues in the session.
+                    </Text>
+                  ) : undefined}
+                </Stack>
+              )}
+              <Text muted size="xs">
+                {omissionSentence(answer.sessionCount, 1, sessionScope)}
+              </Text>
+            </Stack>
           )}
         </Stack>
       )}
-      {handoff.truncated ? (
-        <Text muted size="xs">
-          Older session notes exist — the panel shows the latest only.
-        </Text>
-      ) : undefined}
-    </Stack>
+    </Region>
   )
 }
 
-/** A group the worker refused while others connected: the group's own ⚠ region. */
-function GroupRefusal(props: { label: string; message: string }) {
+/** One way in: its label and scope from WAYS_IN, its order stated, Show more in place. */
+function WayInRegion(props: { id: string }) {
+  const label = WAYS_IN.find((way) => way.id === props.id)?.label ?? props.id
+  const answer = read(wayInResults)[props.id] ?? null
   return (
-    <Stack gap="sm">
-      <Heading>{props.label}</Heading>
-      <Text tone="warning">{`⚠ ${props.message}`}</Text>
-    </Stack>
+    <Region answer={answer} label={label}>
+      {answer !== null && answer.state === 'ok' ? (
+        <Stack gap="sm">
+          <Heading level={3}>{`${answer.label} (${answer.total})`}</Heading>
+          <Text muted size="xs">
+            {WAY_IN_ORDER}
+          </Text>
+          {answer.rows.length === 0 ? (
+            <Text muted size="xs">{`— No ${answer.scope}.`}</Text>
+          ) : (
+            <List label={answer.label}>
+              {answer.rows.map((item) => (
+                <ResourceRow key={item.id} item={item} />
+              ))}
+            </List>
+          )}
+          {answer.rows.length === 0 ? undefined : (
+            <Text muted size="xs">
+              {omissionSentence(answer.total, answer.rows.length, answer.scope)}
+            </Text>
+          )}
+          {answer.rows.length < answer.total && answer.bound < WAY_IN_MAX ? (
+            <Row>
+              <Button variant="ghost" onPress={() => void showMore(props.id)}>
+                Show more
+              </Button>
+            </Row>
+          ) : undefined}
+        </Stack>
+      ) : undefined}
+    </Region>
+  )
+}
+
+/** Places: the contexts the person changed something in, by their own latest change in each. */
+function PlacesRegion() {
+  const answer = read(placesResult)
+  return (
+    <Region answer={answer} label="places">
+      {answer !== null && answer.state === 'ok' ? (
+        <Stack gap="sm">
+          <Heading level={3}>{`places (${answer.total})`}</Heading>
+          <Text muted size="xs">
+            {PLACES_ORDER}
+          </Text>
+          {answer.rows.length === 0 ? (
+            <Text muted size="xs">{`— No ${PLACES_SCOPE}.`}</Text>
+          ) : (
+            <List label="places">
+              {answer.rows.map((place) => (
+                <ListItem
+                  key={place.ref}
+                  title={place.name}
+                  description={place.ref}
+                >
+                  <RelativeTime at={Date.parse(place.lastChangedAt)} muted />
+                </ListItem>
+              ))}
+            </List>
+          )}
+          <Text muted size="xs">
+            {omissionSentence(answer.total, answer.rows.length, PLACES_SCOPE)}
+          </Text>
+        </Stack>
+      ) : undefined}
+    </Region>
+  )
+}
+
+/** Recently updated — across everything the person can read, and it says so. */
+function RecentRegion() {
+  const answer = read(recentResult)
+  return (
+    <Region answer={answer} label="recently updated">
+      {answer !== null && answer.state === 'ok' ? (
+        <Stack gap="sm">
+          <Heading level={3}>{`recently updated (${answer.total})`}</Heading>
+          <Text muted size="xs">
+            {WAY_IN_ORDER}
+          </Text>
+          {answer.rows.length === 0 ? (
+            <Text muted size="xs">{`— No ${RECENT_SCOPE}.`}</Text>
+          ) : (
+            <List label="recently updated">
+              {answer.rows.map((item) => (
+                <ResourceRow
+                  key={item.id}
+                  item={item}
+                  description={
+                    item.contextRef === null ? item.docType : `${item.docType} · ${item.contextRef}`
+                  }
+                />
+              ))}
+            </List>
+          )}
+          <Text muted size="xs">
+            {omissionSentence(answer.total, answer.rows.length, RECENT_SCOPE)}
+          </Text>
+        </Stack>
+      ) : undefined}
+    </Region>
   )
 }
 
 function HomeTab() {
-  const [goals, tasks, handoff] = readAnswers()
   if (nothingReadYet()) {
     // The loading region stands over the tabs; nothing else renders yet.
     return undefined
   }
-  if (goals === null || tasks === null || handoff === null) {
-    // Some answers still out while others landed: keep the loading region until all are in,
-    // as before — no half-set of groups.
-    return <LoadingRegion />
-  }
   if (allRefused()) {
-    // The refusal region above the tabs carries it; no group renders.
+    // The refusal region above the tabs carries it; no region renders.
     return undefined
   }
   return (
     <Stack gap="md">
-      {goals !== null && !goals.connected ? (
-        <GroupRefusal label="Active goals" message={goals.message} />
-      ) : (
-        <GoalsGroup />
-      )}
-      {tasks !== null && !tasks.connected ? (
-        <GroupRefusal label="Tasks in progress" message={tasks.message} />
-      ) : (
-        <TasksGroup />
-      )}
-      {handoff !== null && !handoff.connected ? (
-        <GroupRefusal label="Latest handoff" message={handoff.message} />
-      ) : (
-        <HandoffGroup />
-      )}
+      <ResumeRegion />
+      <HandoffRegion />
+      {WAYS_IN.map((way) => (
+        <WayInRegion key={way.id} id={way.id} />
+      ))}
+      <RecentRegion />
+      <PlacesRegion />
     </Stack>
   )
 }

@@ -1,57 +1,37 @@
 // The plugin's trusted worker. Every temper read goes: consult the ONE credential strategy this
 // worker holds (its cache carries the refreshed token across panel reads; a read never mints a
 // fresh token when a valid one is cached), then read through temper-ts at the origin temper
-// auth status names (the API the CLI presents the minted grant to). Without the grant — at
-// mint time or lost mid-read — the answer is a refusal,
-// never a guess, and never partial or cached group data. The panel shows the refusal text.
+// auth status names (the API the CLI presents the minted grant to). Home's reads are
+// temper-ui's home reads for the same person — the context-scoped lists and their settings are
+// retired. Without the grant — at mint time or lost mid-read — the answer is a refusal, never a
+// guess, and never partial or cached region data; the panel shows the refusal text. A read that
+// fails any other way is that region's failure, beside the regions that answered.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { createCliCredentials, TemperNotConnectedError } from './credentials'
 import { deps } from './deps'
 import {
-  activeGoals,
   GrantLostError,
-  inProgressTasks,
   latestHandoff,
+  placesInUse,
+  recentlyUpdated,
+  resumeItem,
+  wayIn,
   type TemperRead
 } from './reads'
 import { TemperOriginRefusedError } from './origin'
 import type {
-  ActiveGoalsOutput,
   CapabilitiesOutput,
-  InProgressTasksOutput,
-  LatestHandoffOutput
+  LatestHandoffOutput,
+  PlacesOutput,
+  RecentOutput,
+  RegionFailure,
+  ResumeOutput,
+  WayInInput,
+  WayInOutput
 } from './protocol'
 
 const NOT_CONNECTED_MESSAGE =
   'temper is not connected — sign in with the temper CLI (`temper auth login`), then try again'
-
-const DEFAULT_CONTEXT_REF = '@me/temper'
-
-// The panel reads goals from the goals contexts and work items from the work contexts. Each
-// group's setting is a comma-separated list of context refs; unset, the group falls back to the
-// single "Temper context" setting, and beyond that to @me/temper — today's behaviour.
-async function settingContexts(
-  orca: OrcaWorkerApi,
-  listKey: string,
-  fallbackKey: string
-): Promise<string[]> {
-  const value = await orca.settings.get(listKey)
-  if (typeof value === 'string') {
-    const refs = value
-      .split(',')
-      .map((ref) => ref.trim())
-      .filter((ref) => ref !== '')
-    if (refs.length > 0) {
-      return refs
-    }
-  }
-  const fallbackValue = await orca.settings.get(fallbackKey)
-  const fallback =
-    typeof fallbackValue === 'string' && fallbackValue.trim() !== ''
-      ? fallbackValue.trim()
-      : null
-  return [fallback ?? DEFAULT_CONTEXT_REF]
-}
 
 export default function activate(orca: OrcaWorkerApi): void {
   // One strategy per worker: its cache carries the refreshed token — and the origin minted
@@ -74,7 +54,8 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   // Losing the grant mid-read (a 401 through the client, a re-mint that finds the CLI signed
   // out) is the same refusal as never having it. An origin the CLI cannot name — a CLI too old
-  // to report one, or one answering none — refuses in its own words.
+  // to report one, or one answering none — refuses in its own words. Any other failure is the
+  // region's own: the panel names it, and the regions that answered stay.
   const refused = (error: unknown): boolean =>
     error instanceof TemperNotConnectedError ||
     error instanceof GrantLostError ||
@@ -83,49 +64,43 @@ export default function activate(orca: OrcaWorkerApi): void {
   const refusalMessage = (error: unknown): string =>
     error instanceof TemperOriginRefusedError ? error.message : NOT_CONNECTED_MESSAGE
 
-  orca.panels.handle('temper.goals.active', async (): Promise<ActiveGoalsOutput> => {
-    const contexts = await settingContexts(orca, 'goalsContexts', 'contextRef')
+  // The grant gate: cached if still valid; the first read (and any later refresh) mints
+  // through the CLI. Without it, refuse before any read is even attempted.
+  async function answer<T>(
+    run: (read: TemperRead) => Promise<T>
+  ): Promise<T | RegionFailure> {
     try {
-      // The grant gate: cached if still valid; the first read (and any later refresh) mints
-      // through the CLI. Without it, refuse before any read is even attempted.
       await credentials.tokenResult()
-      const { goals, truncated } = await activeGoals(await temperRead(), contexts)
-      return { connected: true, contexts, goals, truncated }
+      return await run(await temperRead())
     } catch (error) {
       if (refused(error)) {
-        return { connected: false, contexts, message: refusalMessage(error) }
+        return { state: 'not-connected', message: refusalMessage(error) }
       }
-      throw error
+      return { state: 'failed', message: error instanceof Error ? error.message : String(error) }
     }
-  })
+  }
 
-  orca.panels.handle('temper.tasks.in-progress', async (): Promise<InProgressTasksOutput> => {
-    const contexts = await settingContexts(orca, 'workContexts', 'contextRef')
-    try {
-      await credentials.tokenResult()
-      const { tasks, truncated } = await inProgressTasks(await temperRead(), contexts)
-      return { connected: true, contexts, tasks, truncated }
-    } catch (error) {
-      if (refused(error)) {
-        return { connected: false, contexts, message: refusalMessage(error) }
-      }
-      throw error
-    }
-  })
+  orca.panels.handle('temper.home.resume', async (): Promise<ResumeOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await resumeItem(read)) }))
+  )
 
-  orca.panels.handle('temper.handoff.latest', async (): Promise<LatestHandoffOutput> => {
-    const contexts = await settingContexts(orca, 'workContexts', 'contextRef')
-    try {
-      await credentials.tokenResult()
-      const { handoff, truncated } = await latestHandoff(await temperRead(), contexts)
-      return { connected: true, contexts, truncated, handoff }
-    } catch (error) {
-      if (refused(error)) {
-        return { connected: false, contexts, message: refusalMessage(error) }
-      }
-      throw error
-    }
-  })
+  orca.panels.handle('temper.home.handoff', async (): Promise<LatestHandoffOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await latestHandoff(read)) }))
+  )
+
+  orca.panels.handle(
+    'temper.home.way-in',
+    async (input: WayInInput): Promise<WayInOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await wayIn(read, input.id, input.bound)) }))
+  )
+
+  orca.panels.handle('temper.home.places', async (): Promise<PlacesOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await placesInUse(read)) }))
+  )
+
+  orca.panels.handle('temper.home.recent', async (): Promise<RecentOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await recentlyUpdated(read)) }))
+  )
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.

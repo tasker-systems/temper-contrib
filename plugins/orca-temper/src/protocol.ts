@@ -1,61 +1,110 @@
 // The panel <-> worker contract, declared once: src/panel.tsx and src/worker.ts both read it.
 // The worker is the only surface that talks to temper; the panel requests, the worker answers
-// on the person's borrowed grant or refuses. Each group answers one read:
+// on the person's borrowed grant or refuses. Home's reads are the ones temper-ui's home makes
+// for the same person (design record, Rulings Q1/R2), each its own request so one region can
+// fail or refuse beside the others:
 //
-//   temper.goals.active       — active goals in the goals contexts
-//   temper.tasks.in-progress  — tasks whose stage is in-progress in the work contexts
-//   temper.handoff.latest     — the most recently updated session note in the work contexts,
-//                               with its Next steps section
-//   temper.capabilities       — the capability kinds the host has granted the plugin; the
-//                               panel lights actions with them and names those it may not run
+//   temper.home.resume    — the one resource the person last changed
+//   temper.home.handoff   — the person's newest session, its Next section quoted
+//   temper.home.way-in    — one of the standing ways in (goals, in progress, sessions),
+//                           grown by the panel's Show more bound
+//   temper.home.places    — the contexts the person changed something in
+//   temper.home.recent    — recently updated across everything the person can read
+//   temper.capabilities   — the capability kinds the host has granted the plugin; the
+//                           panel lights actions with them and names those it may not run
 //
-// One summary carries how each group was asked: the context refs it read and, on the lists,
-// an explicit limit and whether it truncated.
+// Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
+// refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
+// never draws — the refusal over the whole panel carries it.
 export {}
 
-/** One temper resource, as every panel group shows it: ids and titles, nothing more. */
+/** One region's state, the failure shapes shared by every Home read. */
+export type RegionFailure =
+  /** The grant was never minted or temper refused it: no data answers, not even cached. */
+  | { state: 'not-connected'; message: string }
+  /** The read ran and failed; the region names what failed and shows nothing in its place. */
+  | { state: 'failed'; message: string }
+
+/** One temper resource, as Home's rows show it: ids and titles, its type word and home. */
 export interface ResourceSummary {
   id: string
   ref: string
   title: string
+  /** The doc-type word — it stands where an icon would. */
+  docType: string
+  /** The home-context address; null for a cogmap-homed resource. */
+  contextRef: string | null
+  updated: string
 }
 
-/**
- * `temper.goals.active` answers one of two ways, and nothing in between: the active goals found
- * on the person's grant across the goals contexts, or a refusal that carries no goal data —
- * none partial, none cached.
- */
-export type ActiveGoalsOutput =
-  | { connected: true; contexts: string[]; goals: ResourceSummary[]; truncated: boolean }
-  | { connected: false; contexts: string[]; message: string }
+/** `temper.home.resume`: the one resource the person last changed, by their own change time. */
+export type ResumeOutput =
+  | {
+      state: 'ok'
+      resume: {
+        resource: ResourceSummary
+        /** The person's own latest change — never `updated`, which a teammate's write moves. */
+        changedAt: string
+      } | null
+    }
+  | RegionFailure
 
-/**
- * `temper.tasks.in-progress` answers one of two ways, and nothing in between: the in-progress
- * tasks found on the person's grant across the work contexts, or a refusal that carries no
- * task data — none partial, none cached.
- */
-export type InProgressTasksOutput =
-  | { connected: true; contexts: string[]; tasks: ResourceSummary[]; truncated: boolean }
-  | { connected: false; contexts: string[]; message: string }
-
-/** The latest handoff: one session note and its Next steps section — or the absence of one. */
-export interface HandoffSummary {
-  id: string
-  ref: string
-  title: string
-  contextRef: string
-  /** The note's Next steps section; null when the note carries none. */
-  nextSteps: string | null
+/** The session's Next section, quoted as written (temper-design's `nextSection`, its own bound). */
+export interface NextSummary {
+  heading: string
+  text: string
+  truncated: boolean
 }
 
-/**
- * `temper.handoff.latest` answers one of two ways, and nothing in between: the most recently
- * updated session note in the work contexts with its Next steps, or a refusal that carries no
- * note data. `truncated` reports older session notes the one-row page left out.
- */
+/** `temper.home.handoff`: the person's newest session and its Next section, or the none of one. */
 export type LatestHandoffOutput =
-  | { connected: true; contexts: string[]; truncated: boolean; handoff: HandoffSummary | null }
-  | { connected: false; contexts: string[]; message: string }
+  | {
+      state: 'ok'
+      /** How many sessions of the person's the one-row page stands before. */
+      sessionCount: number
+      handoff: {
+        id: string
+        ref: string
+        title: string
+        /** Null when the session carries no Next heading — nothing is invented in its place. */
+        next: NextSummary | null
+      } | null
+    }
+  | RegionFailure
+
+/** `temper.home.way-in` grows one way in in place: the bound the panel asks for, up to its cap. */
+export interface WayInInput {
+  id: string
+  bound: number
+}
+
+export type WayInOutput =
+  | {
+      state: 'ok'
+      /** The way's own id, label and scope, from temper-design's WAYS_IN. */
+      id: string
+      label: string
+      scope: string
+      rows: ResourceSummary[]
+      total: number
+      bound: number
+    }
+  | RegionFailure
+
+/** One place the person works in: the context, and when they last changed something there. */
+export interface PlaceInUse {
+  ref: string
+  name: string
+  lastChangedAt: string
+}
+
+export type PlacesOutput =
+  | { state: 'ok'; rows: PlaceInUse[]; total: number }
+  | RegionFailure
+
+export type RecentOutput =
+  | { state: 'ok'; rows: ResourceSummary[]; total: number }
+  | RegionFailure
 
 /** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
 export type CapabilitiesOutput = {
@@ -64,12 +113,16 @@ export type CapabilitiesOutput = {
 
 declare module 'orca' {
   interface PluginRequests {
-    /** The person's active goals in the goals contexts, or a signed-out refusal. */
-    'temper.goals.active': { output: ActiveGoalsOutput }
-    /** Tasks whose stage is in-progress in the work contexts, or a signed-out refusal. */
-    'temper.tasks.in-progress': { output: InProgressTasksOutput }
-    /** The latest session note's Next steps in the work contexts, or a signed-out refusal. */
-    'temper.handoff.latest': { output: LatestHandoffOutput }
+    /** The one resource the person last changed, or a signed-out refusal. */
+    'temper.home.resume': { output: ResumeOutput }
+    /** The person's newest session and its Next section, or a signed-out refusal. */
+    'temper.home.handoff': { output: LatestHandoffOutput }
+    /** One way in (goals, in progress, sessions) at the panel's bound, or a signed-out refusal. */
+    'temper.home.way-in': { input: WayInInput; output: WayInOutput }
+    /** The contexts the person changed something in, by their own latest change in each. */
+    'temper.home.places': { output: PlacesOutput }
+    /** Recently updated across everything the person can read. */
+    'temper.home.recent': { output: RecentOutput }
     /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
     'temper.capabilities': { output: CapabilitiesOutput }
   }
