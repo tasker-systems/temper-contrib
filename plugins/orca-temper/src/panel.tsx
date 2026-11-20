@@ -48,6 +48,7 @@ import {
 } from '../vendor/temper-design.mjs'
 import { refreshGrantedCapabilities } from './capabilities'
 import { DetailLaunchActions, HandoffLaunchAction } from './launcher'
+import { OpenBodyAction } from './editor-room/open-body-action'
 import type {
   LatestHandoffOutput,
   LinkedTasksOutput,
@@ -656,6 +657,7 @@ function DetailView(props: { entry: DetailEntry }) {
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />
       ) : undefined}
+      <OpenBodyAction id={props.entry.id} />
       <WayOut id={props.entry.id} />
     </Stack>
   )

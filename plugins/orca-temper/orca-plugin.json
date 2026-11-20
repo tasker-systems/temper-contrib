@@ -20,6 +20,16 @@
         "ui": "components"
       }
     ],
+    "customEditors": [
+      {
+        "id": "temper-body",
+        "title": "Temper body",
+        "extensions": [".temper.md"],
+        "entry": "editor/main.ts",
+        "frame": "isolated",
+        "priority": "default"
+      }
+    ],
     "settings": [
       {
         "key": "apiUrl",
