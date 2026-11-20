@@ -12,6 +12,10 @@
 //   temper.home.recent    — recently updated across everything the person can read
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
 //                           panel lights actions with them and names those it may not run
+//   temper.resource.detail — one record's meta, read with no `sections` query (no body, no
+//                           open-meta run); the detail view draws it and nothing of the body
+//   temper.goal.tasks     — a goal's linked tasks (the asserted `advances` edges), at the
+//                           panel's bound — labelled "linked tasks", never "all tasks"
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -111,6 +115,51 @@ export type CapabilitiesOutput = {
   granted: readonly string[]
 }
 
+/** One row of a record's meta, the key in temper's words, its value as the wire carries it. */
+export interface PropertyRow {
+  label: string
+  value: string | number | boolean | null
+}
+
+/** The item's meta, one property in temper-ui's order, and nothing of the body. */
+export interface RecordDetail {
+  id: string
+  ref: string
+  title: string
+  docType: string
+  /**
+   * In temper-ui's order (packages/temper-ui/src/lib/properties.ts): `doc_type` first, then the
+   * managed run — ranked keys lead, unranked follow alphabetically. The open run is not shown:
+   * without a `sections` query the read does not ask for it. Context, owner and updated close
+   * the run; a cogmap-homed record carries no context row, and none is invented.
+   */
+  properties: PropertyRow[]
+}
+
+/** `temper.resource.detail`: one record's meta (the read asks no body, no sections). */
+export interface RecordDetailInput {
+  id: string
+}
+
+export type RecordDetailOutput =
+  | { state: 'ok'; detail: RecordDetail }
+  | RegionFailure
+
+/** `temper.goal.tasks`: a goal's linked tasks — the `advances` edges, not every task. */
+export interface LinkedTasksInput {
+  /** The goal's id, a bare UUID. */
+  id: string
+  /** The explicit limit the read asks for; the raw list endpoint is uncapped without one. */
+  bound: number
+}
+
+/** How many linked tasks a goal's detail shows before asking again — the ways-in bound. */
+export const LINKED_TASKS_BOUND = 8
+
+export type LinkedTasksOutput =
+  | { state: 'ok'; rows: ResourceSummary[]; total: number; bound: number }
+  | RegionFailure
+
 declare module 'orca' {
   interface PluginRequests {
     /** The one resource the person last changed, or a signed-out refusal. */
@@ -125,5 +174,9 @@ declare module 'orca' {
     'temper.home.recent': { output: RecentOutput }
     /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
     'temper.capabilities': { output: CapabilitiesOutput }
+    /** One record's meta, its read asking no body, no sections — or a signed-out refusal. */
+    'temper.resource.detail': { input: RecordDetailInput; output: RecordDetailOutput }
+    /** A goal's linked tasks at the panel's bound, or a signed-out refusal. */
+    'temper.goal.tasks': { input: LinkedTasksInput; output: LinkedTasksOutput }
   }
 }

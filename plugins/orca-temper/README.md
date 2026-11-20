@@ -29,9 +29,14 @@ person works in, and recently updated — every list with its omission sentence 
   that answered — it names what failed and never shows as empty.
 - `src/panel.tsx` is a components panel: Home / Explore / Search sub-tabs over the regions, an
   in-panel detail stack with Back, and actions lit only by granted consent. Show more grows a
-  way in in place by 8, up to 200.
-- The only setting is the API origin override; the context-scoped settings and reads were
-  retired when Home became person-scoped (the design record's Rulings, Q1).
+  way in in place by 8, up to 200. A pressed item's detail shows its meta in temper-ui's order
+  (the read asks no `sections`, so no body crosses it), a goal's linked tasks with their
+  omission sentence — labelled "linked tasks", the `advances` edges, never "all tasks" — and
+  the way out: "Open in temper" lights only on the person's https:// `webUrl` setting and opens
+  `<webUrl>/vault/r/<id>` with `shell.openExternal`, never derived from the API origin.
+- The settings are the API origin override and the "Temper web address" (`webUrl`); the
+  context-scoped settings and reads were retired when Home became person-scoped (the design
+  record's Rulings, Q1).
 
 ## Develop
 

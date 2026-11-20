@@ -4,13 +4,16 @@
 // uncapped without one — and the ways-in filters come from temper-design's WAYS_IN, so the rail
 // asks for each way under the same name, scope and filter as both other surfaces. A list
 // orients; only the latest handoff needs a body, and it asks for it explicitly, the Next section
-// quoted by temper-design's own parser.
+// quoted by temper-design's own parser. A record's detail asks for neither — the single-record
+// door with no `sections` query answers the meta alone, so the body never crosses the read.
 import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import type {
   NextSummary,
   PlaceInUse,
+  PropertyRow,
+  RecordDetail,
   ResourceSummary
 } from './protocol'
 
@@ -37,6 +40,31 @@ export const RESUME_PAGE_LIMIT = 1
 
 /** The handoff's page is one row — the newest session — then its body. */
 export const HANDOFF_PAGE_LIMIT = 1
+
+/**
+ * The linked-tasks bound lives in the panel <-> worker contract (`./protocol`), one home for
+ * the bound the panel names and the answer bounds.
+ *
+ * temper-ui's editorial order for the managed run, from
+ * `packages/temper-ui/src/lib/properties.ts`: ranked keys lead in this order, unranked managed
+ * keys follow alphabetically. Interim, like `WAY_IN_MAX` above: temper-design does not yet
+ * export it, so the rail carries it locally until temper-design publishes it and the follow-up
+ * import swaps it for the package's export.
+ */
+const MANAGED_KEY_ORDER = [
+  'temper-stage',
+  'temper-mode',
+  'temper-effort',
+  'temper-status',
+  'temper-seq',
+  'temper-llm-model',
+  'temper-llm-run',
+  'temper-provenance',
+  'temper-branch',
+  'temper-pr'
+] as const
+
+const MANAGED_RANK = new Map<string, number>(MANAGED_KEY_ORDER.map((key, index) => [key, index]))
 
 /** How many places and recently-updated rows Home shows — temper-ui's bound for the same lists. */
 export const HOME_LIST_BOUND = 5
@@ -85,6 +113,8 @@ interface ListQuery {
   changed_by?: string
   status?: string
   stage?: string
+  /** The goal filter, task only: the resolved goal id as a bare UUID (the API's own contract). */
+  goal?: string
   sort?: 'updated' | 'changed_by_me'
   order?: 'desc'
   limit: number
@@ -101,6 +131,7 @@ async function listResources(read: TemperRead, what: string, query: ListQuery): 
         changed_by: query.changed_by,
         status: query.status,
         stage: query.stage,
+        goal: query.goal,
         sort: query.sort,
         order: query.order,
         limit: query.limit
@@ -275,4 +306,118 @@ export async function recentlyUpdated(
     limit: HOME_LIST_BOUND
   })
   return { rows: page.rows.map(summaryOf), total: page.total }
+}
+
+/**
+ * A bare UUID names a resource on the single-record door — a decorated ref is a client error,
+ * not a read. The detail read takes exactly that: the path id without decoration, the query
+ * without `sections`, so the read downloads no body to leave out.
+ */
+function assertBareId(id: string, what: string): void {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error(`a bare UUID names ${what} — "${id}" is not one, so nothing is read`)
+  }
+}
+
+/**
+ * A managed value as the meta row carries it: the scalars as they come, a structured one as its
+ * JSON. The closed vocabulary holds scalars, so the fallback is for nothing the register writes
+ * today — a value that could never render as itself is shown, not dropped.
+ */
+function propertyValue(value: unknown): string | number | boolean | null {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  return JSON.stringify(value)
+}
+
+/**
+ * The detail's meta rows, in temper-ui's order (mergeProperties, packages/temper-ui/
+ * src/lib/properties.ts): `doc_type` first, then the managed run — ranked keys lead per
+ * MANAGED_KEY_ORDER, unranked follow alphabetically. The open run is not read (no `sections`
+ * query), so no open row appears. Context, owner and updated close the run — the words the
+ * record's card carries — and a cogmap-homed record shows no context row: none is invented.
+ */
+function detailProperties(resource: {
+  doc_type_name: string
+  managed_meta: Record<string, unknown> | null | undefined
+  context_ref: string | null
+  cogmap_name: string | null
+  owner_handle: string
+  updated: string
+}): PropertyRow[] {
+  const managed = Object.entries(resource.managed_meta ?? {})
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([label, value]) => ({ label, value: propertyValue(value) }))
+  managed.sort((a, b) => {
+    const ra = MANAGED_RANK.get(a.label) ?? MANAGED_KEY_ORDER.length
+    const rb = MANAGED_RANK.get(b.label) ?? MANAGED_KEY_ORDER.length
+    return ra === rb ? a.label.localeCompare(b.label) : ra - rb
+  })
+  const rows: PropertyRow[] = [{ label: 'doc_type', value: resource.doc_type_name }, ...managed]
+  if (resource.context_ref !== null && resource.context_ref !== undefined) {
+    rows.push({ label: 'context', value: resource.context_ref })
+  }
+  if (resource.owner_handle) {
+    rows.push({ label: 'owner', value: resource.owner_handle })
+  }
+  rows.push({ label: 'updated', value: resource.updated })
+  return rows
+}
+
+/**
+ * One record's meta by its bare UUID, asking neither body nor sections: the single-record door
+ * answers the managed run and the card fields without downloading a word of the body, so the
+ * detail can show the meta and stay out of the body entirely.
+ */
+export async function resourceDetail(read: TemperRead, id: string): Promise<RecordDetail> {
+  assertBareId(id, 'a record')
+  const client = clientOf(read)
+  const { data, error, response } = await client.GET('/api/resources/{id}', {
+    params: { path: { id } }
+  })
+  if (error || !data) {
+    if (response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the record read: ${JSON.stringify(error)}`)
+  }
+  return {
+    id,
+    ref: data.ref,
+    title: data.title,
+    docType: data.doc_type_name,
+    properties: detailProperties({
+      doc_type_name: data.doc_type_name,
+      managed_meta: data.managed_meta as Record<string, unknown> | null | undefined,
+      context_ref: data.context_ref ?? null,
+      cogmap_name: data.cogmap_name ?? null,
+      owner_handle: data.owner_handle,
+      updated: data.updated
+    })
+  }
+}
+
+/**
+ * A goal's linked tasks: the tasks joined to it by a live `advances` edge — the edges that were
+ * asserted at create, so the list is what linking recorded, never every task of the goal's kind.
+ * The ruled query (`Rulings Q4a`) names no order and takes no owner, so none is sent; the limit
+ * is the caller's bound, explicit because the raw list endpoint is uncapped without one, and
+ * the view's omission sentence stands under it.
+ */
+export async function goalLinkedTasks(
+  read: TemperRead,
+  goalId: string,
+  bound: number
+): Promise<{ rows: ResourceSummary[]; total: number; bound: number }> {
+  assertBareId(goalId, 'a goal')
+  const page = await listResources(read, 'linked tasks', {
+    doc_type_name: 'task',
+    goal: goalId,
+    limit: bound
+  })
+  return { rows: page.rows.map(summaryOf), total: page.total, bound }
 }

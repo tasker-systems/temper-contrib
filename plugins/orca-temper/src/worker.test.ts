@@ -1,7 +1,8 @@
 // Worker tests over the orca host mock, with deps.ts standing in for the temper CLI and the
 // network. The first test is the witness `orca_worker_refuses_without_the_persons_grant`:
 // with the CLI answering non-zero (signed out) and the network WILLING to hand every region
-// over, the worker must refuse on all five Home reads and return no region data.
+// over, the worker must refuse on all of them — the Home reads, the record detail and a
+// goal's linked tasks — and return no region data.
 import { assert, mockHost, mountWorker, test, afterEach } from 'orca/testing'
 import { deps, type CommandResult, type RunCli } from './deps'
 import * as main from './worker'
@@ -125,7 +126,9 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
     ['temper.home.way-in', { id: 'tasks', bound: 8 }],
     ['temper.home.way-in', { id: 'sessions', bound: 8 }],
     ['temper.home.places', undefined],
-    ['temper.home.recent', undefined]
+    ['temper.home.recent', undefined],
+    ['temper.resource.detail', { id: '00000000-0000-7000-8000-0000000000a1' }],
+    ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }]
   ] as const
   for (const [name, input] of reads) {
     const answer = await worker.request(name, input as never)
@@ -673,5 +676,228 @@ test('every declared consent reads granted when the host holds none back', async
     assert.ok(answer.granted.includes(kind), `${kind} is among the granted`)
   }
   assert.equal(answer.granted.length, expected.length, 'the grant names nothing undeclared')
+  await worker.deactivate()
+})
+
+/** A ResourceView answering the single-record door, as `sections` omitted arrives. */
+const RECORD_ID = '44444444-4444-7444-8444-444444444444'
+const GOAL_DETAIL_ID = '55555555-5555-7555-8555-555555555555'
+const RECORD_VIEW = {
+  id: RECORD_ID,
+  ref: `the-item-detail-${RECORD_ID}`,
+  title: 'The item detail',
+  doc_type_name: 'task',
+  created: '2026-11-01T00:00:00Z',
+  updated: '2026-11-20T01:00:00Z',
+  is_active: true,
+  origin_uri: '',
+  originator_profile_id: '019d0000-0000-7000-8000-000000000000',
+  owner_profile_id: '019d0000-0000-7000-8000-000000000000',
+  owner_handle: 'fixture-owner',
+  context_name: 'contrib',
+  context_owner_ref: '+temper-dev',
+  context_slug: 'contrib',
+  context_ref: '+temper-dev/contrib',
+  cogmap_name: null,
+  managed_meta: {
+    'temper-stage': 'in-progress',
+    'temper-mode': 'build',
+    'temper-effort': 'small',
+    'temper-llm-model': 'claude-opus-5-5',
+    'temper-provenance': 'llm-discovered'
+  }
+}
+
+test('the record read takes a bare UUID, asks no sections, and orders the meta as temper-ui does', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    return new Response(JSON.stringify(RECORD_VIEW), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.resource.detail', { id: RECORD_ID })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.detail.id, RECORD_ID)
+  assert.equal(answer.detail.title, 'The item detail')
+  assert.equal(answer.detail.ref, RECORD_VIEW.ref)
+  assert.equal(answer.detail.docType, 'task')
+  // doc_type first, the managed run in temper-ui's ranked order — stage, mode, effort,
+  // then the provenance ranks — then the record's context, owner and updated. No body row,
+  // and no content field crossed the read at all.
+  assert.deepEqual(
+    answer.detail.properties.map((each) => [each.label, each.value]),
+    [
+      ['doc_type', 'task'],
+      ['temper-stage', 'in-progress'],
+      ['temper-mode', 'build'],
+      ['temper-effort', 'small'],
+      ['temper-llm-model', 'claude-opus-5-5'],
+      ['temper-provenance', 'llm-discovered'],
+      ['context', '+temper-dev/contrib'],
+      ['owner', 'fixture-owner'],
+      ['updated', '2026-11-20T01:00:00Z']
+    ]
+  )
+
+  const request = requests[0]
+  assert.ok(request)
+  const url = new URL(request.url)
+  assert.equal(url.pathname, `/api/resources/${RECORD_ID}`)
+  assert.equal(url.search, '', 'the record read asks for nothing — no sections, no body')
+  assert.equal(request.method, 'GET', 'the record read is a read')
+  assert.equal(request.headers.get('authorization'), `Bearer ${TOKEN}`)
+  assert.equal(requests.length, 1, 'one read answers the detail; no body read follows')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('an unranked managed key sorts after the ranked run, alphabetically', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        ...RECORD_VIEW,
+        managed_meta: { ...RECORD_VIEW.managed_meta, 'temper-legacy': 'kept' }
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    )
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.resource.detail', { id: RECORD_ID })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  const labels = answer.detail.properties.map((each) => each.label)
+  assert.equal(labels[0], 'doc_type')
+  assert.equal(labels.at(-3), 'context')
+  assert.equal(labels.at(-2), 'owner')
+  assert.equal(labels.at(-1), 'updated')
+  assert.deepEqual(labels.slice(1, -3), [
+    'temper-stage',
+    'temper-mode',
+    'temper-effort',
+    'temper-llm-model',
+    'temper-provenance',
+    'temper-legacy'
+  ])
+  await worker.deactivate()
+})
+
+test('a record homed nowhere (a cogmap) shows no context row, and none is invented', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ ...RECORD_VIEW, context_ref: null, cogmap_name: 'the map' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.resource.detail', { id: RECORD_ID })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(
+    answer.detail.properties.some((each) => each.label === 'context'),
+    false,
+    'no context row answers for a cogmap-homed record'
+  )
+  await worker.deactivate()
+})
+
+test('a decorated ref is the caller\'s error on the record door, never a read', async () => {
+  deps.run = async () => mintedToken()
+  const requests: Request[] = []
+  deps.fetch = answering(listResponse([]), requests)
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.resource.detail', {
+    id: 'the-item-detail-44444444-4444-7444-8444-444444444444'
+  })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /bare UUID/)
+  assert.equal(requests.length, 0)
+  await worker.deactivate()
+})
+
+test('a detail read into a refused grant is the signed-out refusal, no item data', async () => {
+  // The mint at the gate succeeds; the API refuses the token on the detail read; the re-mint
+  // finds the CLI signed out. The detail answers the refusal — the record's title never rides it.
+  let runs = 0
+  deps.run = async () => {
+    runs += 1
+    return runs === 1 ? mintedToken() : SIGNED_OUT
+  }
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: { code: 'UNAUTHENTICATED', message: 'bad token' } }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' }
+    })
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.resource.detail', { id: RECORD_ID })
+
+  assert.equal(answer.state, 'not-connected')
+  if (answer.state !== 'not-connected') return
+  assert.match(answer.message, /temper is not connected/)
+  assert.equal(JSON.stringify(answer).includes('The item detail'), false)
+  assert.equal(runs, 2, 'the gate minted once; the 401 re-mint found the CLI signed out')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+const LINKED_ROWS = [row('b1', 'Task one', 'task'), row('b2', 'Task two', 'task')]
+
+test('a goal\'s linked tasks are the advances edges, at the explicit bound', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(listResponse(LINKED_ROWS, 9), requests)
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.goal.tasks', { id: GOAL_DETAIL_ID, bound: 8 })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.total, 9)
+  assert.equal(answer.bound, 8)
+  assert.deepEqual(
+    answer.rows.map((item) => item.title),
+    ['Task one', 'Task two']
+  )
+
+  const request = requests[0]
+  assert.ok(request)
+  const url = new URL(request.url)
+  assert.equal(url.pathname, '/api/resources')
+  assert.equal(url.searchParams.get('doc_type_name'), 'task')
+  assert.equal(url.searchParams.get('goal'), GOAL_DETAIL_ID)
+  assert.equal(url.searchParams.get('limit'), '8', 'the list door is asked at an explicit limit')
+  assert.equal(url.searchParams.get('owner'), null, 'the ruled query names no owner')
+  assert.equal(url.searchParams.get('status'), null)
+  assert.equal(url.searchParams.get('stage'), null)
+  assert.equal(request.headers.get('authorization'), `Bearer ${TOKEN}`)
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a goal ref that is not a bare UUID is the caller\'s error, never a read', async () => {
+  deps.run = async () => mintedToken()
+  const requests: Request[] = []
+  deps.fetch = answering(listResponse([]), requests)
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.goal.tasks', {
+    id: 'goal-55555555-5555-7555-8555-555555555555',
+    bound: 8
+  })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /bare UUID/)
+  assert.equal(requests.length, 0)
   await worker.deactivate()
 })
