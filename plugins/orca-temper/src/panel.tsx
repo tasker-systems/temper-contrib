@@ -47,6 +47,7 @@ import {
   WAYS_IN
 } from '../vendor/temper-design.mjs'
 import { refreshGrantedCapabilities } from './capabilities'
+import { DetailLaunchActions, HandoffLaunchAction } from './launcher'
 import type {
   LatestHandoffOutput,
   LinkedTasksOutput,
@@ -358,6 +359,9 @@ function Region(props: {
   return props.children
 }
 
+// The Start / Resume launcher lives in ./launcher.tsx; the detail view and Home place its
+// buttons only, along the ruled table (Rulings: Where Start and Resume appear).
+
 /** Resume: the one resource the person last changed — nothing stands in its place if none. */
 function ResumeRegion() {
   const answer = read(resumeResult)
@@ -437,6 +441,7 @@ function HandoffRegion() {
                   ) : undefined}
                 </Stack>
               )}
+              <HandoffLaunchAction handoff={handoff} />
               <Text muted size="xs">
                 {omissionSentence(answer.sessionCount, 1, sessionScope)}
               </Text>
@@ -647,6 +652,7 @@ function DetailView(props: { entry: DetailEntry }) {
         </Text>
       </Stack>
       <RecordDetailRegion answer={answer} fallbackRef={props.entry.ref} />
+      {detail === null ? undefined : <DetailLaunchActions detail={detail} />}
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />
       ) : undefined}

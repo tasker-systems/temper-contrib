@@ -180,7 +180,13 @@ export async function resumeItem(
 export async function latestHandoff(
   read: TemperRead
 ): Promise<{
-  handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null
+  handoff: {
+    id: string
+    ref: string
+    title: string
+    contextRef: string | null
+    next: NextSummary | null
+  } | null
   sessionCount: number
 }> {
   const page = await listResources(read, 'latest handoff', {
@@ -207,7 +213,13 @@ export async function latestHandoff(
   }
   const { id, ref, title } = row
   return {
-    handoff: { id, ref, title, next: nextSection(data.content ?? '') },
+    handoff: {
+      id,
+      ref,
+      title,
+      contextRef: row.context_ref ?? null,
+      next: nextSection(data.content ?? '')
+    },
     sessionCount: page.total
   }
 }
@@ -385,14 +397,22 @@ export async function resourceDetail(read: TemperRead, id: string): Promise<Reco
     }
     throw new Error(`temper refused the record read: ${JSON.stringify(error)}`)
   }
+  const managedMeta = data.managed_meta as Record<string, unknown> | null | undefined
+  const managedScalar = (key: string): string | null => {
+    const value = managedMeta?.[key]
+    return typeof value === 'string' && value.trim() !== '' ? value : null
+  }
   return {
     id,
     ref: data.ref,
     title: data.title,
     docType: data.doc_type_name,
+    stage: managedScalar('temper-stage'),
+    status: managedScalar('temper-status'),
+    contextRef: data.context_ref ?? null,
     properties: detailProperties({
       doc_type_name: data.doc_type_name,
-      managed_meta: data.managed_meta as Record<string, unknown> | null | undefined,
+      managed_meta: managedMeta,
       context_ref: data.context_ref ?? null,
       cogmap_name: data.cogmap_name ?? null,
       owner_handle: data.owner_handle,

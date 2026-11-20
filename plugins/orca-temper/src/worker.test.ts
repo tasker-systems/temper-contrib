@@ -359,6 +359,7 @@ test('the latest handoff is the person\'s newest session, its Next section quote
     id: NOTE.id,
     ref: NOTE.ref,
     title: NOTE.title,
+    contextRef: NOTE.context_ref,
     next: { heading: 'Next steps', text: '- Record the witness runs\n- Run the live check', truncated: false }
   })
   const list = new URL(requests[0]?.url ?? '')
