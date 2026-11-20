@@ -4,10 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild vendor/temper-ts.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-ts.mjs",
+    "build": "esbuild vendor/temper-ts.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-ts.mjs && esbuild vendor/temper-design.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-design.mjs",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@tasker-systems/temper-design": "0.6.5",
     "@tasker-systems/temper-ts": "0.6.5"
   },
   "devDependencies": {

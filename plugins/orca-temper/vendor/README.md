@@ -1,9 +1,11 @@
-# vendored temper-ts
+# vendored temper-ts and temper-design
 
 `temper-ts.mjs` is a bundled copy of `@tasker-systems/temper-ts` (currently 0.6.5, pinned in
-`../package.json`) plus its one runtime dependency, `openapi-fetch`. Orca loads the plugin's
-worker as-is and a bare npm import cannot ship with the plugin (`node_modules` is never
-committed), so the client is bundled once and committed here.
+`../package.json`) plus its one runtime dependency, `openapi-fetch`, and `temper-design.mjs` the
+same for `@tasker-systems/temper-design` (the rail's ruled imports — pure modules only; nothing
+that reaches for a DOM, such as `sanitize`, may enter either bundle). Orca loads the plugin's
+worker and panels as-is and bare npm imports cannot ship with the plugin (`node_modules` is never
+committed), so the packages are bundled once and committed here.
 
 Regenerate after bumping the pin:
 

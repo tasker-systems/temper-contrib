@@ -10,39 +10,51 @@ afterEach(() => mounted?.unmount())
 
 const GRANTED = ['settings:own', 'workspace:read', 'workspace:create']
 
-function refuse(contexts: string[]): {
-  connected: false
-  contexts: string[]
-  message: string
-} {
-  return {
-    connected: false,
-    contexts,
-    message: 'temper is not connected — sign in with the temper CLI'
-  }
+const NOT_CONNECTED = {
+  state: 'not-connected' as const,
+  message: 'temper is not connected — sign in with the temper CLI'
+}
+
+const GOAL_ONE = {
+  id: '00000000-0000-7000-8000-0000000000a1',
+  ref: 'goal-one-00000000-0000-7000-8000-0000000000a1',
+  title: 'Goal one',
+  docType: 'goal',
+  contextRef: '+temper-dev/contrib',
+  updated: '2026-11-20T01:00:00Z'
+}
+
+const WAY_LABELS: Record<string, string> = { goals: 'goals', tasks: 'in progress', sessions: 'sessions' }
+const WAY_SCOPES: Record<string, string> = {
+  goals: 'active goals of yours',
+  tasks: 'tasks in progress of yours',
+  sessions: 'sessions of yours'
 }
 
 function servedHost(): ReturnType<typeof mockHost> {
   return mockHost({
     requests: {
       'temper.capabilities': () => ({ granted: GRANTED }),
-      'temper.goals.active': () => ({
-        connected: true,
-        contexts: ['@me/temper'],
-        truncated: false,
-        goals: [
-          { id: '00000000-0000-7000-8000-0000000000a1', ref: 'goal-one-00000000-0000-7000-8000-0000000000a1', title: 'Goal one' }
-        ]
+      'temper.home.resume': () => ({ state: 'ok', resume: null }),
+      'temper.home.handoff': () => ({ state: 'ok', sessionCount: 0, handoff: null }),
+      'temper.home.way-in': (input: { id: string; bound: number }) => ({
+        state: 'ok' as const,
+        id: input.id,
+        label: WAY_LABELS[input.id] ?? input.id,
+        scope: WAY_SCOPES[input.id] ?? input.id,
+        rows: input.id === 'goals' ? [GOAL_ONE] : [],
+        total: input.id === 'goals' ? 1 : 0,
+        bound: 8
       }),
-      'temper.tasks.in-progress': () => ({ connected: true, contexts: ['+temper-dev/contrib-workflows'], truncated: false, tasks: [] }),
-      'temper.handoff.latest': () => ({ connected: true, contexts: ['+temper-dev/contrib-workflows'], truncated: false, handoff: null })
+      'temper.home.places': () => ({ state: 'ok', rows: [], total: 0 }),
+      'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 })
     }
   })
 }
 
 test('home holds first; explore and search say what arrives later', async () => {
   mounted = await mount(panel, { host: servedHost() })
-  assert.ok(mounted.find({ text: 'Active goals (1)' }), 'home is the tab that holds first')
+  assert.ok(mounted.find({ text: 'goals (1)' }), 'home is the tab that holds first')
   assert.equal(
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     null,
@@ -54,7 +66,7 @@ test('home holds first; explore and search say what arrives later', async () => 
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     'explore names its placeholder'
   )
-  assert.equal(mounted.find({ text: 'Active goals (1)' }), null, 'the home body does not show under explore')
+  assert.equal(mounted.find({ text: 'goals (1)' }), null, 'the home body does not show under explore')
   assert.deepEqual(mounted.warnings, [])
 
   await mounted.select({ type: 'Tabs' }, 'search')
@@ -79,12 +91,12 @@ test('pressing an item pushes a detail view; Back returns to the tab', async () 
   assert.equal(mounted.find({ type: 'Tabs' }), null, 'the detail holds the panel; no tabs beside it')
 
   await mounted.press({ text: 'Back' })
-  assert.ok(mounted.find({ text: 'Active goals (1)' }), 'back returns to the tab that held')
+  assert.ok(mounted.find({ text: 'goals (1)' }), 'back returns to the tab that held')
 
   // Pushing twice pops once only: the stack holds the pushed views.
   await mounted.press({ label: 'Goal one' })
   await mounted.press({ text: 'Back' })
-  assert.ok(mounted.find({ text: 'Active goals (1)' }), 'a single pop lands back on the frame')
+  assert.ok(mounted.find({ text: 'goals (1)' }), 'a single pop lands back on the frame')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
@@ -99,19 +111,15 @@ test('rows carry the doc-type word, not icons', async () => {
   assert.deepEqual(mounted.warnings, [])
 })
 
-test('empty lists carry the — word', async () => {
-  mounted = await mount(panel, { host: servedHost() })
-  assert.ok(mounted.find({ text: '— No tasks in progress in +temper-dev/contrib-workflows.' }))
-  assert.ok(mounted.find({ text: '— No session notes in +temper-dev/contrib-workflows.' }))
-})
-
 test('the signed-out refusal holds on every tab', async () => {
   const host = mockHost({
     requests: {
       'temper.capabilities': () => ({ granted: GRANTED }),
-      'temper.goals.active': () => refuse(['@me/temper']),
-      'temper.tasks.in-progress': () => refuse(['@me/temper']),
-      'temper.handoff.latest': () => refuse(['@me/temper'])
+      'temper.home.resume': () => NOT_CONNECTED,
+      'temper.home.handoff': () => NOT_CONNECTED,
+      'temper.home.way-in': () => NOT_CONNECTED,
+      'temper.home.places': () => NOT_CONNECTED,
+      'temper.home.recent': () => NOT_CONNECTED
     }
   })
   mounted = await mount(panel, { host })
