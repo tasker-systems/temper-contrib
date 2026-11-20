@@ -33,6 +33,7 @@ const HANDOFF: LatestHandoffOutput = {
 test('lists the groups the worker answered', async () => {
   const host = mockHost({
     requests: {
+      'temper.capabilities': () => ({ granted: ['settings:own'] }),
       'temper.goals.active': () => GOALS,
       'temper.tasks.in-progress': () => TASKS,
       'temper.handoff.latest': () => HANDOFF
@@ -41,8 +42,8 @@ test('lists the groups the worker answered', async () => {
   mounted = await mount(panel, { host })
   assert.ok(mounted.find({ label: 'Goal one' }), 'Goal one is on the panel')
   assert.ok(mounted.find({ label: 'Goal two' }), 'Goal two is on the panel')
-  assert.ok(mounted.find({ text: 'No tasks in progress in +temper-dev/contrib-workflows.' }), 'the empty tasks group is on the panel')
-  assert.ok(mounted.find({ text: 'No session notes in +temper-dev/contrib-workflows.' }), 'the empty handoff group is on the panel')
+  assert.ok(mounted.find({ text: '— No tasks in progress in +temper-dev/contrib-workflows.' }), 'the empty tasks group is on the panel')
+  assert.ok(mounted.find({ text: '— No session notes in +temper-dev/contrib-workflows.' }), 'the empty handoff group is on the panel')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
@@ -61,6 +62,7 @@ function refuse(contexts: string[]): {
 }
   const host = mockHost({
     requests: {
+      'temper.capabilities': () => ({ granted: ['settings:own'] }),
       'temper.goals.active': () => refuse(['@me/temper']),
       'temper.tasks.in-progress': () => refuse(['@me/temper']),
       'temper.handoff.latest': () => refuse(['@me/temper'])

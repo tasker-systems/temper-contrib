@@ -65,6 +65,7 @@ const HANDOFF_ANSWER: {
 test('orca_panel_shows_the_in_force_state', async () => {
   const host = mockHost({
     requests: {
+      'temper.capabilities': () => ({ granted: ['settings:own'] }),
       'temper.goals.active': () => GOALS_ANSWER,
       'temper.tasks.in-progress': () => TASKS_ANSWER,
       'temper.handoff.latest': () => HANDOFF_ANSWER

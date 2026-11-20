@@ -51,8 +51,12 @@
     ]
   },
   "capabilities": [
-    {
-      "kind": "settings:own"
-    }
+    { "kind": "settings:own" },
+    { "kind": "workspace:read" },
+    { "kind": "workspace:create" },
+    { "kind": "agent:launch" },
+    { "kind": "agent:read" },
+    { "kind": "storage:own" },
+    { "kind": "workspace:write" }
   ]
 }

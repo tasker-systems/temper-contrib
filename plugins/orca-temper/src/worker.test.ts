@@ -493,3 +493,35 @@ test('a CLI reporting api_url null refuses rather than guessing', async () => {
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()
 })
+
+test('hands the host\'s granted capabilities to the panel', async () => {
+  // The withheld case: the host granted settings:own only, exactly as Orca holds a declined
+  // consent. The panel must see exactly that — the panel reads the consents off this answer,
+  // and it is also the pass-through the capability-gating witness builds on.
+  const host = mockHost({ capabilities: ['settings:own'] })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.capabilities')
+  assert.deepEqual(answer.granted, ['settings:own'])
+  await worker.deactivate()
+})
+
+test('every declared consent reads granted when the host holds none back', async () => {
+  // mockHost defaults to the manifest's declared capabilities: the set the Q9 ruling declared
+  // up front. With everything granted, the panel lights every action it draws.
+  const worker = await mountWorker(main, { host: mockHost() })
+  const answer = await worker.request('temper.capabilities')
+  const expected = [
+    'settings:own',
+    'workspace:read',
+    'workspace:create',
+    'agent:launch',
+    'agent:read',
+    'storage:own',
+    'workspace:write'
+  ]
+  for (const kind of expected) {
+    assert.ok(answer.granted.includes(kind), `${kind} is among the granted`)
+  }
+  assert.equal(answer.granted.length, expected.length, 'the grant names nothing undeclared')
+  await worker.deactivate()
+})
