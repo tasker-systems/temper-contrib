@@ -9,7 +9,7 @@ import type { HandoffSummary, ResourceSummary } from './protocol'
 /** Generous but explicit: a list matches `--all` for any context a person actually keeps. */
 export const LIST_LIMIT = 1000
 
-/** What every read shares: the origin the CLI is configured for, the vetted grant, the fetch. */
+/** What every read shares: the origin temper auth status reports, the vetted grant, the fetch. */
 export interface TemperRead {
   apiUrl: string
   credentials: Credentials

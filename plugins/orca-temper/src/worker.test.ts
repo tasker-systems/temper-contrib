@@ -3,7 +3,7 @@
 // with the CLI answering non-zero (signed out) and the network WILLING to hand every group
 // over, the worker must refuse on all three reads and return no group data.
 import { assert, mockHost, mountWorker, test, afterEach } from 'orca/testing'
-import { deps, type CommandResult } from './deps'
+import { deps, type CommandResult, type RunCli } from './deps'
 import * as main from './worker'
 
 /** A syntactically valid unsigned JWT whose payload is just an `exp`. */
@@ -66,8 +66,21 @@ const originalDeps = { ...deps }
 afterEach(() => {
   deps.run = originalDeps.run
   deps.fetch = originalDeps.fetch
-  deps.readTextFile = originalDeps.readTextFile
 })
+
+/**
+ * An auth-status answer in the confirmed shape. `api_url` reports what the CLI presents to;
+ * never omitted, null only for an in-process client with no wire origin.
+ */
+function authStatus(apiUrl: string | unknown, extra: object = {}): CommandResult {
+  return { code: 0, stdout: `${JSON.stringify({ ...extra, api_url: apiUrl })}\n`, stderr: '' }
+}
+
+/** A CLI answer dispatching by what was asked: the mint, or the origin question. */
+function cliThatRuns(mint: CommandResult, status: CommandResult): RunCli {
+  return async (args) =>
+    args[0] === 'auth' && args[1] === 'status' ? status : mint
+}
 
 test('orca_worker_refuses_without_the_persons_grant', async () => {
   let runs = 0
@@ -357,35 +370,126 @@ test('a handoff note with no Next steps answers none rather than inventing one',
   await worker.deactivate()
 })
 
-test('reads at the origin the CLI is configured for when the setting is unset', async () => {
-  const hadEnv = 'TEMPER_API_URL' in process.env
-  const envValue = process.env.TEMPER_API_URL
-  delete process.env.TEMPER_API_URL
-  try {
-    deps.run = async () => ({ code: 0, stdout: `${TOKEN}\n`, stderr: '' })
-    deps.readTextFile = () => '[cloud]\napi_url = "https://temper-configured.example"\n'
-    const requests: Request[] = []
-    deps.fetch = async (input: Request) => {
-      requests.push(input)
-      return new Response(JSON.stringify(GOALS_RESPONSE), {
-        status: 200,
-        headers: { 'content-type': 'application/json' }
-      })
-    }
-
-    const host = mockHost({ settings: { contextRef: '@me/temper' } })
-    const worker = await mountWorker(main, { host })
-    const answer = await worker.request('temper.goals.active')
-
-    assert.equal(answer.connected, true)
-    assert.equal(requests.length, 1)
-    const request = requests[0]
-    assert.ok(request)
-    assert.equal(new URL(request.url).origin, 'https://temper-configured.example')
-    await worker.deactivate()
-  } finally {
-    if (hadEnv) {
-      process.env.TEMPER_API_URL = envValue
-    }
+test('reads at the origin temper auth status reports when the setting is unset', async () => {
+  deps.run = cliThatRuns(mintedToken(), authStatus('https://cli-answered.example/'))
+  const requests: Request[] = []
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    return new Response(JSON.stringify(GOALS_RESPONSE), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
   }
+
+  const host = mockHost({ settings: { contextRef: '@me/temper' } })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.goals.active')
+
+  assert.equal(answer.connected, true)
+  assert.equal(requests.length, 1)
+  const request = requests[0]
+  assert.ok(request)
+  // The origin the CLI answered with — trailing slash trimmed per its contract.
+  assert.equal(new URL(request.url).origin, 'https://cli-answered.example')
+  await worker.deactivate()
+})
+
+test('the API-origin setting overrides the CLI without asking it', async () => {
+  let statusRuns = 0
+  deps.run = async (args) => {
+    if (args[0] === 'auth' && args[1] === 'status') {
+      statusRuns += 1
+    }
+    return mintedToken()
+  }
+  deps.fetch = async () =>
+    new Response(JSON.stringify(GOALS_RESPONSE), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+
+  const host = mockHost({
+    settings: { contextRef: '@me/temper', apiUrl: 'https://setting.example' }
+  })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.goals.active')
+
+  assert.equal(answer.connected, true)
+  assert.equal(statusRuns, 0, 'a set origin setting means the CLI is never asked')
+  await worker.deactivate()
+})
+
+test('two reads, one mint, one status run — the token travels with its origin', async () => {
+  let mints = 0
+  let statuses = 0
+  const origins: string[] = []
+  deps.run = async (args) => {
+    if (args[0] === 'auth' && args[1] === 'status') {
+      statuses += 1
+      return authStatus('https://cli-answered.example')
+    }
+    mints += 1
+    return mintedToken()
+  }
+  deps.fetch = async (input: Request) => {
+    origins.push(new URL(input.url).origin)
+    return new Response(JSON.stringify(GOALS_RESPONSE), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  // No apiUrl setting: the mint asks the status once, and the pair answers both reads.
+  const host = mockHost({ settings: { contextRef: '@me/temper' } })
+  const worker = await mountWorker(main, { host })
+  const first = await worker.request('temper.goals.active')
+  const second = await worker.request('temper.goals.active')
+
+  assert.equal(first.connected, true)
+  assert.equal(second.connected, true)
+  assert.equal(mints, 1, 'two reads, one mint: the token is cached')
+  assert.equal(statuses, 1, 'two reads, one status run: the origin rode the same mint')
+  assert.deepEqual(origins, [
+    'https://cli-answered.example',
+    'https://cli-answered.example'
+  ])
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a CLI too old to report its origin refuses naming the temper needed', async () => {
+  // An old CLI's status carries no api_url: the answer is the refusal in its own words —
+  // never a guess at an instance.
+  deps.run = cliThatRuns(mintedToken(), authStatus(undefined, { authenticated: true }))
+  deps.fetch = async () => {
+    throw new Error('the too-old refusal must come before any API read')
+  }
+
+  const host = mockHost({ settings: { contextRef: '@me/temper' } })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.goals.active')
+
+  assert.equal(answer.connected, false)
+  assert.match(answer.message, /too old/)
+  assert.match(answer.message, /0\.6\.5/)
+  assert.equal(/98de/.test(answer.message), false)
+  assert.equal(JSON.stringify(answer).includes('Goal one'), false)
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a CLI reporting api_url null refuses rather than guessing', async () => {
+  deps.run = cliThatRuns(mintedToken(), authStatus(null))
+  deps.fetch = async () => {
+    throw new Error('the null-origin refusal must come before any API read')
+  }
+
+  const host = mockHost({ settings: { contextRef: '@me/temper' } })
+  const worker = await mountWorker(main, { host })
+  const answer = await worker.request('temper.goals.active')
+
+  assert.equal(answer.connected, false)
+  assert.match(answer.message, /api_url null/)
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
 })

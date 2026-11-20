@@ -1,7 +1,8 @@
 // The plugin's trusted worker. Every temper read goes: consult the ONE credential strategy this
 // worker holds (its cache carries the refreshed token across panel reads; a read never mints a
-// fresh token when a valid one is cached), then read through temper-ts at the origin the CLI is
-// configured for. Without the grant — at mint time or lost mid-read — the answer is a refusal,
+// fresh token when a valid one is cached), then read through temper-ts at the origin temper
+// auth status names (the API the CLI presents the minted grant to). Without the grant — at
+// mint time or lost mid-read — the answer is a refusal,
 // never a guess, and never partial or cached group data. The panel shows the refusal text.
 import type { OrcaWorkerApi } from 'orca/worker'
 import { createCliCredentials, TemperNotConnectedError } from './credentials'
@@ -13,7 +14,7 @@ import {
   latestHandoff,
   type TemperRead
 } from './reads'
-import { resolveApiOrigin } from './origin'
+import { TemperOriginRefusedError } from './origin'
 import type {
   ActiveGoalsOutput,
   InProgressTasksOutput,
@@ -22,10 +23,6 @@ import type {
 
 const NOT_CONNECTED_MESSAGE =
   'temper is not connected — sign in with the temper CLI (`temper auth login`), then try again'
-
-const NO_ORIGIN_MESSAGE =
-  'no temper API origin resolved: set this plugin\'s "Temper API origin" setting, ' +
-  'or [cloud] api_url in the CLI config (`temper config edit`), or TEMPER_API_URL'
 
 const DEFAULT_CONTEXT_REF = '@me/temper'
 
@@ -55,33 +52,35 @@ async function settingContexts(
   return [fallback ?? DEFAULT_CONTEXT_REF]
 }
 
-/** The setting overrides; otherwise the origin the CLI (and so the token) is configured for. */
-async function apiOrigin(orca: OrcaWorkerApi): Promise<string> {
-  const value = await orca.settings.get('apiUrl')
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim()
-  }
-  const resolved = resolveApiOrigin(process.env, deps.readTextFile)
-  if (resolved !== null) {
-    return resolved
-  }
-  throw new Error(NO_ORIGIN_MESSAGE)
-}
-
 export default function activate(orca: OrcaWorkerApi): void {
-  // One strategy per worker: its cache and refresh-ahead span every panel read.
-  const credentials = createCliCredentials({ run: deps.run })
+  // One strategy per worker: its cache carries the refreshed token — and the origin minted
+  // with it — across panel reads, the pair from one CLI conversation: the mint runs
+  // export-token for the grant, then the origin question, asked only when the plugin setting
+  // does not answer it. Two reads, one mint, one status run.
+  const credentials = createCliCredentials({
+    run: deps.run,
+    originSetting: async () => {
+      const value = await orca.settings.get('apiUrl')
+      return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+    }
+  })
 
   const temperRead = async (): Promise<TemperRead> => ({
-    apiUrl: await apiOrigin(orca),
+    apiUrl: await credentials.apiOrigin(),
     credentials,
     fetch: deps.fetch
   })
 
   // Losing the grant mid-read (a 401 through the client, a re-mint that finds the CLI signed
-  // out) is the same refusal as never having it.
+  // out) is the same refusal as never having it. An origin the CLI cannot name — a CLI too old
+  // to report one, or one answering none — refuses in its own words.
   const refused = (error: unknown): boolean =>
-    error instanceof TemperNotConnectedError || error instanceof GrantLostError
+    error instanceof TemperNotConnectedError ||
+    error instanceof GrantLostError ||
+    error instanceof TemperOriginRefusedError
+
+  const refusalMessage = (error: unknown): string =>
+    error instanceof TemperOriginRefusedError ? error.message : NOT_CONNECTED_MESSAGE
 
   orca.panels.handle('temper.goals.active', async (): Promise<ActiveGoalsOutput> => {
     const contexts = await settingContexts(orca, 'goalsContexts', 'contextRef')
@@ -93,7 +92,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { connected: true, contexts, goals, truncated }
     } catch (error) {
       if (refused(error)) {
-        return { connected: false, contexts, message: NOT_CONNECTED_MESSAGE }
+        return { connected: false, contexts, message: refusalMessage(error) }
       }
       throw error
     }
@@ -107,7 +106,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { connected: true, contexts, tasks, truncated }
     } catch (error) {
       if (refused(error)) {
-        return { connected: false, contexts, message: NOT_CONNECTED_MESSAGE }
+        return { connected: false, contexts, message: refusalMessage(error) }
       }
       throw error
     }
@@ -121,7 +120,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { connected: true, contexts, truncated, handoff }
     } catch (error) {
       if (refused(error)) {
-        return { connected: false, contexts, message: NOT_CONNECTED_MESSAGE }
+        return { connected: false, contexts, message: refusalMessage(error) }
       }
       throw error
     }
