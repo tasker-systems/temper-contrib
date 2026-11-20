@@ -21,7 +21,7 @@ function served(granted: string[], open: (input: { id: string }) => OpenBodyOutp
       'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 }),
       'temper.resource.detail': () => ({
         state: 'ok',
-        detail: { id: ID, ref: `r-${ID}`, title: 'The body room', docType: 'task', properties: [] }
+        detail: { id: ID, ref: `r-${ID}`, title: 'The body room', docType: 'task', stage: null, status: null, contextRef: null, properties: [] }
       }),
       'temper.body.open': (input: { id: string }) => {
         asked.push(input.id)
