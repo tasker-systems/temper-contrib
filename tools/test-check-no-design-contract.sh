@@ -67,6 +67,15 @@ expect_refused "a stylesheet declaring a --tp-* role" "apps/desktop/src/local.cs
 fresh; add apps/desktop/src/Badge.svelte '<span style="--tp-accent: red">x</span>'
 expect_refused "an inline style declaring a --tp-* role" "apps/desktop/src/Badge.svelte"
 
+fresh; add plugins/orca-temper/vendor/temper-design-frame.mjs 'var t = "[data-theme=x] { --tp-text: #fff; }";'
+expect_pass "the orca-temper plugin's generated vendor bundle"
+
+fresh; add plugins/orca-temper/vendor/local.css ':root { --tp-text: #fff; }'
+expect_refused "a hand-written stylesheet beside the vendor bundles" "plugins/orca-temper/vendor/local.css"
+
+fresh; add plugins/orca-temper/editor/main.ts 'root.style.cssText = "--tp-text: red"'
+expect_refused "the plugin's own code declaring a --tp-* role" "plugins/orca-temper/editor/main.ts"
+
 echo ""
 echo "test-check-no-design-contract: ${PASS} passed, ${FAIL} failed"
 [ "$FAIL" -eq 0 ]

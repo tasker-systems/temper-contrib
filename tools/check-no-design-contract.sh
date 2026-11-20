@@ -8,7 +8,10 @@
 #   - anything under themes/ — where the contract lived before it moved
 #   - a theme or contract file by name: theme.json, theme.css, theme.schema.json
 #   - a declaration of a --tp-* role (`--tp-x: ...`) — components read roles, never define them
-#     (not searched: .md prose, and this check's own harness, whose fixtures are refused shapes)
+#     (not searched: .md prose, this check's own harness, whose fixtures are refused shapes, and
+#     the orca-temper plugin's vendor bundles, `plugins/orca-temper/vendor/*.mjs` — esbuild output
+#     of the pinned package, which Orca needs committed and the plugin's gate rebuilds and refuses
+#     on any drift (`git diff --exit-code vendor/`), so they are the package's bytes, not a copy)
 #
 # A change to the contract or a theme is made in the package and reaches this repository as a
 # version bump. Locally, the desktop can paint from an unreleased package checkout first (see
@@ -35,7 +38,7 @@ done < <(git ls-files -- '*theme.json' '*theme.css' '*theme.schema.json' | grep 
 
 while IFS= read -r hit; do
   refuse "${hit} — declares a --tp-* role; components read roles, the package defines them"
-done < <(git grep -n -I -E '(^|[;{"[:space:]])--tp-[a-z0-9-]+[[:space:]]*:' -- ':!*.md' ':!tools/test-check-no-design-contract.sh' || true)
+done < <(git grep -n -I -E '(^|[;{"[:space:]])--tp-[a-z0-9-]+[[:space:]]*:' -- ':!*.md' ':!tools/test-check-no-design-contract.sh' ':!plugins/orca-temper/vendor/*.mjs' || true)
 
 if [ "$found" -ne 0 ]; then
   echo "check-no-design-contract: the theme contract has a copy here (above). Make the change in" >&2

@@ -7,6 +7,11 @@
 //                      holds the base in plugin storage, and opens the file in an editor tab
 //                      beside the person's view — never moving it.
 //
+//   temper.body.base — asked by the custom editor: whether temper has moved past the held base.
+//                      The worker reads the record's current `body_token` on the person's grant
+//                      and compares it with the held one; it writes nothing. `current` and
+//                      `behind` carry when the check ran; `no-base` says no base is held.
+//
 // `opened` names the file and the read time; `refused` says why nothing was written or opened,
 // in words the panel shows as they come; `not-connected` and `failed` are the rail's own.
 import type { RegionFailure } from '../protocol'
@@ -30,6 +35,32 @@ export type OpenBodyOutput =
   | { state: 'refused'; message: string }
   | RegionFailure
 
+export interface BaseCheckInput {
+  /** The record's id, a bare UUID. */
+  id: string
+}
+
+export type BaseCheckOutput =
+  | {
+      /** temper's current body is the held base's: the view works from the current record. */
+      state: 'current'
+      /** When the held base was read, ISO-8601 UTC. */
+      readAt: string
+      /** When temper answered this check, ISO-8601 UTC. */
+      checkedAt: string
+    }
+  | {
+      /** temper's body has moved past the held base: the view is not the current record. */
+      state: 'behind'
+      readAt: string
+      checkedAt: string
+      /** When temper says the record last changed, when it says. */
+      updatedAt: string | null
+    }
+  /** No base is held for this record, so there is nothing to compare; `message` says why. */
+  | { state: 'no-base'; message: string }
+  | RegionFailure
+
 /** The held base, as plugin storage keeps it under `heldBaseKey(id)`. */
 export interface HeldBase {
   id: string
@@ -51,5 +82,7 @@ declare module 'orca' {
   interface PluginRequests {
     /** Opens a record's body in an editor tab of the focused workspace, its base held. */
     'temper.body.open': { input: OpenBodyInput; output: OpenBodyOutput }
+    /** Whether temper has moved past a record's held base; reads only. */
+    'temper.body.base': { input: BaseCheckInput; output: BaseCheckOutput }
   }
 }

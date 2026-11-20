@@ -28,6 +28,7 @@ import {
 } from '../../editor/view-file'
 import type { RegionFailure } from '../protocol'
 import { GrantLostError, type TemperRead } from '../reads'
+import { registerBaseCheck } from './base-check'
 import { roomDeps } from './deps'
 import {
   heldBaseKey,
@@ -266,4 +267,5 @@ async function openBody(orca: OrcaWorkerApi, gate: Gate, input: OpenBodyInput): 
 /** Registers the editor room's requests on the worker. */
 export function registerEditorRoom(orca: OrcaWorkerApi, gate: Gate): void {
   orca.panels.handle('temper.body.open', (input: OpenBodyInput) => openBody(orca, gate, input))
+  registerBaseCheck(orca, gate)
 }
