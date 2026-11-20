@@ -40,8 +40,12 @@ test('with the consent withheld, the action is disabled and names it', async () 
   const button = mounted.find({ type: 'Button' })
   assert.equal(button?.props.disabled, true, 'the gated action draws disabled')
   assert.equal(button?.props.onPress, undefined, 'the dark action carries no way to fire')
+  // The refusal is in Orca's own words, verbatim — workspace:create's approval-time
+  // description on Orca 1.4.264.
   assert.ok(
-    mounted.find({ text: "Needs the 'Create workspaces' consent." }),
+    mounted.find({
+      text: "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' consent."
+    }),
     "the refusal names the missing consent in Orca's own words"
   )
   assert.deepEqual(mounted.errors, [])
@@ -56,7 +60,9 @@ test('with the consent granted, the action is enabled and the press lands', asyn
   const button = mounted.find({ type: 'Button' })
   assert.notEqual(button?.props.disabled, true, 'the gated action draws enabled')
   assert.equal(
-    mounted.find({ text: "Needs the 'Create workspaces' consent." }),
+    mounted.find({
+      text: "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' consent."
+    }),
     null,
     'no refusal is drawn for a granted consent'
   )
@@ -80,16 +86,21 @@ test('two withheld consents are named together', async () => {
     { host }
   )
   assert.ok(
-    mounted.find({ text: "Needs the 'Read workspaces' and 'Launch agents' consents." }),
-    'both withheld consents are named in one sentence'
+    mounted.find({
+      text: "Needs the 'Read your projects and workspaces (names, branches, paths and agent status) and the terminals in them, and get notified when they change' and 'Start and resume agents in your workspaces, local and SSH' consents."
+    }),
+    'both withheld consents are named together, in Orca\'s words'
   )
 })
 
 test('the consent sentence, in words, for one two and three', () => {
-  assert.equal(consentSentence(['workspace:create']), "Needs the 'Create workspaces' consent.")
+  assert.equal(
+    consentSentence(['workspace:create']),
+    "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' consent."
+  )
   assert.equal(
     consentSentence(['workspace:create', 'agent:launch']),
-    "Needs the 'Create workspaces' and 'Launch agents' consents."
+    "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' and 'Start and resume agents in your workspaces, local and SSH' consents."
   )
   assert.equal(
     consentSentence(['a:b', 'c:d', 'e:f']),

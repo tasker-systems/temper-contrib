@@ -11,15 +11,24 @@ import { atom, Button, plugin, read, set, Stack, Text, type Press } from 'orca'
 /** The host's consent kinds for this plugin, as the worker's `temper.capabilities` answers. */
 export type GrantedCapabilities = readonly string[]
 
-/** Orca's own words for each consent kind; an unknown kind names itself. */
+/**
+ * Orca's own words for each capability kind — the descriptions Orca shows when it asks for the
+ * consent, taken verbatim from `orca plugin dev load plugins/orca-temper --json` WITHOUT
+ * `--approve` (its `approval_required` answer lists every declared capability with Orca's
+ * description), on Orca 1.4.264 / host API 1.10. They are Orca's wording, not ours; when Orca
+ * rewords them, re-run that load and copy the answers again. An unknown kind names itself.
+ */
 export const CONSENT_WORDS: Readonly<Record<string, string>> = {
-  'settings:own': 'Edit plugin settings',
-  'workspace:read': 'Read workspaces',
-  'workspace:create': 'Create workspaces',
-  'agent:launch': 'Launch agents',
-  'agent:read': 'Read agents',
-  'storage:own': 'Use plugin storage',
-  'workspace:write': 'Write workspace files'
+  'settings:own': "Read and change the plugin's own settings",
+  'workspace:read':
+    'Read your projects and workspaces (names, branches, paths and agent status) and the terminals in them, and get notified when they change',
+  'workspace:create':
+    "Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say",
+  'agent:launch': 'Start and resume agents in your workspaces, local and SSH',
+  'agent:read': 'Get notified when agent status changes',
+  'storage:own': "Store data in the plugin's own storage folder",
+  'workspace:write':
+    'Open and rename your workspaces, hide projects from the sidebar or show them again, focus their terminals, open their files in Orca, and run its built-in commands'
 }
 
 export function consentWord(kind: string): string {
