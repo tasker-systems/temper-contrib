@@ -1,8 +1,12 @@
 // A temper-ts `Credentials` strategy whose mint is `temper auth export-token`: the plugin borrows
 // the person's grant from the CLI they already signed in to, and this file is the only way a
 // token ever enters the worker. It never reads the CLI's auth store or its lock (the CLI rotates
-// the refresh token under an OS lock; a second reader would race it).
+// the refresh token under an OS lock; a second reader would race it). The mint also names the
+// API origin the token is presented to — the plugin setting answers at mint time when it is set,
+// otherwise `temper auth status` does — and the token and its origin travel as one pair: a
+// refresh resolves both again, and a cached token never travels without its origin.
 import type { Credentials, TokenResult } from '../vendor/temper-ts.mjs'
+import { resolveApiOrigin, TemperOriginRefusedError } from './origin'
 import type { RunCli } from './deps'
 
 /** The signed-out refusal: `temper auth export-token` exited non-zero. */
@@ -37,18 +41,46 @@ function expiryOf(token: string): number {
 
 export interface CliCredentialsOptions {
   run: RunCli
+  /**
+   * The plugin setting's answer at mint time: a non-empty string is the origin the mint pairs
+   * the token with (the CLI is never asked for one), null or empty sends the mint to `temper
+   * auth status`. The option's presence turns the mint into a pair mint — token plus origin —
+   * so a read answered from the cache carries a token and an origin from one CLI conversation,
+   * and a refresh resolves both again. Omit the option and the strategy is token-only.
+   */
+  originSetting?: () => Promise<string | null>
   /** Injectable clock (ms since epoch) — tests drive expiry without sleeping. */
   now?: () => number
 }
 
+/** The pair strategy: temper-ts's `Credentials` plus the origin the minted token travels with. */
+export type PairCredentials = Credentials & { apiOrigin: () => Promise<string> }
+
 /**
- * The borrowed-grant strategy. `refresh()` runs the CLI; stdout is trusted ONLY on exit 0 — on
- * failure the CLI prints a JSON error payload on stdout, and a token read from there would be an
- * error document served as a bearer.
+ * The borrowed-grant strategy. Each mint runs `export-token` — stdout is trusted ONLY on exit 0,
+ * on failure the CLI prints a JSON error payload on stdout, and a token read from there would be
+ * an error document served as a bearer — and then resolves the origin, caching both as one pair:
+ * a failed origin resolution leaves nothing cached, and a token minted alone is minted again.
  */
-export function createCliCredentials({ run, now = Date.now }: CliCredentialsOptions): Credentials {
+export function createCliCredentials({
+  run,
+  now = Date.now,
+  originSetting
+}: CliCredentialsOptions): PairCredentials {
   let cached: TokenResult | null = null
+  let cachedOrigin: string | null = null
   let inflight: Promise<TokenResult> | null = null
+
+  /** The origin the mint travels with: the setting answers first, otherwise the CLI does. */
+  async function mintOrigin(): Promise<string> {
+    if (originSetting) {
+      const value = await originSetting()
+      if (typeof value === 'string' && value.trim() !== '') {
+        return value.trim()
+      }
+    }
+    return resolveApiOrigin(run, process.env)
+  }
 
   async function mint(): Promise<TokenResult> {
     // The CLI refuses export-token when TEMPER_TOKEN or TEMPER_AUTH=ambient is set: drop both from
@@ -63,7 +95,11 @@ export function createCliCredentials({ run, now = Date.now }: CliCredentialsOpti
     }
     const token = stdout.trim()
     const result: TokenResult = { token, expiresAt: expiryOf(token) }
+    // Caching waits for the pair: an origin the CLI cannot name refuses the mint whole, and the
+    // next read mints again rather than trusting a token that travelled without an origin.
+    const origin = originSetting ? await mintOrigin() : null
     cached = result
+    cachedOrigin = origin
     return result
   }
 
@@ -84,10 +120,27 @@ export function createCliCredentials({ run, now = Date.now }: CliCredentialsOpti
     return refresh()
   }
 
+  /**
+   * The origin the minted token is presented to. When nothing is cached the mint completes
+   * first (the pair resolves together) — this never asks the CLI on its own account.
+   */
+  async function apiOrigin(): Promise<string> {
+    if (cachedOrigin === null) {
+      await tokenResult()
+    }
+    if (cachedOrigin === null) {
+      throw new TemperOriginRefusedError(
+        'the borrowed token carries no API origin — its mint did not name one'
+      )
+    }
+    return cachedOrigin
+  }
+
   return {
     canRefresh: true,
     token: async () => (await tokenResult()).token,
     tokenResult,
-    refresh
+    refresh,
+    apiOrigin
   }
 }

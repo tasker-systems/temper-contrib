@@ -46,11 +46,15 @@ test('the reported origin is trimmed and its trailing slash dropped', () => {
 
 test('a CLI too old to carry the field refuses, naming what temper is needed', () => {
   // The field's contract is "never omitted" — an answer without it is an old CLI, and the
-  // refusal names the temper it takes, not a guess at the instance.
+  // refusal names the temper it takes (newer than the CLI that cannot), not a guess at the
+  // instance, and nothing pinned to a repo commit or a date the person cannot verify.
   const oldCli = JSON.stringify({ authenticated: true })
-  assert.match(refusedParsing(oldCli).message, /too old/)
-  assert.match(refusedParsing(oldCli).message, /98de84dc/)
-  assert.match(refusedParsing(oldCli).message, /"Temper API origin" setting/)
+  const message = refusedParsing(oldCli).message
+  assert.match(message, /too old/)
+  assert.match(message, /0\.6\.5/)
+  assert.match(message, /"Temper API origin" setting/)
+  assert.equal(/98de/.test(message), false, 'the refusal pins no repo commit')
+  assert.equal(/2026/.test(message), false, 'the refusal pins no date')
 })
 
 test('a null api_url refuses naming the in-process CLI, never guessing', () => {

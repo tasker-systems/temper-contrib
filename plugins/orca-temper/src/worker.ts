@@ -14,7 +14,7 @@ import {
   latestHandoff,
   type TemperRead
 } from './reads'
-import { resolveApiOrigin, TemperOriginRefusedError } from './origin'
+import { TemperOriginRefusedError } from './origin'
 import type {
   ActiveGoalsOutput,
   InProgressTasksOutput,
@@ -52,21 +52,21 @@ async function settingContexts(
   return [fallback ?? DEFAULT_CONTEXT_REF]
 }
 
-/** The setting overrides; otherwise the origin the CLI itself names (`temper auth status`). */
-async function apiOrigin(orca: OrcaWorkerApi): Promise<string> {
-  const value = await orca.settings.get('apiUrl')
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value.trim()
-  }
-  return resolveApiOrigin(deps.run, process.env)
-}
-
 export default function activate(orca: OrcaWorkerApi): void {
-  // One strategy per worker: its cache and refresh-ahead span every panel read.
-  const credentials = createCliCredentials({ run: deps.run })
+  // One strategy per worker: its cache carries the refreshed token — and the origin minted
+  // with it — across panel reads, the pair from one CLI conversation: the mint runs
+  // export-token for the grant, then the origin question, asked only when the plugin setting
+  // does not answer it. Two reads, one mint, one status run.
+  const credentials = createCliCredentials({
+    run: deps.run,
+    originSetting: async () => {
+      const value = await orca.settings.get('apiUrl')
+      return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+    }
+  })
 
   const temperRead = async (): Promise<TemperRead> => ({
-    apiUrl: await apiOrigin(orca),
+    apiUrl: await credentials.apiOrigin(),
     credentials,
     fetch: deps.fetch
   })

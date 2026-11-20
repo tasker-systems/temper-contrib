@@ -20,8 +20,8 @@ export class TemperOriginRefusedError extends Error {
 
 export const TOO_OLD_MESSAGE =
   'this temper CLI is too old to name its API origin: `temper auth status` answers no api_url. ' +
-  'A temper CLI built from main on or after 2026-11-19 (temper 98de84dc) does — upgrade temper, ' +
-  'or set this plugin\'s "Temper API origin" setting.'
+  'A temper CLI whose auth status reports api_url is needed — one newer than 0.6.5. Upgrade ' +
+  'temper, or set this plugin\'s "Temper API origin" setting.'
 
 const NULL_URL_MESSAGE =
   'temper auth status reports api_url null — this CLI answers in-process, with no wire origin. ' +

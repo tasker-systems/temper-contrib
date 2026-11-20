@@ -419,6 +419,44 @@ test('the API-origin setting overrides the CLI without asking it', async () => {
   await worker.deactivate()
 })
 
+test('two reads, one mint, one status run — the token travels with its origin', async () => {
+  let mints = 0
+  let statuses = 0
+  const origins: string[] = []
+  deps.run = async (args) => {
+    if (args[0] === 'auth' && args[1] === 'status') {
+      statuses += 1
+      return authStatus('https://cli-answered.example')
+    }
+    mints += 1
+    return mintedToken()
+  }
+  deps.fetch = async (input: Request) => {
+    origins.push(new URL(input.url).origin)
+    return new Response(JSON.stringify(GOALS_RESPONSE), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  // No apiUrl setting: the mint asks the status once, and the pair answers both reads.
+  const host = mockHost({ settings: { contextRef: '@me/temper' } })
+  const worker = await mountWorker(main, { host })
+  const first = await worker.request('temper.goals.active')
+  const second = await worker.request('temper.goals.active')
+
+  assert.equal(first.connected, true)
+  assert.equal(second.connected, true)
+  assert.equal(mints, 1, 'two reads, one mint: the token is cached')
+  assert.equal(statuses, 1, 'two reads, one status run: the origin rode the same mint')
+  assert.deepEqual(origins, [
+    'https://cli-answered.example',
+    'https://cli-answered.example'
+  ])
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
 test('a CLI too old to report its origin refuses naming the temper needed', async () => {
   // An old CLI's status carries no api_url: the answer is the refusal in its own words —
   // never a guess at an instance.
@@ -433,7 +471,8 @@ test('a CLI too old to report its origin refuses naming the temper needed', asyn
 
   assert.equal(answer.connected, false)
   assert.match(answer.message, /too old/)
-  assert.match(answer.message, /98de84dc/)
+  assert.match(answer.message, /0\.6\.5/)
+  assert.equal(/98de/.test(answer.message), false)
   assert.equal(JSON.stringify(answer).includes('Goal one'), false)
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()

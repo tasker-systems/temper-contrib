@@ -9,11 +9,12 @@ The person's temper in view from Orca, on the person's own grant and nothing els
   from the JWT's `exp` — and the read goes through `@tasker-systems/temper-ts` (`src/reads.ts`,
   vendored to `vendor/temper-ts.mjs` so no `node_modules` ships). An explicit limit rides every
   list call; the latest handoff also reads the newest session note's body and shows its Next
-  steps. The API origin is the one the temper CLI itself names (`src/origin.ts`: the top-level
-  `api_url` in `temper auth status --format json`, through the same CLI seam as the mint), so the
-  token and the API come from the same deployment; the plugin setting can override it. A CLI too
-  old to report the origin, or one answering none, refuses — the worker never guesses an instance,
-  and the plugin never reads the CLI's config or auth store.
+  steps. The API origin is named in the same mint that borrows the grant (`src/credentials.ts`):
+  the plugin setting answers it when set, otherwise the top-level `api_url` of the worker's
+  `temper auth status --format json` run does, and the token and its origin are cached as one pair
+  from that one CLI conversation — two panel reads cost one mint and one status run. A CLI too old
+  to report the origin, or one answering none, refuses — the worker never guesses an instance, and
+  the plugin never reads the CLI's config or auth store.
 - Losing the grant mid-read (a 401, or a re-mint that finds the CLI signed out) is the same
   refusal as never having it: "temper is not connected" and no group data.
 - Signed out, every request refuses — "temper is not connected" and no group data, neither
