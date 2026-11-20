@@ -28,6 +28,9 @@ const TASK_DETAIL = {
     ref: `the-item-detail-${TASK_ID}`,
     title: 'The item detail',
     docType: 'task',
+    stage: 'in-progress',
+    status: null,
+    contextRef: '+temper-dev/contrib',
     properties: [
       { label: 'doc_type', value: 'task' },
       { label: 'temper-stage', value: 'in-progress' },
@@ -52,6 +55,9 @@ const GOAL_DETAIL = {
     ref: `the-goal-${GOAL_ID}`,
     title: 'The in-force goal',
     docType: 'goal',
+    stage: null,
+    status: 'active',
+    contextRef: '+temper-dev/contrib',
     properties: [{ label: 'doc_type', value: 'goal' }]
   }
 }

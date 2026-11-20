@@ -17,6 +17,7 @@ import {
   recentlyUpdated,
   resourceDetail,
   resumeItem,
+  taskHandoff,
   wayIn,
   type TemperRead
 } from './reads'
@@ -24,6 +25,10 @@ import { TemperOriginRefusedError } from './origin'
 import type {
   CapabilitiesOutput,
   LatestHandoffOutput,
+  LaunchAgentsOutput,
+  LaunchInput,
+  LaunchOutput,
+  LaunchProjectsOutput,
   LinkedTasksInput,
   LinkedTasksOutput,
   PlacesOutput,
@@ -32,9 +37,12 @@ import type {
   RecordDetailOutput,
   RegionFailure,
   ResumeOutput,
+  TaskHandoffInput,
+  TaskHandoffOutput,
   WayInInput,
   WayInOutput
 } from './protocol'
+import { LAUNCH_LINKS_KEY } from './protocol'
 
 const NOT_CONNECTED_MESSAGE =
   'temper is not connected — sign in with the temper CLI (`temper auth login`), then try again'
@@ -123,9 +131,174 @@ export default function activate(orca: OrcaWorkerApi): void {
     answer(async (read) => ({ state: 'ok' as const, ...(await recentlyUpdated(read)) }))
   )
 
+  // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;
+  // it names the task's newest linked session and never the person's latest (Review 1).
+  orca.panels.handle(
+    'temper.launch.task-handoff',
+    async (input: TaskHandoffInput): Promise<TaskHandoffOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await taskHandoff(read, input.id)) }))
+  )
+
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
   orca.panels.handle('temper.capabilities', async (): Promise<CapabilitiesOutput> => ({
     granted: [...orca.grantedCapabilities]
   }))
+
+  // The launcher handlers. None of them is a temper read, so none passes the grant gate
+  // (`answer`) — launching writes nothing to temper (Rulings Q3); temper changes only when
+  // the agent the press started acts, under the person's grant.
+
+  /** What a host call's rejection carries, as words the panel can show. */
+  const refusalCode = (error: unknown): string | null =>
+    error !== null && typeof error === 'object' && 'code' in error
+      ? String((error as { code: unknown }).code)
+      : null
+
+  // The projects the person may start a new workspace in (`project.list`, hidden ones left
+  // out). Orca's own refusal rides to the panel, where it is named as Orca said it.
+  orca.panels.handle('temper.launch.projects', async (): Promise<LaunchProjectsOutput> => {
+    try {
+      const answer = await orca.host.call('project.list')
+      return {
+        state: 'ok',
+        projects: answer.projects
+          .filter((project) => project.hidden !== true)
+          .map(({ id, name, path, hostId }) => ({ id, name, path, hostId }))
+      }
+    } catch (error) {
+      return {
+        state: 'failed',
+        message: `Orca refused the projects read: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+  })
+
+  // The agents Orca can launch on this host: the host API has no enumeration, so the question
+  // goes to the host's own CLI (`orca agent installed --json` — the public command, never the
+  // undocumented RPC beneath it). A failed run fails the pick list rather than guessing a set.
+  orca.panels.handle('temper.launch.agents', async (): Promise<LaunchAgentsOutput> => {
+    let result
+    try {
+      result = await deps.runOrca(['agent', 'installed', '--json'], process.env)
+    } catch (error) {
+      return {
+        state: 'failed',
+        message: `the Orca CLI could not be run: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+    if (result.code !== 0) {
+      const words = (result.stderr.trim() || result.stdout.trim()).split('\n')[0] ?? ''
+      return { state: 'failed', message: `Orca would not name its agents: ${words || `exit ${result.code}`}` }
+    }
+    try {
+      const parsed: unknown = JSON.parse(result.stdout)
+      const box = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+      const resultBox =
+        box['result'] !== null && typeof box['result'] === 'object'
+          ? (box['result'] as Record<string, unknown>)
+          : box
+      const agents = Array.isArray(resultBox['agents']) ? resultBox['agents'] : []
+      const named = agents
+        .filter(
+          (agent): agent is { id: string; name?: unknown; default?: unknown } =>
+            agent !== null && typeof agent === 'object' && typeof (agent as { id?: unknown }).id === 'string'
+        )
+        .map((agent) => ({
+          id: agent.id,
+          name: typeof agent['name'] === 'string' ? (agent['name'] as string) : agent.id,
+          isDefault: agent['default'] === true
+        }))
+      return { state: 'ok', agents: named }
+    } catch (error) {
+      return {
+        state: 'failed',
+        message: `Orca's agent list could not be read: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+  })
+
+  // One launch. The press itself writes nothing to temper — the prompt the person saw goes to
+  // workspace.create (a new workspace in the picked project) or agent.launch (this workspace),
+  // the host re-checks every consent itself, and a refused call comes back as what Orca said.
+  // On success the workspace ↔ item link lands in the plugin's own storage, for item 7's
+  // launch hook to read later; a link that cannot be stored rides along as `linkError` and
+  // never takes the launch back.
+  orca.panels.handle('temper.launch.go', async (input: LaunchInput): Promise<LaunchOutput> => {
+    if (input.destination !== 'new-workspace' && input.destination !== 'this-workspace') {
+      return { state: 'failed', message: `unknown launch destination: ${String(input.destination)}` }
+    }
+    if (typeof input.agent !== 'string' || input.agent.trim() === '') {
+      return { state: 'failed', message: 'no agent was named' }
+    }
+    if (typeof input.prompt !== 'string' || input.prompt.trim() === '') {
+      return { state: 'failed', message: 'no prompt was sent — the launch asks for the one the person saw' }
+    }
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(input.item?.id ?? ''))) {
+      return { state: 'failed', message: 'a bare UUID names the item, and none was sent' }
+    }
+    if (input.destination === 'new-workspace' && (typeof input.projectId !== 'string' || input.projectId.trim() === '')) {
+      return { state: 'failed', message: 'a new workspace needs the picked project, and none was sent' }
+    }
+    if (input.destination === 'this-workspace' && (typeof input.workspaceId !== 'string' || input.workspaceId.trim() === '')) {
+      return { state: 'failed', message: 'this workspace was named by no id' }
+    }
+
+    let workspaceId: string
+    let terminalId: string | null = null
+    try {
+      if (input.destination === 'new-workspace') {
+        const created = await orca.host.call('workspace.create', {
+          projectId: input.projectId as string,
+          agent: input.agent,
+          prompt: input.prompt
+        })
+        workspaceId = created.workspaceId
+        terminalId = created.terminalId ?? null
+      } else {
+        const launched = await orca.host.call('agent.launch', {
+          workspaceId: input.workspaceId as string,
+          agent: input.agent,
+          prompt: input.prompt
+        })
+        workspaceId = input.workspaceId as string
+        terminalId = launched.terminalId
+      }
+    } catch (error) {
+      return {
+        state: 'refused',
+        code: refusalCode(error),
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+
+    let linkError: string | null = null
+    try {
+      const existing = await orca.storage.get(LAUNCH_LINKS_KEY)
+      const rows = (Array.isArray(existing) ? existing : []).map((entry) =>
+        entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>)
+          : {}
+      )
+      const links = rows.filter(
+        (entry) => typeof entry['workspaceId'] === 'string' && typeof entry['itemId'] === 'string'
+      ) as { [key: string]: string | null }[]
+      const link = {
+        workspaceId,
+        itemId: input.item.id,
+        ref: input.item.ref,
+        contextRef: input.item.contextRef ?? null,
+        startedAt: new Date().toISOString()
+      }
+      await orca.storage.set(LAUNCH_LINKS_KEY, [
+        ...links.filter(
+          (entry) => !(entry['workspaceId'] === link.workspaceId && entry['itemId'] === link.itemId)
+        ),
+        link
+      ])
+    } catch (error) {
+      linkError = error instanceof Error ? error.message : String(error)
+    }
+    return { state: 'launched', workspaceId, terminalId, linkError }
+  })
 }

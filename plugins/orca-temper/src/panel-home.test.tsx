@@ -62,6 +62,7 @@ test('orca_home_shows_the_persons_in_force_state', async () => {
           id: '00000000-0000-7000-8000-0000000000d4',
           ref: 'handoff-note-00000000-0000-7000-8000-0000000000d4',
           title: 'The latest session note',
+          contextRef: '+temper-dev/contrib',
           next: {
             heading: 'Next steps',
             text: '- Record the witness runs\n- Run the live check',

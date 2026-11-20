@@ -16,6 +16,14 @@
 //                           open-meta run); the detail view draws it and nothing of the body
 //   temper.goal.tasks     — a goal's linked tasks (the asserted `advances` edges), at the
 //                           panel's bound — labelled "linked tasks", never "all tasks"
+//   temper.launch.projects — the projects Orca lists, for the launcher's project pick
+//   temper.launch.agents   — the agents Orca can launch on this host (`orca agent installed`)
+//   temper.launch.task-handoff — the task's own newest linked session and its Next section —
+//                           never the person's latest (Review 1); feeds the task prompts
+//   temper.launch.go      — the launch itself: workspace.create or agent.launch with the
+//                           prompt the person saw; stores the workspace ↔ item link in the
+//                           plugin's own storage on success. No temper write happens here
+//                           (Rulings Q3): temper changes only when the agent acts.
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -70,6 +78,8 @@ export type LatestHandoffOutput =
         id: string
         ref: string
         title: string
+        /** The session's home-context address, for the resume prompt's naming. */
+        contextRef: string | null
         /** Null when the session carries no Next heading — nothing is invented in its place. */
         next: NextSummary | null
       } | null
@@ -127,6 +137,12 @@ export interface RecordDetail {
   ref: string
   title: string
   docType: string
+  /** The managed stage (a task's workflow state), or null when the record carries none. */
+  stage: string | null
+  /** The managed status (a goal's workflow state), or null when the record carries none. */
+  status: string | null
+  /** The home-context address; null for a cogmap-homed record. */
+  contextRef: string | null
   /**
    * In temper-ui's order (packages/temper-ui/src/lib/properties.ts): `doc_type` first, then the
    * managed run — ranked keys lead, unranked follow alphabetically. The open run is not shown:
@@ -160,6 +176,118 @@ export type LinkedTasksOutput =
   | { state: 'ok'; rows: ResourceSummary[]; total: number; bound: number }
   | RegionFailure
 
+/**
+ * `temper.launch.projects`: Orca's projects (worker `project.list`), hidden ones left out —
+ * the launcher's pick list. No temper read rides it: launching needs no temper grant (Q3).
+ */
+export interface LaunchProject {
+  id: string
+  name: string
+  path: string
+  hostId: string | null
+}
+
+export type LaunchProjectsOutput =
+  | { state: 'ok'; projects: LaunchProject[] }
+  | { state: 'failed'; message: string }
+
+/** One agent Orca can launch on this host, as `orca agent installed --json` reports it. */
+export interface LaunchAgentChoice {
+  id: string
+  name: string
+  isDefault: boolean
+}
+
+export type LaunchAgentsOutput =
+  | { state: 'ok'; agents: LaunchAgentChoice[] }
+  | { state: 'failed'; message: string }
+
+/** The item a launch serves; the link stored on a successful launch names the same. */
+export interface LaunchItem {
+  /** The temper record's bare UUID. */
+  id: string
+  ref: string
+  title: string
+  contextRef: string | null
+}
+
+/** Where the press lands the agent: a new workspace in a picked project, or this workspace. */
+export type LaunchDestination = 'new-workspace' | 'this-workspace'
+
+/** `temper.launch.go`: one launch, the prompt exactly as the person saw it in the panel. */
+export interface LaunchInput {
+  destination: LaunchDestination
+  /** Required for `new-workspace`: the pick from `temper.launch.projects`. */
+  projectId?: string
+  /** Required for `this-workspace`: the focused workspace's id. */
+  workspaceId?: string
+  agent: string
+  prompt: string
+  item: LaunchItem
+}
+
+export type LaunchOutput =
+  | {
+      state: 'launched'
+      /** The workspace the agent now runs in (created, or the one named). */
+      workspaceId: string
+      terminalId: string | null
+      /** Set when the launch landed but the link could not be stored (e.g. no storage:own). */
+      linkError: string | null
+    }
+  /** The caller's input was wrong before any Orca call; the panel's error, not a refusal. */
+  | { state: 'failed'; message: string }
+  /** Orca refused the launch; the message is what Orca said, its code when it carried one. */
+  | { state: 'refused'; code: string | null; message: string }
+
+/**
+ * The workspace ↔ item link, stored in the plugin's own storage on a successful launch
+ * (Rulings Q3 — the write-back stays local, never temper); item 7's launch hook reads it.
+ * One entry per workspace × item; a relaunch of the same pair replaces its entry.
+ */
+export interface LaunchLink {
+  workspaceId: string
+  itemId: string
+  ref: string
+  contextRef: string | null
+  startedAt: string
+}
+
+/** The plugin-storage key under which the launch links sit, as a JSON array. */
+export const LAUNCH_LINKS_KEY = 'launch-links'
+
+/**
+ * The consents behind each launch destination (Rulings Q9's table). A press that opens the
+ * launcher needs nothing more than `workspace:read` + `agent:launch` — the sheet itself gates
+ * "New workspace" further and names what it lacks.
+ */
+export const LAUNCH_NEW_WORKSPACE_NEEDS = [
+  'workspace:read',
+  'workspace:create',
+  'agent:launch'
+] as const
+export const LAUNCH_THIS_WORKSPACE_NEEDS = ['workspace:read', 'agent:launch'] as const
+/**
+ * `temper.launch.task-handoff`: the task's own newest linked session and its Next section —
+ * the session→task `advances` edge. null says the task has no handoff yet; it never falls
+ * back to the person's latest, which belongs to whatever work that session did.
+ */
+export interface TaskHandoffInput {
+  /** The task's id, a bare UUID. */
+  id: string
+}
+
+export type TaskHandoffOutput =
+  | {
+      state: 'ok'
+      handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null
+    }
+  | RegionFailure
+
+/** What the launcher's press needs at minimum — the this-workspace path stays open without
+ *  `workspace:create` (Q9: declining one consent leaves the others working). */
+export const LAUNCH_PRESS_NEEDS = ['workspace:read', 'agent:launch'] as const
+
 declare module 'orca' {
   interface PluginRequests {
     /** The one resource the person last changed, or a signed-out refusal. */
@@ -178,5 +306,13 @@ declare module 'orca' {
     'temper.resource.detail': { input: RecordDetailInput; output: RecordDetailOutput }
     /** A goal's linked tasks at the panel's bound, or a signed-out refusal. */
     'temper.goal.tasks': { input: LinkedTasksInput; output: LinkedTasksOutput }
+    /** The projects Orca lists, for the launcher's project pick — no temper grant rides it. */
+    'temper.launch.projects': { output: LaunchProjectsOutput }
+    /** The agents Orca can launch on this host. */
+    'temper.launch.agents': { output: LaunchAgentsOutput }
+    /** One launch: workspace.create or agent.launch, then the local link; never a temper write. */
+    'temper.launch.go': { input: LaunchInput; output: LaunchOutput }
+    /** The task's own newest linked session and its Next section — never the person's latest. */
+    'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
   }
 }

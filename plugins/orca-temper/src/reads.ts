@@ -115,6 +115,8 @@ interface ListQuery {
   stage?: string
   /** The goal filter, task only: the resolved goal id as a bare UUID (the API's own contract). */
   goal?: string
+  /** Scope to these ids (a CSV of bare UUIDs, at most 256) — the task-handoff read's pick set. */
+  ids?: string
   sort?: 'updated' | 'changed_by_me'
   order?: 'desc'
   limit: number
@@ -132,6 +134,7 @@ async function listResources(read: TemperRead, what: string, query: ListQuery): 
         status: query.status,
         stage: query.stage,
         goal: query.goal,
+        ids: query.ids,
         sort: query.sort,
         order: query.order,
         limit: query.limit
@@ -180,7 +183,13 @@ export async function resumeItem(
 export async function latestHandoff(
   read: TemperRead
 ): Promise<{
-  handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null
+  handoff: {
+    id: string
+    ref: string
+    title: string
+    contextRef: string | null
+    next: NextSummary | null
+  } | null
   sessionCount: number
 }> {
   const page = await listResources(read, 'latest handoff', {
@@ -207,9 +216,78 @@ export async function latestHandoff(
   }
   const { id, ref, title } = row
   return {
-    handoff: { id, ref, title, next: nextSection(data.content ?? '') },
+    handoff: {
+      id,
+      ref,
+      title,
+      contextRef: row.context_ref ?? null,
+      next: nextSection(data.content ?? '')
+    },
     sessionCount: page.total
   }
+}
+
+/**
+ * A task's latest handoff: the newest session linked to the task — the session→task
+ * `advances` edge `temper resource create --task` asserts (incoming on the task) — read by
+ * its body, its Next section quoted as written. Never the person's newest session: that
+ * orients the agent to whatever another task's work was, not this task's (Review 1). The
+ * task's advances rows name the candidates; the list door scoped by their ids, newest first,
+ * picks the latest visible one. No linked session answers null — nothing is quoted, and
+ * nothing is invented in its place.
+ */
+export async function taskHandoff(
+  read: TemperRead,
+  taskId: string
+): Promise<{
+  handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null
+}> {
+  assertBareId(taskId, 'a task')
+  const client = clientOf(read)
+  const connections = await client.GET('/api/resources/{id}/connections', {
+    params: { path: { id: taskId }, query: { limit: 200 } }
+  })
+  if (connections.error || !connections.data) {
+    if (connections.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(
+      `temper refused the task's connections read: ${JSON.stringify(connections.error)}`
+    )
+  }
+  const advancing = connections.data.rows
+    .filter(
+      (row) =>
+        row.direction === 'incoming' &&
+        row.label === 'advances' &&
+        row.peer_table === 'kb_resources'
+    )
+    .map((row) => row.peer_id)
+  if (advancing.length === 0) {
+    return { handoff: null }
+  }
+  const page = await listResources(read, 'the task\'s sessions', {
+    doc_type_name: 'session',
+    ids: advancing.join(','),
+    sort: 'updated',
+    order: 'desc',
+    limit: 1
+  })
+  const row = page.rows[0]
+  if (!row) {
+    return { handoff: null }
+  }
+  const body = await client.GET('/api/resources/{id}', {
+    params: { path: { id: row.id }, query: { sections: 'body' } }
+  })
+  if (body.error || !body.data) {
+    if (body.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the task handoff body read: ${JSON.stringify(body.error)}`)
+  }
+  const { id, ref, title } = row
+  return { handoff: { id, ref, title, next: nextSection(body.data.content ?? '') } }
 }
 
 /**
@@ -385,14 +463,22 @@ export async function resourceDetail(read: TemperRead, id: string): Promise<Reco
     }
     throw new Error(`temper refused the record read: ${JSON.stringify(error)}`)
   }
+  const managedMeta = data.managed_meta as Record<string, unknown> | null | undefined
+  const managedScalar = (key: string): string | null => {
+    const value = managedMeta?.[key]
+    return typeof value === 'string' && value.trim() !== '' ? value : null
+  }
   return {
     id,
     ref: data.ref,
     title: data.title,
     docType: data.doc_type_name,
+    stage: managedScalar('temper-stage'),
+    status: managedScalar('temper-status'),
+    contextRef: data.context_ref ?? null,
     properties: detailProperties({
       doc_type_name: data.doc_type_name,
-      managed_meta: data.managed_meta as Record<string, unknown> | null | undefined,
+      managed_meta: managedMeta,
       context_ref: data.context_ref ?? null,
       cogmap_name: data.cogmap_name ?? null,
       owner_handle: data.owner_handle,
