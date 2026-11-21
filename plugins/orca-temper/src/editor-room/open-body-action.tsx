@@ -3,7 +3,7 @@
 // answer stands under it in its own words — where the tab opened and when its base was read,
 // or why nothing was opened. The rail itself never draws the body.
 import { atom, read, set, Stack, Text, plugin } from 'orca'
-import { GatedAction, grantedCapabilities } from '../capabilities'
+import { ConsentNote, GatedAction, grantedCapabilities } from '../capabilities'
 import type { OpenBodyOutput } from './protocol'
 
 /** The consents Open body needs: find the workspace, open its file, hold the base. */
@@ -45,8 +45,9 @@ function AnswerLine(props: { answer: OpenBodyOutput | 'pending' | undefined }) {
   )
 }
 
-/** The press, for the detail's act row: a secondary act, outlined, its icon beside its label. */
-export function OpenBodyButton(props: { id: string }) {
+/** The press, for the detail's act row: a secondary act, outlined, its icon beside its label.
+ *  In a row (`named={false}`) its missing consent is said under the row by `OpenBodyConsent`. */
+export function OpenBodyButton(props: { id: string; named?: boolean }) {
   return (
     <GatedAction
       needs={OPEN_BODY_NEEDS}
@@ -54,9 +55,15 @@ export function OpenBodyButton(props: { id: string }) {
       label="Open body"
       variant="outline"
       icon="file-text"
+      named={props.named}
       onPress={() => void openBody(props.id)}
     />
   )
+}
+
+/** Open body's missing consent, for under the detail's act row. */
+export function OpenBodyConsent() {
+  return <ConsentNote act="Open body" needs={OPEN_BODY_NEEDS} granted={read(grantedCapabilities)} />
 }
 
 /** The press's answer, under the act row. */

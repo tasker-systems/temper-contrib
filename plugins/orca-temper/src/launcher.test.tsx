@@ -133,6 +133,7 @@ function servedHost(options: {
   links?: readonly object[]
   handoff?: unknown
   taskHandoff?: unknown
+  launch?: LaunchOutput
 }): { host: ReturnType<typeof mockHost>; served: Served } {
   const served: Served = { launches: [] }
   const host = mockHost({
@@ -160,7 +161,7 @@ function servedHost(options: {
       'temper.launch.task-handoff': () => (options.taskHandoff ?? TASK_HANDOFF) as TaskHandoffOutput,
       'temper.launch.go': (input: LaunchInput): LaunchOutput => {
         served.launches.push(input)
-        return { state: 'launched', workspaceId: 'ws-new', terminalId: 't-new', linkError: null }
+        return options.launch ?? { state: 'launched', workspaceId: 'ws-new', terminalId: 't-new', linkError: null }
       }
     }
   })
@@ -414,12 +415,13 @@ test('a withheld launch consent draws the action disabled, named, never attempte
 
   const start = mounted.find({ type: 'Button', text: 'Start agent' })
   assert.equal(start?.disabled, true, 'Start agent is dark without the launch consent')
-  assert.ok(
-    mounted.find({
-      text: "Needs the 'Start and resume agents in your workspaces, local and SSH' consent."
-    }),
-    'the missing consent is named in Orca\'s own words'
-  )
+  const sentence = mounted.find({
+    text: "Start agent needs the 'Start and resume agents in your workspaces, local and SSH' consent."
+  })
+  assert.ok(sentence, 'the missing consent is named in Orca\'s own words, with its act')
+  assert.equal(sentence.props.tone, 'warning', 'in warning text')
+  const row = mounted.findAll({ type: 'Row' }).find((r) => start!.path.startsWith(r.path))
+  assert.ok(row && !sentence.path.startsWith(row.path), 'said under the act row, so the row stays aligned')
   assert.equal(served.launches.length, 0, 'nothing was attempted')
   assert.deepEqual(mounted.errors, [])
 })
@@ -477,10 +479,161 @@ test('the handoff card\'s sheet opens below the card\'s omission sentence, outsi
 
   const card = mounted.find({ type: 'Card', label: 'latest handoff' })
   const omission = mounted.find({ text: '1 of 4 sessions of yours; 3 not shown.' })
-  const sheet = mounted.find({ type: 'Heading', text: 'Resume' })
+  const sheet = mounted.find({ type: 'Card', label: 'Resume' })
   assert.ok(card && omission && sheet, 'the card, its omission sentence and the sheet are drawn')
   assert.ok(omission.path.startsWith(card.path), 'the omission sentence is the card\'s own')
   assert.ok(!sheet.path.startsWith(card.path), 'the sheet stands outside the card')
   assert.ok(drawnBefore(omission, sheet), 'the sheet opens after the omission sentence, never between')
+  assert.deepEqual(mounted.errors, [])
+})
+
+/** Opens Start agent's sheet on the backlog task's detail. */
+async function openStartSheet(options: Parameters<typeof servedHost>[0] = {}) {
+  const { host, served } = servedHost(options)
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+  await mounted.press(mounted.find({ type: 'Button', text: 'Start agent' })!)
+  await mounted.settled()
+  return served
+}
+
+test('the sheet is a card titled with its act, its prompt wrapping so every line is readable', async () => {
+  await openStartSheet()
+
+  const card = mounted!.find({ type: 'Card', label: 'Start agent' })
+  assert.ok(card, 'the sheet is a card titled with its act')
+  assert.match(String(card.props.description), /first prompt — sent when you confirm/)
+  const prompt = mounted!.find({ type: 'CodeView' })
+  assert.ok(prompt && prompt.path.startsWith(card.path), 'the prompt stands inside the card')
+  assert.equal(prompt.props.wrap, true, 'the prompt wraps — no line clips at the rail edge')
+  assert.equal(prompt.props.label, 'first prompt')
+  assert.ok(
+    String(prompt.props.code).includes(`Start the task: ref \`${TASK_REF}\``),
+    'the whole prompt the confirm sends is the code shown'
+  )
+  assert.equal(mounted!.find({ type: 'Code' }), null, 'no unwrapped code block is left to clip')
+  assert.deepEqual(mounted!.errors, [])
+  assert.deepEqual(mounted!.warnings, [])
+})
+
+test('the confirm row: one solid accent confirm, Cancel ghost beside it, the reason under the row', async () => {
+  await openStartSheet()
+
+  const card = mounted!.find({ type: 'Card', label: 'Start agent' })!
+  const confirm = mounted!.findAll({ type: 'Button', text: 'Start agent' }).find((b) => b.path.startsWith(card.path))
+  const cancel = mounted!.find({ type: 'Button', text: 'Cancel' })
+  assert.ok(confirm && cancel)
+  assert.equal(confirm.props.variant, 'solid')
+  assert.equal(confirm.props.tone, 'accent')
+  assert.equal(confirm.props.icon, 'play')
+  assert.equal(confirm.disabled, true, 'dark until a project is picked')
+  assert.equal(cancel.props.variant, 'ghost')
+  const solids = mounted!.findAll({ type: 'Button' }).filter((b) => b.props.variant === 'solid')
+  assert.deepEqual(solids.map((b) => b.path), [confirm.path], 'with the sheet open, its confirm is the one solid act')
+  const row = mounted!.findAll({ type: 'Row' }).find((r) => confirm.path.startsWith(r.path) && cancel.path.startsWith(r.path))
+  assert.ok(row, 'confirm and Cancel stand in one row')
+  assert.equal(row.props.align, 'center')
+  const reason = mounted!.find({ text: 'Pick a project.' })
+  assert.ok(reason, 'the not-ready reason is said')
+  assert.ok(!reason.path.startsWith(row.path), 'the reason stands under the row, not in it')
+  assert.ok(drawnBefore(row, reason))
+
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  assert.equal(mounted!.find({ text: 'Pick a project.' }), null)
+  const lit = mounted!.findAll({ type: 'Button', text: 'Start agent' }).find((b) => b.path.startsWith(card.path))
+  assert.notEqual(lit?.disabled, true, 'a picked project lights the confirm')
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('launched is a success callout in the sheet, with Close', async () => {
+  await openStartSheet()
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  const done = mounted!.find({ type: 'Callout', label: 'The agent was launched.' })
+  assert.equal(done?.props.tone, 'success')
+  assert.ok(mounted!.find({ type: 'Button', text: 'Close' }))
+  assert.equal(mounted!.find({ text: /✓/ }), null, 'the callout carries its own glyph')
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('Orca refusing a launch is a danger callout with Orca\'s own message and code', async () => {
+  await openStartSheet({
+    launch: { state: 'refused', message: 'the project is not reachable over SSH', code: 'not_permitted' }
+  })
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  const refused = mounted!.find({ type: 'Callout', label: 'Orca refused' })
+  assert.equal(refused?.props.tone, 'danger')
+  assert.ok(mounted!.find({ text: 'the project is not reachable over SSH (not_permitted)' }))
+  assert.ok(mounted!.find({ type: 'CodeView' }), 'the sheet stays open to try again')
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('a launch that never ran is a warning callout, titled in words', async () => {
+  await openStartSheet({ launch: { state: 'failed', message: 'the worker lost its grant' } })
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  const failed = mounted!.find({ type: 'Callout', label: 'The launch never ran' })
+  assert.equal(failed?.props.tone, 'warning')
+  assert.ok(mounted!.find({ text: 'the worker lost its grant' }))
+  assert.equal(mounted!.find({ text: /⚠/ }), null)
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('a missing consent darkens the confirm and names it in warning text under the row', async () => {
+  const withoutCreate = ALL_GRANTED.filter((kind) => kind !== 'workspace:create')
+  await openStartSheet({ granted: withoutCreate })
+
+  const sentence = mounted!.findAll({ type: 'Text', text: /Needs the 'Create workspaces/ })
+  assert.ok(sentence.length > 0, 'the withheld consent is named')
+  assert.ok(sentence.every((s) => s.props.tone === 'warning'), 'in warning text')
+  const card = mounted!.find({ type: 'Card', label: 'Start agent' })!
+  const confirm = mounted!.findAll({ type: 'Button', text: 'Start agent' }).find((b) => b.path.startsWith(card.path))
+  assert.equal(confirm?.disabled, true)
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('a sheet carried from the last run draws again with its reads asked, on its own item only', async () => {
+  const compose = {
+    kind: 'task-start',
+    from: 'detail',
+    item: { id: TASK_ID, ref: TASK_REF, title: 'The item detail', contextRef: TASK_CONTEXT },
+    handoffNext: null
+  }
+  const { host } = servedHost({})
+  mounted = await mount(panel, {
+    host,
+    persisted: {
+      plugin: {
+        'detail-stack': [{ id: TASK_ID, ref: '', title: '', docType: 'task' }],
+        'launch-compose': compose,
+        'launch-outcome': { state: 'refused', message: 'Orca said no', code: null }
+      }
+    }
+  })
+  await mounted.settled()
+  assert.ok(mounted.find({ type: 'Card', label: 'Start agent' }), 'the carried sheet draws')
+  assert.ok(mounted.find({ type: 'Select', label: 'Project' }), 'its reads were asked again')
+  assert.ok(mounted.find({ type: 'Callout', label: 'Orca refused' }), 'its outcome is held with it')
+  await mounted.unmount()
+
+  const other = servedHost({ detail: { ...taskDetail('backlog'), detail: { ...taskDetail('backlog').detail, id: GOAL_ID } } })
+  mounted = await mount(panel, {
+    host: other.host,
+    persisted: {
+      plugin: {
+        'detail-stack': [{ id: GOAL_ID, ref: '', title: '', docType: 'task' }],
+        'launch-compose': compose
+      }
+    }
+  })
+  await mounted.settled()
+  assert.equal(mounted.find({ type: 'Card' }), null, 'a sheet opened on one record never stands on another')
   assert.deepEqual(mounted.errors, [])
 })

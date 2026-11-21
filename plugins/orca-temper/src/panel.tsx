@@ -14,8 +14,9 @@
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
-// Region states carry their own words (◌ loading, — empty, ⚠ failed), and every list states
-// its omission sentence and its order. Orca's controls carry the look (./look.ts): a row wears
+// Region states carry their own words (◌ loading over a skeleton, — empty with its count at 0,
+// "unavailable — nothing here was read" as a warning callout's title, temper not connected as
+// an empty state with the plug), and every list states its omission sentence and its order. Orca's controls carry the look (./look.ts): a row wears
 // its doc-type icon beside the doc-type word, never instead of it; a region's count is a badge
 // on its heading; a row's state is words in its description; the detail's state is a badge
 // holding its word; one solid accent act per view, the rest outlined or ghost.
@@ -24,6 +25,7 @@ import {
   Badge,
   Box,
   Button,
+  Callout,
   Card,
   Collapsible,
   EmptyState,
@@ -38,6 +40,7 @@ import {
   Row,
   set,
   settings,
+  Skeleton,
   Spinner,
   Stack,
   Tab,
@@ -54,8 +57,14 @@ import {
   WAYS_IN
 } from '../vendor/temper-design.mjs'
 import { refreshGrantedCapabilities } from './capabilities'
-import { DetailLaunchButton, HandoffLaunchButton, LauncherSheet } from './launcher'
-import { OpenBodyAnswer, OpenBodyButton } from './editor-room/open-body-action'
+import {
+  DetailLaunchButton,
+  DetailLaunchConsent,
+  HandoffLaunchButton,
+  LauncherSheet,
+  setupLauncher
+} from './launcher'
+import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
 import {
   ACT_ICON,
   docTypeIcon,
@@ -269,6 +278,7 @@ export function setup(ctx: PanelContext): void {
     void loadDetail(carried)
     void loadLinkedTasks(carried)
   }
+  setupLauncher()
   void refresh()
 }
 
@@ -310,28 +320,60 @@ function Refusal() {
   if (!allRefused()) {
     return undefined
   }
-  return <EmptyState title="temper is not connected" description={refusalMessage()} icon="warning" />
+  return <NotConnected message={refusalMessage()} />
+}
+
+/** Signed out: temper was never reached. `plug` says connection; the words say the rest. */
+function NotConnected(props: { message: string }) {
+  return <EmptyState title="temper is not connected" description={props.message} icon="plug" />
 }
 
 /** The loading region, for every tab: reads happen once, on the panel's behalf. */
 function LoadingRegion() {
   return (
-    <Row gap="sm" align="center">
-      {read(loading) ? <Spinner label="Reading temper" labelHidden /> : undefined}
-      <Text muted>◌ Loading …</Text>
-    </Row>
+    <Stack gap="sm">
+      <Row gap="sm" align="center">
+        {read(loading) ? <Spinner label="Reading temper" labelHidden /> : undefined}
+        <Text muted>◌ Loading …</Text>
+      </Row>
+      <Skeleton lines={3} label="Reading temper" />
+    </Stack>
   )
 }
 
-/** A region whose read failed: it names what failed and shows nothing in its place. */
+/** A read still out: its house words, muted, with the skeleton of what will stand there. */
+function Loading(props: { words: string }) {
+  return (
+    <Stack gap="xs">
+      <Text muted size="xs">
+        {props.words}
+      </Text>
+      <Skeleton lines={3} label={props.words} />
+    </Stack>
+  )
+}
+
+/**
+ * A read that failed: a warning callout whose title is the house words — what is unavailable,
+ * and that nothing here was read — and whose body is the message; the callout draws its own
+ * glyph, so the words carry no "⚠" (Rulings 21.3).
+ */
+function Unavailable(props: { title: string; message: string }) {
+  return (
+    <Callout tone="warning" title={props.title}>
+      <Text muted size="xs">
+        {props.message}
+      </Text>
+    </Callout>
+  )
+}
+
+/** A region whose read failed: its label, then what failed; nothing stands in its place. */
 function FailedRegion(props: { label: string; message: string }) {
   return (
     <Stack gap="xs">
       <Heading level={3}>{props.label}</Heading>
-      <Text tone="warning">{`⚠ ${props.label} unavailable — nothing here was read.`}</Text>
-      <Text muted size="xs">
-        {props.message}
-      </Text>
+      <Unavailable title={`${props.label} unavailable — nothing here was read.`} message={props.message} />
     </Stack>
   )
 }
@@ -359,9 +401,10 @@ function ResourceRow(props: { item: ResourceSummary; description?: string; state
 
 /**
  * One region's shell: its own state — still out, failed, refused (drawn over by the panel's
- * refusal, so not here) or answered. The children render the answered case.
+ * refusal, so not here) or answered. The children render the answered case. Exported for the
+ * region-state witness, which stands one up still out.
  */
-function Region(props: {
+export function Region(props: {
   answer: { state: string } | null
   label: string
   children?: OrcaNode
@@ -371,7 +414,7 @@ function Region(props: {
     return (
       <Stack gap="sm">
         <Heading level={3}>{props.label}</Heading>
-        <Text muted size="xs">{`◌ Loading ${props.label}…`}</Text>
+        <Loading words={`◌ Loading ${props.label}…`} />
       </Stack>
     )
   }
@@ -490,7 +533,7 @@ function HandoffRegion() {
             </Card>
           )}
           {/* The sheet opens below the card, after its omission sentence — never between them. */}
-          {handoff === null ? undefined : <LauncherSheet from="home" />}
+          {handoff === null ? undefined : <LauncherSheet from="home" itemId={handoff.id} />}
         </Stack>
       )}
     </Region>
@@ -712,13 +755,15 @@ function DetailView(props: { entry: DetailEntry }) {
       <Stack gap="xs">
         <Row gap="xs" wrap>
           {detail === null ? undefined : <DetailLaunchButton detail={detail} />}
-          <OpenBodyButton id={props.entry.id} />
+          <OpenBodyButton id={props.entry.id} named={false} />
           <WayOutButton id={props.entry.id} />
         </Row>
+        {detail === null ? undefined : <DetailLaunchConsent detail={detail} />}
+        <OpenBodyConsent />
         <OpenBodyAnswer id={props.entry.id} />
         <WayOutNote id={props.entry.id} />
       </Stack>
-      {detail === null ? undefined : <LauncherSheet from="detail" />}
+      {detail === null ? undefined : <LauncherSheet from="detail" itemId={props.entry.id} />}
       <RecordDetailRegion answer={answer} />
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />
@@ -731,19 +776,14 @@ function DetailView(props: { entry: DetailEntry }) {
 function RecordDetailRegion(props: { answer: RecordDetailOutput | null }) {
   const answer = props.answer
   if (answer === null) {
-    return <Text muted size="xs">◌ Loading the record…</Text>
+    return <Loading words="◌ Loading the record…" />
   }
   if (answer.state === 'not-connected') {
-    // The existing signed-out refusal: no item data answers it on any surface.
-    return <EmptyState title="temper is not connected" description={answer.message} icon="warning" />
+    // The signed-out refusal: no item data answers it on any surface.
+    return <NotConnected message={answer.message} />
   }
   if (answer.state === 'failed') {
-    return (
-      <Stack gap="xs">
-        <Text tone="warning">⚠ the record is unavailable — nothing here was read.</Text>
-        <Text muted size="xs">{answer.message}</Text>
-      </Stack>
-    )
+    return <Unavailable title="the record is unavailable — nothing here was read." message={answer.message} />
   }
   const items = metaItems(answer.detail)
   return (
@@ -759,18 +799,13 @@ const LINKED_TASKS_SCOPE = 'linked tasks'
 function LinkedTasksRegion(props: { goal: DetailEntry }) {
   const answer = read(linkedTaskResults)[props.goal.id] ?? null
   if (answer === null) {
-    return <Text muted size="xs">◌ Loading {LINKED_TASKS_SCOPE}…</Text>
+    return <Loading words={`◌ Loading ${LINKED_TASKS_SCOPE}…`} />
   }
   if (answer.state === 'not-connected') {
     return undefined
   }
   if (answer.state === 'failed') {
-    return (
-      <Stack gap="xs">
-        <Text tone="warning">{`⚠ ${LINKED_TASKS_SCOPE} unavailable — nothing here was read.`}</Text>
-        <Text muted size="xs">{answer.message}</Text>
-      </Stack>
-    )
+    return <FailedRegion label={LINKED_TASKS_SCOPE} message={answer.message} />
   }
   return (
     <Stack gap="sm">

@@ -224,7 +224,7 @@ test('a way in that fails while Show more presses keeps its failure, not its row
   serve = false
   await mounted.press({ text: 'Show more' })
   assert.ok(
-    mounted.find({ text: '⚠ goals unavailable — nothing here was read.' }),
+    mounted.find({ type: 'Callout', label: 'goals unavailable — nothing here was read.' }),
     'the failing growth names what failed'
   )
   assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'the other way in is untouched')

@@ -79,6 +79,7 @@ test('shows the refusal text when the worker reports temper is not connected', a
   assert.ok(mounted.find({ label: 'temper is not connected' }), 'the refusal is on the panel')
   const state = mounted.find({ type: 'EmptyState' })
   assert.match(String(state?.props.description), /sign in with the temper CLI/)
+  assert.equal(state?.props.icon, 'plug', 'signed out says connection, with the plug')
   assert.equal(mounted.find({ label: 'Goal one' }), null)
   assert.equal(mounted.find({ type: 'Heading', text: 'goals 0' }), null, 'no region claims a count over a refusal')
   assert.deepEqual(mounted.errors, [])
@@ -105,13 +106,47 @@ test('a failed region names what failed beside the regions that answered', async
     }
   })
   mounted = await mount(panel, { host })
+  const failed = mounted.find({ type: 'Callout', label: 'latest handoff unavailable — nothing here was read.' })
+  assert.ok(failed, 'the failed region names what failed, never showing as empty')
+  assert.equal(failed.props.tone, 'warning', 'a failed region is a warning callout')
   assert.ok(
-    mounted.find({ text: '⚠ latest handoff unavailable — nothing here was read.' }),
-    'the failed region names what failed, never showing as empty'
+    mounted.find({ text: 'temper refused the handoff body read: boom' }),
+    'the callout carries the message'
   )
+  assert.equal(mounted.find({ text: /⚠/ }), null, 'the callout draws its own glyph; the words carry no ⚠')
   assert.equal(mounted.find({ text: '— No sessions of yours.' }), null, 'a failure never shows as empty')
   assert.ok(mounted.find({ type: 'Heading', text: 'goals 0' }), 'the regions that answered still render')
   assert.equal(mounted.find({ type: 'EmptyState' }), null, 'one failure is not the signed-out refusal')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
+
+test('a region still out keeps its muted words over a skeleton', async () => {
+  mounted = await mount(() => <panel.Region answer={null} label="goals" />)
+  const words = mounted.find({ text: '◌ Loading goals…' })
+  assert.ok(words, 'the house words stand while the read is out')
+  assert.equal(words.props.muted, true)
+  const skeleton = mounted.find({ type: 'Skeleton' })
+  assert.ok(skeleton, 'with a skeleton under them')
+  assert.ok(drawnAfter(skeleton, words))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('an empty region keeps its words and its count at 0, with no skeleton left', async () => {
+  mounted = await mount(panel, { host: servedHost() })
+  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'empty keeps its count at 0')
+  assert.ok(mounted.find({ text: '— No tasks in progress of yours.' }), 'and its own empty words')
+  assert.equal(mounted.find({ type: 'Skeleton' }), null, 'answered, no skeleton stands')
+  assert.deepEqual(mounted.errors, [])
+})
+
+function drawnAfter(a: { path: string }, b: { path: string }): boolean {
+  const pa = a.path.match(/\d+/g)?.map(Number) ?? []
+  const pb = b.path.match(/\d+/g)?.map(Number) ?? []
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    if (pa[i] !== pb[i]) {
+      return (pa[i] ?? 0) > (pb[i] ?? 0)
+    }
+  }
+  return pa.length > pb.length
+}

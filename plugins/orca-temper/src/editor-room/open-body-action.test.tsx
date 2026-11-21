@@ -72,7 +72,9 @@ test('without its consents Open body is disabled and names what it needs', async
   const button = mounted.findAll({ text: 'Open body' }).find((each) => each.role === 'button')
   assert.ok(button)
   assert.equal(button.disabled, true)
-  // The two consents not granted, named in Orca's words.
-  assert.ok(mounted.find({ text: /^Needs the 'Open and rename your workspaces.*' and 'Store data in the plugin's own storage folder' consents\.$/ }))
+  // The two consents not granted, named in Orca's words, under the act row in warning text.
+  const sentence = mounted.find({ text: /^Open body needs the 'Open and rename your workspaces.*' and 'Store data in the plugin's own storage folder' consents\.$/ })
+  assert.ok(sentence)
+  assert.equal(sentence.props.tone, 'warning')
   assert.deepEqual(asked, [])
 })

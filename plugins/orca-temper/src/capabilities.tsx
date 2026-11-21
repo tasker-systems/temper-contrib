@@ -74,7 +74,8 @@ export function missingConsents(
 
 /**
  * One action, lit only by granted consent: enabled when the panel holds every consent it
- * needs; disabled with the missing consent named when not. Every start, resume and
+ * needs; disabled with the missing consent named when not — in warning text, since the act
+ * the person reached for is withheld. Every start, resume and
  * workspace-writing action the later iterations draw goes through here, so the panel can
  * never offer an act Orca would refuse.
  */
@@ -87,6 +88,9 @@ export function GatedAction(props: {
   /** Weight only: the label always carries the act. */
   tone?: Tone
   icon?: IconName
+  /** False when the action stands in a row of acts: the row names the consent under itself
+   *  (`ConsentNote`), so the buttons stay aligned. */
+  named?: boolean
 }) {
   const missing = missingConsents(props.needs, props.granted)
   if (missing.length === 0) {
@@ -96,14 +100,39 @@ export function GatedAction(props: {
       </Button>
     )
   }
+  if (props.named === false) {
+    return (
+      <Button disabled variant={props.variant} tone={props.tone} icon={props.icon}>
+        {props.label}
+      </Button>
+    )
+  }
   return (
     <Stack gap="xs">
       <Button disabled variant={props.variant} tone={props.tone} icon={props.icon}>
         {props.label}
       </Button>
-      <Text muted size="xs">
+      <Text tone="warning" size="xs">
         {consentSentence(missing)}
       </Text>
     </Stack>
+  )
+}
+
+/**
+ * A dark act's missing consent, said under the row it stands in and naming the act, since the
+ * sentence is no longer beside its button: "Open body needs the '…' consent." Nothing when
+ * every consent is granted.
+ */
+export function ConsentNote(props: { act: string; needs: readonly string[]; granted: readonly string[] }) {
+  const missing = missingConsents(props.needs, props.granted)
+  if (missing.length === 0) {
+    return undefined
+  }
+  const sentence = consentSentence(missing)
+  return (
+    <Text tone="warning" size="xs">
+      {`${props.act} n${sentence.slice(1)}`}
+    </Text>
   )
 }
