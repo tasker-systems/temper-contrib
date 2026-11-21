@@ -59,9 +59,21 @@ person works in, and recently updated — every list with its omission sentence 
   `workspace.open`. No focused workspace, one on another host, a folder without git, a tracked
   file under `.temper-views/`, a body not stored verbatim, or a view already changed on disk
   refuses in the panel, naming why, and writes nothing. The `temper-body` custom editor
-  (`editor/`, `priority: default`) draws the view read-only: a header naming the record and when
-  its base was read, then the body; editing, the difference and Save are later work.
+  (`editor/`, `priority: default`) draws the view: a header naming the record, when its base
+  was read and whether temper has moved past it, the difference from the base, then the body
+  rendered. Editing happens in Orca's own editor of the same file, or on disk by an agent.
   `orca_body_opens_in_an_editor_tab` in `src/editor-room/open-body.test.ts` is its witness.
+- **Save** in the body view is the one act that writes a body to temper
+  (`src/editor-room/save.ts`): the worker runs `temper resource update <id> --body @<file>
+  --expect-body <held token>` as the person acting through the plugin's UI (persona
+  `orca-temper-ui`, a confidence band, no model), sending the body without the view's
+  frontmatter. No held token refuses before the CLI runs. A local file save, closing or
+  reopening never write to temper, and the view says when the file on disk holds a local save
+  temper does not have. A save temper refuses as stale writes nothing and shows the base, the
+  person's version and temper's current, with carry-over, discard, or handing the three to an
+  agent in the workspace (the desktop's refused-save prompt, `vendor/desktop-handoff.ts`, sent
+  through the launcher's `agent.launch`). Witnesses: `orca_only_a_save_reaches_temper` and
+  `orca_stale_save_writes_nothing` in `editor/save.test.ts`.
 - The settings are the API origin override and the "Temper web address" (`webUrl`); the
   context-scoped settings and reads were retired when Home became person-scoped (the design
   record's Rulings, Q1).

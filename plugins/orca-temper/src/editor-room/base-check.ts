@@ -15,8 +15,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export const NO_BASE_MESSAGE =
   'No base is held for this record here, so whether temper has moved past it is not known. Open it again from the Temper rail.'
 
-/** temper's current body token for a record, and when it says the record last changed. */
-async function currentToken(read: TemperRead, id: string): Promise<{ token: string | null; updated: string | null }> {
+/** temper's current body, its token, and when it says the record last changed. */
+export interface CurrentBody {
+  content: string
+  token: string | null
+  updated: string | null
+}
+
+/** One single-record `sections=body` read: the only read that answers a body token. */
+export async function readCurrent(read: TemperRead, id: string): Promise<CurrentBody> {
   const client = createTemperClient({
     baseUrl: read.apiUrl,
     credentials: read.credentials,
@@ -29,9 +36,10 @@ async function currentToken(read: TemperRead, id: string): Promise<{ token: stri
     if (response.status === 401) {
       throw new GrantLostError()
     }
-    throw new Error(`temper refused the base check: ${JSON.stringify(error)}`)
+    throw new Error(`temper refused the body read: ${JSON.stringify(error)}`)
   }
   return {
+    content: data.content ?? '',
     token: typeof data.body_token === 'string' && data.body_token !== '' ? data.body_token : null,
     updated: typeof data.updated === 'string' ? data.updated : null
   }
@@ -46,7 +54,7 @@ async function checkBase(orca: OrcaWorkerApi, gate: Gate, input: BaseCheckInput)
     return { state: 'no-base', message: NO_BASE_MESSAGE }
   }
   return gate(async (read) => {
-    const current = await currentToken(read, input.id)
+    const current = await readCurrent(read, input.id)
     const checkedAt = roomDeps.now().toISOString()
     // A read with no token cannot show the base is current, so it never says so.
     if (current.token === null) {

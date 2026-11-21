@@ -39,7 +39,12 @@ function follow(text: string) {
       document,
       held: async () => HELD,
       check: async () => ({ state: 'current', readAt: HELD.read_at, checkedAt: HELD.read_at }),
-      every: () => () => undefined
+      every: () => () => undefined,
+      local: async () => ({ state: 'clean' }),
+      save: async () => ({ state: 'failed', message: 'this test saves nothing' }),
+      rebase: async () => ({ state: 'failed', message: 'this test rebases nothing' }),
+      agents: async () => ({ state: 'ok', agents: [] }),
+      launch: async () => ({ state: 'failed', message: 'this test launches nothing' })
     },
     (state) => drawn.push(state)
   )
