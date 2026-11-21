@@ -20,8 +20,9 @@
 import {
   atom,
   Button,
-  Code,
-  Heading,
+  Callout,
+  Card,
+  CodeView,
   host,
   plugin,
   RadioGroup,
@@ -35,6 +36,7 @@ import {
   type OrcaNode
 } from 'orca'
 import {
+  ConsentNote,
   consentSentence,
   GatedAction,
   grantedCapabilities,
@@ -74,10 +76,15 @@ interface LaunchCompose {
   /** Where the sheet renders: a pushed detail view, or Home beside the handoff card. */
   from: 'detail' | 'home'
   item: LaunchItem
+  /** The handoff card's Next, quoted by its Resume prompt; null for the other acts. */
+  handoffNext: NextSummary | null
 }
 
-/** What the sheet is composing; null while nothing was pressed. */
-const launchCompose = atom<LaunchCompose | null>('launch-compose', null)
+/** What the sheet is composing; null while nothing was pressed. Held across the panel's runs,
+ *  as the detail stack is — device-local view state (Rulings Q2) — so the rail reopens with
+ *  the sheet where the person left it, and a check run can stand a sheet up from a seeded run.
+ *  Its reads are not held: they are asked again when a carried sheet draws (`setupLauncher`). */
+const launchCompose = atom<LaunchCompose | null>('launch-compose', null, { persist: 'plugin' })
 
 /** The handoff behind the prompt; null while its read is out or it failed. For a task this is
  *  the task's own newest linked session (`temper.launch.task-handoff`) — never the person's
@@ -112,9 +119,10 @@ const lastProjectByContext = atom<Record<string, string>>(
   { persist: 'plugin' }
 )
 
-/** Set while the launch request is out; the answer, once it lands — shown in the sheet. */
+/** Set while the launch request is out; the answer, once it lands — shown in the sheet, and
+ *  held with the sheet it answers. */
 const launchSending = atom('launch-sending', false)
-const launchOutcome = atom<LaunchOutput | null>('launch-outcome', null)
+const launchOutcome = atom<LaunchOutput | null>('launch-outcome', null, { persist: 'plugin' })
 
 /** The words on each button and sheet heading, per act. */
 const KIND_LABEL: Record<LaunchKind, string> = {
@@ -158,11 +166,32 @@ async function openLaunch(
   item: LaunchItem,
   handoffNext: NextSummary | null = null
 ): Promise<void> {
-  set(launchCompose, { kind, from, item })
+  const compose: LaunchCompose = { kind, from, item, handoffNext }
+  set(launchCompose, compose)
   set(launchOutcome, null)
+  await loadLaunch(compose)
+}
+
+/**
+ * A sheet carried over from the panel's last run owes its reads, as a carried detail does:
+ * it arrived without a press, so they are asked here. Its outcome stays as it was.
+ */
+export function setupLauncher(): void {
+  const carried = read(launchCompose)
+  if (carried !== null) {
+    void loadLaunch(carried)
+  }
+}
+
+/** The sheet's reads and its default picks, for the act it composes. */
+async function loadLaunch(compose: LaunchCompose): Promise<void> {
+  const { kind, item } = compose
   set(launchSending, false)
   set(launchChoices, null)
-  set(launchHandoff, kind === 'handoff-resume' ? { hasSession: true, session: null, next: handoffNext } : null)
+  set(
+    launchHandoff,
+    kind === 'handoff-resume' ? { hasSession: true, session: null, next: compose.handoffNext } : null
+  )
   set(launchPick, {
     destination: 'new-workspace',
     projectId: null,
@@ -292,21 +321,26 @@ async function confirmLaunch(): Promise<void> {
 }
 
 /** The press button — gated on the minimum consents; the sheet gates the destination further.
- *  It is its view's one primary act: solid accent, its icon beside its label. */
+ *  It is its view's one primary act: solid accent, its icon beside its label — until its
+ *  sheet is open, when the sheet's confirm is the primary act and the press steps back to
+ *  outline, so a view never holds two. */
 function LaunchButton(props: {
   kind: LaunchKind
   from: 'detail' | 'home'
   item: LaunchItem
   handoffNext?: NextSummary | null
+  named?: boolean
 }) {
+  const open = read(launchCompose)?.item.id === props.item.id
   return (
     <GatedAction
       needs={LAUNCH_PRESS_NEEDS}
       granted={read(grantedCapabilities)}
       label={KIND_LABEL[props.kind]}
-      variant="solid"
-      tone="accent"
+      variant={open ? 'outline' : 'solid'}
+      tone={open ? undefined : 'accent'}
       icon={props.kind === 'goal-work' ? 'rocket' : 'play'}
+      named={props.named}
       onPress={() => void openLaunch(props.kind, props.from, props.item, props.handoffNext ?? null)}
     />
   )
@@ -327,7 +361,8 @@ export function detailLaunchKind(detail: RecordDetail): LaunchKind | null {
         : null
 }
 
-/** A detail view's launcher press, for the view's act row; its sheet is `LauncherSheet`. */
+/** A detail view's launcher press, for the view's act row; its sheet is `LauncherSheet`, its
+ *  missing consent `DetailLaunchConsent`, under the row. */
 export function DetailLaunchButton(props: { detail: RecordDetail }): OrcaNode {
   const detail = props.detail
   const kind = detailLaunchKind(detail)
@@ -340,7 +375,15 @@ export function DetailLaunchButton(props: { detail: RecordDetail }): OrcaNode {
     title: detail.title,
     contextRef: detail.contextRef
   }
-  return <LaunchButton kind={kind} from="detail" item={item} />
+  return <LaunchButton kind={kind} from="detail" item={item} named={false} />
+}
+
+/** The detail's launcher press, when its consent is missing: said under the act row. */
+export function DetailLaunchConsent(props: { detail: RecordDetail }): OrcaNode {
+  const kind = detailLaunchKind(props.detail)
+  return kind === null ? undefined : (
+    <ConsentNote act={KIND_LABEL[kind]} needs={LAUNCH_PRESS_NEEDS} granted={read(grantedCapabilities)} />
+  )
 }
 
 /** The latest-handoff card's Resume (Home) — a session start from that session. Its sheet is
@@ -370,28 +413,69 @@ export function HandoffLaunchButton(props: {
   )
 }
 
-/** The sheet itself, rendered where the pressed button lives; undefined while nothing was pressed. */
-export function LauncherSheet(props: { from: 'detail' | 'home' }): OrcaNode {
-  const compose = read(launchCompose)
-  if (compose === null || compose.from !== props.from) {
+/** The words under a sheet's description, per answer: Orca's own for a refusal. */
+function OutcomeCallout(props: { outcome: LaunchOutput }): OrcaNode {
+  const outcome = props.outcome
+  if (outcome.state === 'launched') {
     return undefined
   }
+  return outcome.state === 'refused' ? (
+    <Callout tone="danger" title="Orca refused">
+      <Text size="sm">
+        {`${outcome.message}${outcome.code === null ? '' : ` (${outcome.code})`}`}
+      </Text>
+    </Callout>
+  ) : (
+    <Callout tone="warning" title="The launch never ran">
+      <Text size="sm">{outcome.message}</Text>
+    </Callout>
+  )
+}
+
+/** A launch read that failed inside the sheet: what was not read, in the region's house words. */
+function SheetReadFailure(props: { label: string; message: string }) {
+  return (
+    <Callout tone="warning" title={`${props.label} unavailable — nothing here was read.`}>
+      <Text muted size="xs">
+        {props.message}
+      </Text>
+    </Callout>
+  )
+}
+
+/**
+ * The sheet itself, rendered where the pressed button lives — for the item that press named
+ * (`itemId`), so a sheet opened on one record never stands on another; undefined while
+ * nothing was pressed. It is a card titled with its act; the prompt wraps, so every line the
+ * person confirms is readable; the confirm is the sheet's one solid accent act, Cancel ghost
+ * beside it, and why the confirm is dark stands under that row.
+ */
+export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }): OrcaNode {
+  const compose = read(launchCompose)
+  if (compose === null || compose.from !== props.from || compose.item.id !== props.itemId) {
+    return undefined
+  }
+  const title = KIND_LABEL[compose.kind]
   const outcome = read(launchOutcome)
   if (outcome !== null && outcome.state === 'launched') {
     return (
-      <Stack gap="xs">
-        <Text tone="success">✓ the agent was launched.</Text>
-        {outcome.linkError === null ? undefined : (
-          <Text tone="warning" size="xs">
-            {`⚠ the workspace's link to the item could not be stored: ${outcome.linkError}`}
-          </Text>
-        )}
-        <Row>
-          <Button variant="ghost" onPress={cancelLaunch}>
-            Close
-          </Button>
-        </Row>
-      </Stack>
+      <Card title={title}>
+        <Stack gap="sm">
+          <Callout tone="success" title="The agent was launched." />
+          {outcome.linkError === null ? undefined : (
+            <Callout tone="warning" title="The workspace's link to the item was not stored">
+              <Text muted size="xs">
+                {outcome.linkError}
+              </Text>
+            </Callout>
+          )}
+          <Row>
+            <Button variant="ghost" onPress={cancelLaunch}>
+              Close
+            </Button>
+          </Row>
+        </Stack>
+      </Card>
     )
   }
 
@@ -432,112 +516,114 @@ export function LauncherSheet(props: { from: 'detail' | 'home' }): OrcaNode {
             ? 'No workspace is focused in Orca.'
             : null
 
+  const sending = read(launchSending)
+  // Why the confirm is dark, said under the confirm row so Cancel stays aligned beside it:
+  // sending, a missing consent in Orca's words (warning), or a pick still owed (muted).
+  const reason: OrcaNode = sending ? (
+    <Text muted size="xs">
+      ◌ launching …
+    </Text>
+  ) : missing.length > 0 ? (
+    <Text tone="warning" size="xs">
+      {consentSentence(missing)}
+    </Text>
+  ) : unready !== null ? (
+    <Text muted size="xs">
+      {unready}
+    </Text>
+  ) : undefined
+  const ready = !sending && missing.length === 0 && unready === null
+
   return (
-    <Stack gap="sm">
-      <Heading level={3}>
-        {compose.kind === 'goal-work' ? 'Work this goal' : KIND_LABEL[compose.kind]}
-      </Heading>
-      <Text muted size="xs">
-        The first prompt — sent when you confirm, written to nothing but the agent.
-      </Text>
-      <Code block>{promptFor(compose)}</Code>
-      {wantsHandoff(compose.kind) && compose.kind !== 'handoff-resume' && read(launchChoices) === null ? (
-        <Text muted size="xs">
-          ◌ the task's own latest handoff rides along once it answers; with none linked, the
-          prompt says the task has no handoff yet.
-        </Text>
-      ) : undefined}
-      <RadioGroup
-        label="Where the agent works"
-        value={destination}
-        onChange={(value) =>
-          set(launchPick, {
-            ...current,
-            destination: value === 'this-workspace' ? 'this-workspace' : 'new-workspace'
-          })
-        }
-        options={[
-          {
-            value: 'new-workspace',
-            label: 'New workspace',
-            disabled: newWorkspaceBlocked,
-            description: newWorkspaceBlocked
-              ? consentSentence(['workspace:create'])
-              : 'a new branch and worktree in the picked project'
-          },
-          {
-            value: 'this-workspace',
-            label:
-              choices?.workspace != null
-                ? `This workspace — ${choices.workspace.name}`
-                : 'This workspace',
-            disabled: choices === null || choices.workspace === null,
-            description:
-              choices !== null && choices.workspace === null
-                ? 'No workspace is focused in Orca.'
-                : 'the agent launches in the workspace Orca has focused'
-          }
-        ]}
-      />
-      {destination !== 'new-workspace' ? undefined : projects === null ? (
-        <Text muted size="xs">◌ Reading Orca's projects…</Text>
-      ) : projects.state === 'failed' ? (
-        <Text tone="warning" size="xs">{`⚠ ${projects.message}`}</Text>
-      ) : (
-        <Select
-          label="Project"
-          placeholder="Choose a project"
-          value={current.projectId ?? undefined}
-          options={projectOptions}
-          onChange={(value) => set(launchPick, { ...current, projectId: value })}
-        />
-      )}
-      {agents === null ? (
-        <Text muted size="xs">◌ Reading what Orca can launch…</Text>
-      ) : agents.state === 'failed' ? (
-        <Text tone="warning" size="xs">{`⚠ ${agents.message}`}</Text>
-      ) : (
-        <Select
-          label="Agent"
-          placeholder="Choose an agent"
-          value={current.agent ?? undefined}
-          options={agentOptions}
-          onChange={(value) => set(launchPick, { ...current, agent: value })}
-        />
-      )}
-      {outcome === null ? undefined : outcome.state === 'refused' ? (
-        <Text tone="warning" size="xs">
-          {`⚠ Orca refused: ${outcome.message}${outcome.code === null ? '' : ` (${outcome.code})`}`}
-        </Text>
-      ) : (
-        <Text tone="warning" size="xs">{`⚠ the launch never ran: ${outcome.message}`}</Text>
-      )}
-      <Row gap="sm">
-        {read(launchSending) ? (
+    <Card
+      title={title}
+      description="The first prompt — sent when you confirm, written to nothing but the agent."
+    >
+      <Stack gap="sm">
+        <CodeView code={promptFor(compose)} wrap maxHeight="sm" label="first prompt" />
+        {wantsHandoff(compose.kind) && compose.kind !== 'handoff-resume' && choices === null ? (
           <Text muted size="xs">
-            ◌ launching …
+            ◌ the task's own latest handoff rides along once it answers; with none linked, the
+            prompt says the task has no handoff yet.
           </Text>
-        ) : missing.length > 0 ? (
-          <GatedAction needs={needs} granted={granted} label={KIND_LABEL[compose.kind]} />
-        ) : unready !== null ? (
-          <Stack gap="xs">
-            <Button disabled>{KIND_LABEL[compose.kind]}</Button>
-            <Text muted size="xs">
-              {unready}
-            </Text>
-          </Stack>
+        ) : undefined}
+        <RadioGroup
+          label="Where the agent works"
+          value={destination}
+          onChange={(value) =>
+            set(launchPick, {
+              ...current,
+              destination: value === 'this-workspace' ? 'this-workspace' : 'new-workspace'
+            })
+          }
+          options={[
+            {
+              value: 'new-workspace',
+              label: 'New workspace',
+              disabled: newWorkspaceBlocked,
+              description: newWorkspaceBlocked
+                ? consentSentence(['workspace:create'])
+                : 'a new branch and worktree in the picked project'
+            },
+            {
+              value: 'this-workspace',
+              label:
+                choices?.workspace != null
+                  ? `This workspace — ${choices.workspace.name}`
+                  : 'This workspace',
+              disabled: choices === null || choices.workspace === null,
+              description:
+                choices !== null && choices.workspace === null
+                  ? 'No workspace is focused in Orca.'
+                  : 'the agent launches in the workspace Orca has focused'
+            }
+          ]}
+        />
+        {destination !== 'new-workspace' ? undefined : projects === null ? (
+          <Text muted size="xs">◌ Reading Orca's projects…</Text>
+        ) : projects.state === 'failed' ? (
+          <SheetReadFailure label="Orca's projects" message={projects.message} />
         ) : (
-          <GatedAction
-            needs={needs}
-            granted={granted}
-            label={KIND_LABEL[compose.kind]}
-            onPress={confirmLaunch}
+          <Select
+            label="Project"
+            placeholder="Choose a project"
+            value={current.projectId ?? undefined}
+            options={projectOptions}
+            onChange={(value) => set(launchPick, { ...current, projectId: value })}
           />
         )}
-        <Button variant="ghost" onPress={cancelLaunch} disabled={read(launchSending)}>
-          Cancel
-        </Button>
-      </Row>
-    </Stack>
+        {agents === null ? (
+          <Text muted size="xs">◌ Reading what Orca can launch…</Text>
+        ) : agents.state === 'failed' ? (
+          <SheetReadFailure label="Orca's agents" message={agents.message} />
+        ) : (
+          <Select
+            label="Agent"
+            placeholder="Choose an agent"
+            value={current.agent ?? undefined}
+            options={agentOptions}
+            onChange={(value) => set(launchPick, { ...current, agent: value })}
+          />
+        )}
+        {outcome === null ? undefined : <OutcomeCallout outcome={outcome} />}
+        <Stack gap="xs">
+          <Row gap="sm" align="center">
+            <Button
+              variant="solid"
+              tone="accent"
+              icon={compose.kind === 'goal-work' ? 'rocket' : 'play'}
+              disabled={!ready}
+              onPress={ready ? confirmLaunch : undefined}
+            >
+              {title}
+            </Button>
+            <Button variant="ghost" onPress={cancelLaunch} disabled={sending}>
+              Cancel
+            </Button>
+          </Row>
+          {reason}
+        </Stack>
+      </Stack>
+    </Card>
   )
 }

@@ -42,12 +42,11 @@ test('with the consent withheld, the action is disabled and names it', async () 
   assert.equal(button?.props.onPress, undefined, 'the dark action carries no way to fire')
   // The refusal is in Orca's own words, verbatim — workspace:create's approval-time
   // description on Orca 1.4.264.
-  assert.ok(
-    mounted.find({
-      text: "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' consent."
-    }),
-    "the refusal names the missing consent in Orca's own words"
-  )
+  const sentence = mounted.find({
+    text: "Needs the 'Create workspaces (new Git branches and worktrees) in your projects, local and SSH; a project's setup script runs as its settings say' consent."
+  })
+  assert.ok(sentence, "the refusal names the missing consent in Orca's own words")
+  assert.equal(sentence.props.tone, 'warning', 'the withheld act is said in warning text')
   assert.deepEqual(mounted.errors, [])
 })
 
