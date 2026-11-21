@@ -25,6 +25,7 @@ interface RowFixture {
   context_ref: string | null
   updated: string
   changed_by_me_at?: string | null
+  managed_meta?: Record<string, unknown> | null
 }
 
 /** A ResourceListResponse answering with the given rows. */
@@ -404,8 +405,9 @@ test('recently updated covers everything readable, five rows, newest first', asy
   const requests: Request[] = []
   deps.run = async () => mintedToken()
   const rows = [
-    row('e1', 'A task', 'task'),
-    row('e2', 'A cogmap fact', 'fact', { context_ref: null })
+    row('e1', 'A task', 'task', { managed_meta: { 'temper-stage': 'in-progress' } }),
+    row('e2', 'A cogmap fact', 'fact', { context_ref: null }),
+    row('e3', 'A goal', 'goal', { managed_meta: { 'temper-status': 'active', 'temper-stage': '' } })
   ]
   deps.fetch = answering(listResponse(rows, 40), requests)
 
@@ -416,11 +418,13 @@ test('recently updated covers everything readable, five rows, newest first', asy
   if (answer.state !== 'ok') return
   assert.equal(answer.total, 40)
   assert.deepEqual(
-    answer.rows.map((item) => [item.title, item.docType, item.contextRef]),
+    answer.rows.map((item) => [item.title, item.docType, item.contextRef, item.stage]),
     [
-      ['A task', 'task', '+temper-dev/contrib'],
-      ['A cogmap fact', 'fact', null]
-    ]
+      ['A task', 'task', '+temper-dev/contrib', 'in-progress'],
+      ['A cogmap fact', 'fact', null, null],
+      ['A goal', 'goal', '+temper-dev/contrib', 'active']
+    ],
+    'a row carries its stage, else its status, from the managed meta the list answers'
   )
   const url = new URL(requests[0]?.url ?? '')
   assert.equal(url.searchParams.get('sort'), 'updated')

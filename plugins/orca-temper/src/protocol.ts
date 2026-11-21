@@ -47,6 +47,8 @@ export interface ResourceSummary {
   /** The home-context address; null for a cogmap-homed resource. */
   contextRef: string | null
   updated: string
+  /** The row's state in temper's word: a task's stage, else a goal's status; null for neither. */
+  stage: string | null
 }
 
 /** `temper.home.resume`: the one resource the person last changed, by their own change time. */

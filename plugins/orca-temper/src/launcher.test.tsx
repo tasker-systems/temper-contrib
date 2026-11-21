@@ -450,3 +450,37 @@ test('without workspace:create the new-workspace destination is named and the th
   assert.equal(served.launches[0].workspaceId, 'ws-current')
   assert.deepEqual(mounted.errors, [])
 })
+
+/** Document order from an element path: its index segments, compared left to right. */
+function drawnBefore(a: { path: string }, b: { path: string }): boolean {
+  const pa = a.path.match(/\d+/g)?.map(Number) ?? []
+  const pb = b.path.match(/\d+/g)?.map(Number) ?? []
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    if (pa[i] !== pb[i]) {
+      return (pa[i] ?? 0) < (pb[i] ?? 0)
+    }
+  }
+  return pa.length < pb.length
+}
+
+test('the handoff card\'s sheet opens below the card\'s omission sentence, outside the card', async () => {
+  const { host } = servedHost({})
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+
+  const resume = mounted.find({ type: 'Button', text: 'Resume' })
+  assert.equal(resume?.props.variant, 'solid', 'Resume is the card\'s one primary act')
+  assert.equal(resume?.props.tone, 'accent')
+  assert.equal(resume?.props.icon, 'play')
+  await mounted.press(resume!)
+  await mounted.settled()
+
+  const card = mounted.find({ type: 'Card', label: 'latest handoff' })
+  const omission = mounted.find({ text: '1 of 4 sessions of yours; 3 not shown.' })
+  const sheet = mounted.find({ type: 'Heading', text: 'Resume' })
+  assert.ok(card && omission && sheet, 'the card, its omission sentence and the sheet are drawn')
+  assert.ok(omission.path.startsWith(card.path), 'the omission sentence is the card\'s own')
+  assert.ok(!sheet.path.startsWith(card.path), 'the sheet stands outside the card')
+  assert.ok(drawnBefore(omission, sheet), 'the sheet opens after the omission sentence, never between')
+  assert.deepEqual(mounted.errors, [])
+})

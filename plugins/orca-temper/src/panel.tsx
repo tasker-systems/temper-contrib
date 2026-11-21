@@ -14,11 +14,18 @@
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
-// Region states carry their own words (◌ loading, — empty, ⚠ failed), the doc-type word
-// appears on rows instead of icons, and every list states its omission sentence and its order.
+// Region states carry their own words (◌ loading, — empty, ⚠ failed), and every list states
+// its omission sentence and its order. Orca's controls carry the look (./look.ts): a row wears
+// its doc-type icon beside the doc-type word, never instead of it; a region's count is a badge
+// on its heading; a row's state is words in its description; the detail's state is a badge
+// holding its word; one solid accent act per view, the rest outlined or ghost.
 import {
   atom,
+  Badge,
+  Box,
   Button,
+  Card,
+  Collapsible,
   EmptyState,
   Heading,
   host,
@@ -47,8 +54,18 @@ import {
   WAYS_IN
 } from '../vendor/temper-design.mjs'
 import { refreshGrantedCapabilities } from './capabilities'
-import { DetailLaunchActions, HandoffLaunchAction } from './launcher'
-import { OpenBodyAction } from './editor-room/open-body-action'
+import { DetailLaunchButton, HandoffLaunchButton, LauncherSheet } from './launcher'
+import { OpenBodyAnswer, OpenBodyButton } from './editor-room/open-body-action'
+import {
+  ACT_ICON,
+  docTypeIcon,
+  metaItems,
+  PLACE_ICON,
+  recordState,
+  rowDescription,
+  stateTone,
+  stateWord
+} from './look'
 import type {
   LatestHandoffOutput,
   LinkedTasksOutput,
@@ -319,13 +336,20 @@ function FailedRegion(props: { label: string; message: string }) {
   )
 }
 
-/** One resource row: the doc-type word leads its description — no icons. */
-function ResourceRow(props: { item: ResourceSummary; description?: string }) {
+/**
+ * One resource row: its doc-type icon, and the doc-type word leading its description — with the
+ * row's state in words unless the list's own heading already says it (`stateless`).
+ */
+function ResourceRow(props: { item: ResourceSummary; description?: string; stateless?: boolean }) {
   const item = props.item
   return (
     <ListItem
       title={item.title}
-      description={props.description ?? item.docType}
+      icon={docTypeIcon(item.docType)}
+      description={
+        props.description ??
+        (props.stateless === true ? item.docType : rowDescription(item.docType, item.stage))
+      }
       onPress={() =>
         pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: item.docType })
       }
@@ -363,6 +387,15 @@ function Region(props: {
 // The Start / Resume launcher lives in ./launcher.tsx; the detail view and Home place its
 // buttons only, along the ruled table (Rulings: Where Start and Resume appear).
 
+/** A region's heading: its label, its count a badge beside it. */
+function CountHeading(props: { label: string; count: number }) {
+  return (
+    <Heading level={3}>
+      {props.label} <Badge>{String(props.count)}</Badge>
+    </Heading>
+  )
+}
+
 /** Resume: the one resource the person last changed — nothing stands in its place if none. */
 function ResumeRegion() {
   const answer = read(resumeResult)
@@ -378,7 +411,8 @@ function ResumeRegion() {
           <List label="resume">
             <ListItem
               title={resume.resource.title}
-              description={resume.resource.docType}
+              icon={docTypeIcon(resume.resource.docType)}
+              description={rowDescription(resume.resource.docType, resume.resource.stage)}
               onPress={() =>
                 pushDetail({
                   id: resume.resource.id,
@@ -412,42 +446,51 @@ function HandoffRegion() {
     <Region answer={answer} label={HANDOFF_LABEL}>
       {answer === null || answer.state !== 'ok' ? undefined : (
         <Stack gap="sm">
-          <Heading level={3}>{HANDOFF_LABEL}</Heading>
           {handoff === null ? (
-            <Text muted size="xs">{`— No ${sessionScope}.`}</Text>
-          ) : (
             <Stack gap="sm">
-              <List label={HANDOFF_LABEL}>
-                <ListItem
-                  title={handoff.title}
-                  description="session"
-                  onPress={() =>
-                    pushDetail({
-                      id: handoff.id,
-                      ref: handoff.ref,
-                      title: handoff.title,
-                      docType: 'session'
-                    })
-                  }
-                />
-              </List>
-              {handoff.next === null ? undefined : (
-                <Stack gap="xs">
-                  <Text muted size="xs">{`excerpt · ${handoff.next.heading}`}</Text>
-                  <Text>{handoff.next.text}</Text>
-                  {handoff.next.truncated ? (
-                    <Text muted size="xs">
-                      … continues in the session.
-                    </Text>
-                  ) : undefined}
-                </Stack>
-              )}
-              <HandoffLaunchAction handoff={handoff} />
-              <Text muted size="xs">
-                {omissionSentence(answer.sessionCount, 1, sessionScope)}
-              </Text>
+              <Heading level={3}>{HANDOFF_LABEL}</Heading>
+              <Text muted size="xs">{`— No ${sessionScope}.`}</Text>
             </Stack>
+          ) : (
+            <Card title={HANDOFF_LABEL}>
+              <Stack gap="sm">
+                <List label={HANDOFF_LABEL}>
+                  <ListItem
+                    title={handoff.title}
+                    icon={docTypeIcon('session')}
+                    description="session"
+                    onPress={() =>
+                      pushDetail({
+                        id: handoff.id,
+                        ref: handoff.ref,
+                        title: handoff.title,
+                        docType: 'session'
+                      })
+                    }
+                  />
+                </List>
+                {handoff.next === null ? undefined : (
+                  <Box background="muted" radius="sm" padding="sm" gap="xs">
+                    <Text muted size="xs">{`excerpt · ${handoff.next.heading}`}</Text>
+                    <Text>{handoff.next.text}</Text>
+                    {handoff.next.truncated ? (
+                      <Text muted size="xs">
+                        … continues in the session.
+                      </Text>
+                    ) : undefined}
+                  </Box>
+                )}
+                <Row>
+                  <HandoffLaunchButton handoff={handoff} />
+                </Row>
+                <Text muted size="xs">
+                  {omissionSentence(answer.sessionCount, 1, sessionScope)}
+                </Text>
+              </Stack>
+            </Card>
           )}
+          {/* The sheet opens below the card, after its omission sentence — never between them. */}
+          {handoff === null ? undefined : <LauncherSheet from="home" />}
         </Stack>
       )}
     </Region>
@@ -462,7 +505,7 @@ function WayInRegion(props: { id: string }) {
     <Region answer={answer} label={label}>
       {answer !== null && answer.state === 'ok' ? (
         <Stack gap="sm">
-          <Heading level={3}>{`${answer.label} (${answer.total})`}</Heading>
+          <CountHeading label={answer.label} count={answer.total} />
           <Text muted size="xs">
             {WAY_IN_ORDER}
           </Text>
@@ -471,7 +514,7 @@ function WayInRegion(props: { id: string }) {
           ) : (
             <List label={answer.label}>
               {answer.rows.map((item) => (
-                <ResourceRow key={item.id} item={item} />
+                <ResourceRow key={item.id} item={item} stateless />
               ))}
             </List>
           )}
@@ -482,7 +525,12 @@ function WayInRegion(props: { id: string }) {
           )}
           {answer.rows.length < answer.total && answer.bound < WAY_IN_MAX ? (
             <Row>
-              <Button variant="ghost" onPress={() => void showMore(props.id)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={ACT_ICON.showMore}
+                onPress={() => void showMore(props.id)}
+              >
                 Show more
               </Button>
             </Row>
@@ -500,7 +548,7 @@ function PlacesRegion() {
     <Region answer={answer} label="places">
       {answer !== null && answer.state === 'ok' ? (
         <Stack gap="sm">
-          <Heading level={3}>{`places (${answer.total})`}</Heading>
+          <CountHeading label="places" count={answer.total} />
           <Text muted size="xs">
             {PLACES_ORDER}
           </Text>
@@ -512,6 +560,7 @@ function PlacesRegion() {
                 <ListItem
                   key={place.ref}
                   title={place.name}
+                  icon={PLACE_ICON}
                   description={place.ref}
                 >
                   <RelativeTime at={Date.parse(place.lastChangedAt)} muted />
@@ -535,7 +584,7 @@ function RecentRegion() {
     <Region answer={answer} label="recently updated">
       {answer !== null && answer.state === 'ok' ? (
         <Stack gap="sm">
-          <Heading level={3}>{`recently updated (${answer.total})`}</Heading>
+          <CountHeading label="recently updated" count={answer.total} />
           <Text muted size="xs">
             {WAY_IN_ORDER}
           </Text>
@@ -548,7 +597,9 @@ function RecentRegion() {
                   key={item.id}
                   item={item}
                   description={
-                    item.contextRef === null ? item.docType : `${item.docType} · ${item.contextRef}`
+                    item.contextRef === null
+                      ? rowDescription(item.docType, item.stage)
+                      : `${rowDescription(item.docType, item.stage)} · ${item.contextRef}`
                   }
                 />
               ))}
@@ -603,7 +654,7 @@ function Frame() {
     <Stack gap="md">
       <Row justify="between">
         <Heading>Temper</Heading>
-        <Button variant="ghost" icon="refresh" onPress={refresh} disabled={read(loading)}>
+        <Button variant="ghost" icon={ACT_ICON.refresh} onPress={refresh} disabled={read(loading)}>
           Refresh
         </Button>
       </Row>
@@ -631,40 +682,53 @@ function Frame() {
   )
 }
 
-/** A pushed detail view: out, refused, failed, or answered with its meta and its way out. */
+/**
+ * A pushed detail view: out, refused, failed, or answered. The header names the doc type, the
+ * record's state as a badge holding its word, and the title; the acts stand in one row — the
+ * launcher press the one solid accent act, Open body and Open in temper outlined — with the
+ * launcher's sheet under them; the meta closes the view, collapsed.
+ */
 function DetailView(props: { entry: DetailEntry }) {
   const answer = read(detailResults)[props.entry.id] ?? null
   const ok = answer !== null && answer.state === 'ok'
   const detail = ok ? answer.detail : null
+  const state = detail === null ? null : recordState(detail)
   return (
     <Stack gap="md">
       <Row>
-        <Button variant="ghost" onPress={popDetail}>
+        <Button variant="ghost" size="sm" onPress={popDetail}>
           Back
         </Button>
       </Row>
-      <Stack gap="sm">
-        <Text muted size="xs">
-          {props.entry.docType}
-        </Text>
-        <Heading>{detail === null ? props.entry.title : detail.title}</Heading>
-        <Text muted size="xs">
-          {detail === null ? props.entry.ref : detail.ref}
-        </Text>
+      <Stack gap="xs">
+        <Row gap="xs" align="center">
+          <Text muted size="xs">
+            {props.entry.docType}
+          </Text>
+          {state === null ? undefined : <Badge tone={stateTone(state)}>{stateWord(state)}</Badge>}
+        </Row>
+        <Heading level={2}>{detail === null ? props.entry.title : detail.title}</Heading>
       </Stack>
-      <RecordDetailRegion answer={answer} fallbackRef={props.entry.ref} />
-      {detail === null ? undefined : <DetailLaunchActions detail={detail} />}
+      <Stack gap="xs">
+        <Row gap="xs" wrap>
+          {detail === null ? undefined : <DetailLaunchButton detail={detail} />}
+          <OpenBodyButton id={props.entry.id} />
+          <WayOutButton id={props.entry.id} />
+        </Row>
+        <OpenBodyAnswer id={props.entry.id} />
+        <WayOutNote id={props.entry.id} />
+      </Stack>
+      {detail === null ? undefined : <LauncherSheet from="detail" />}
+      <RecordDetailRegion answer={answer} />
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />
       ) : undefined}
-      <OpenBodyAction id={props.entry.id} />
-      <WayOut id={props.entry.id} />
     </Stack>
   )
 }
 
 /** The meta region of a pushed detail: its own state, then the rows in temper-ui's order. */
-function RecordDetailRegion(props: { answer: RecordDetailOutput | null; fallbackRef: string }) {
+function RecordDetailRegion(props: { answer: RecordDetailOutput | null }) {
   const answer = props.answer
   if (answer === null) {
     return <Text muted size="xs">◌ Loading the record…</Text>
@@ -681,7 +745,12 @@ function RecordDetailRegion(props: { answer: RecordDetailOutput | null; fallback
       </Stack>
     )
   }
-  return <KeyValue label="meta" items={answer.detail.properties} />
+  const items = metaItems(answer.detail)
+  return (
+    <Collapsible title="meta" description={items.map((item) => item.label).join(', ')}>
+      <KeyValue label="meta" items={items} />
+    </Collapsible>
+  )
 }
 
 /** A goal's linked tasks: the `advances` edges, labelled "linked tasks", never "all tasks". */
@@ -705,7 +774,7 @@ function LinkedTasksRegion(props: { goal: DetailEntry }) {
   }
   return (
     <Stack gap="sm">
-      <Heading level={3}>{`${LINKED_TASKS_SCOPE} (${answer.total})`}</Heading>
+      <CountHeading label={LINKED_TASKS_SCOPE} count={answer.total} />
       {answer.rows.length === 0 ? (
         <Text muted size="xs">{`— No ${LINKED_TASKS_SCOPE}.`}</Text>
       ) : (
@@ -724,26 +793,32 @@ function LinkedTasksRegion(props: { goal: DetailEntry }) {
   )
 }
 
-/** The way out: opens the record in temper through the person's web-address setting. */
-function WayOut(props: { id: string }) {
+/** The way out: opens the record in temper through the person's web-address setting. A
+ *  secondary act, outlined; disabled, and named under the row, while the setting is unset. */
+function WayOutButton(props: { id: string }) {
+  const url = wayOutUrl(read(webUrlSetting), props.id)
+  return url === null ? (
+    <Button disabled variant="outline" icon={ACT_ICON.openInTemper}>
+      Open in temper
+    </Button>
+  ) : (
+    <Button variant="outline" icon={ACT_ICON.openInTemper} onPress={() => void openInTemper(url)}>
+      Open in temper
+    </Button>
+  )
+}
+
+/** What the way out is for, and — while it cannot open — the setting that lights it. */
+function WayOutNote(props: { id: string }) {
   const url = wayOutUrl(read(webUrlSetting), props.id)
   return (
     <Stack gap="xs">
       <Text muted size="xs">The full record opens in temper — only the meta shows here.</Text>
       {url === null ? (
-        <Stack gap="xs">
-          <Button disabled variant="outline">
-            Open in temper
-          </Button>
-          <Text muted size="xs">
-            Set 'Temper web address' in the plugin's settings — the address is never guessed.
-          </Text>
-        </Stack>
-      ) : (
-        <Button variant="outline" onPress={() => void openInTemper(url)}>
-          Open in temper
-        </Button>
-      )}
+        <Text muted size="xs">
+          Set 'Temper web address' in the plugin's settings — the address is never guessed.
+        </Text>
+      ) : undefined}
     </Stack>
   )
 }

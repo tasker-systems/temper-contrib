@@ -12,14 +12,21 @@ import * as panel from './panel'
 let mounted: TestPanel | undefined
 afterEach(() => mounted?.unmount())
 
-function item(suffix: string, title: string, docType: string, contextRef: string | null = '+temper-dev/contrib') {
+function item(
+  suffix: string,
+  title: string,
+  docType: string,
+  contextRef: string | null = '+temper-dev/contrib',
+  stage: string | null = null
+) {
   return {
     id: `00000000-0000-7000-8000-0000000000${suffix}`,
     ref: `row-00000000-0000-7000-8000-0000000000${suffix}`,
     title,
     docType,
     contextRef,
-    updated: '2026-11-20T01:00:00Z'
+    updated: '2026-11-20T01:00:00Z',
+    stage
   }
 }
 
@@ -103,7 +110,10 @@ test('orca_home_shows_the_persons_in_force_state', async () => {
   assert.ok(mounted.find({ text: 'the one resource you last changed' }), 'resume says what it is')
 
   // The latest handoff, beside the lists: the session, and its Next section quoted as written.
-  assert.ok(mounted.find({ text: 'latest handoff' }), 'the handoff is named as both surfaces name it')
+  assert.ok(
+    mounted.find({ type: 'Card', label: 'latest handoff' }),
+    'the handoff is a card, named as both surfaces name it'
+  )
   assert.ok(mounted.find({ label: 'The latest session note' }), 'the newest session is on the panel')
   assert.ok(mounted.find({ text: 'excerpt · Next steps' }), 'the excerpt names its section')
   assert.ok(
@@ -116,25 +126,25 @@ test('orca_home_shows_the_persons_in_force_state', async () => {
   )
 
   // The ways in, under their shared names, each counted and ordered, each saying what it omits.
-  assert.ok(mounted.find({ text: 'goals (2)' }), 'the goals way-in is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 2' }), 'the goals way-in is counted')
   assert.ok(mounted.find({ label: 'Goal one' }), 'Goal one is on the panel')
   assert.ok(mounted.find({ text: 'All 2 active goals of yours.' }), 'the goals omission sentence is on the panel')
-  assert.ok(mounted.find({ text: 'in progress (1)' }), 'the in-progress way-in is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 1' }), 'the in-progress way-in is counted')
   assert.ok(mounted.find({ label: 'Task in progress one' }), 'the task is on the panel')
   assert.ok(mounted.find({ text: 'All 1 tasks in progress of yours.' }), 'the tasks omission sentence is on the panel')
-  assert.ok(mounted.find({ text: 'sessions (1)' }), 'the sessions way-in is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'sessions 1' }), 'the sessions way-in is counted')
   assert.ok(mounted.find({ text: 'All 1 sessions of yours.' }), 'the sessions omission sentence is on the panel')
   const orderNotes = mounted.findAll({ text: 'most recently updated first' })
   assert.ok(orderNotes.length >= 4, 'every updated-ordered list states its order')
 
   // Places: the contexts the person changed something in, ordered by their own latest change.
-  assert.ok(mounted.find({ text: 'places (1)' }), 'the places region is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'places 1' }), 'the places region is counted')
   assert.ok(mounted.find({ label: 'contrib-workflows' }), 'the place is on the panel')
   assert.ok(mounted.find({ text: 'by your latest change in each' }), 'the places order is stated')
   assert.ok(mounted.find({ text: 'All 1 places you changed something in.' }), 'the places omission sentence is on the panel')
 
   // Recently updated: across everything readable, and it says so.
-  assert.ok(mounted.find({ text: 'recently updated (2)' }), 'recently updated is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'recently updated 2' }), 'recently updated is counted')
   assert.ok(mounted.find({ label: 'A task' }), 'a recent row is on the panel')
   assert.ok(mounted.find({ text: 'All 2 resources you can read.' }), 'recently updated says what it covers')
 
@@ -165,7 +175,7 @@ test('Show more grows a way in in place, and stops at the cap', async () => {
   mounted = await mount(panel, { host })
 
   // The default bound, and the sentence saying what it omits.
-  assert.ok(mounted.find({ text: 'goals (250)' }), 'the goals way-in is counted against the total')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 250' }), 'the goals way-in is counted against the total')
   assert.ok(mounted.find({ text: '8 of 250 active goals of yours; 242 not shown.' }), 'the omission sentence is on the panel')
   assert.ok(mounted.find({ text: 'Show more' }), 'Show more is offered')
   assert.ok(mounted.find({ label: 'Goal 8' }), 'the eighth row is on the panel')
@@ -176,7 +186,7 @@ test('Show more grows a way in in place, and stops at the cap', async () => {
   assert.equal(seenBounds[seenBounds.length - 1], 16, 'the press asked for one step more')
   assert.ok(mounted.find({ label: 'Goal 16' }), 'the grown list shows the new rows')
   assert.ok(mounted.find({ text: '16 of 250 active goals of yours; 234 not shown.' }), 'the omission sentence grew with it')
-  assert.ok(mounted.find({ text: 'in progress (0)' }), 'the other way in was left as it was')
+  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'the other way in was left as it was')
 
   // Grown to the cap, Show more stops being offered — past it is never this panel's read.
   seenBounds.length = 0
@@ -217,7 +227,63 @@ test('a way in that fails while Show more presses keeps its failure, not its row
     mounted.find({ text: '⚠ goals unavailable — nothing here was read.' }),
     'the failing growth names what failed'
   )
-  assert.ok(mounted.find({ text: 'in progress (0)' }), 'the other way in is untouched')
+  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'the other way in is untouched')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
+})
+
+test('Home wears the look: counts as badges, doc-type icons, row states in words, Show more small', async () => {
+  const host = mockHost({
+    requests: {
+      'temper.capabilities': () => ({ granted: ['settings:own'] }),
+      'temper.home.resume': () => ({
+        state: 'ok',
+        resume: {
+          resource: item('r1', 'The task I changed', 'task', '+temper-dev/contrib', 'in-progress'),
+          changedAt: '2026-11-20T02:00:00Z'
+        }
+      }),
+      'temper.home.handoff': () => ({ state: 'ok', sessionCount: 0, handoff: null }),
+      'temper.home.way-in': (input: { id: string; bound: number }) =>
+        input.id === 'goals'
+          ? wayInAnswer('goals', Array.from({ length: 12 }, (_, i) => `Goal ${i + 1}`), 12, input.bound)
+          : wayInAnswer(input.id, [], 0, input.bound),
+      'temper.home.places': () => ({
+        state: 'ok',
+        rows: [{ ref: '+temper-dev/contrib', name: 'contrib', lastChangedAt: '2026-11-20T03:00:00Z' }],
+        total: 1
+      }),
+      'temper.home.recent': () => ({
+        state: 'ok',
+        rows: [item('e1', 'A recent task', 'task', '+temper-dev/contrib', 'backlog')],
+        total: 1
+      })
+    }
+  })
+  mounted = await mount(panel, { host })
+
+  const heading = mounted.find({ type: 'Heading', text: 'goals 12' })
+  assert.notEqual(heading, null, 'the count rides the heading')
+  const badge = mounted.find({ type: 'Badge', text: '12' })
+  assert.ok(badge && heading && badge.path.startsWith(heading.path), 'as a badge in it')
+
+  const resume = mounted.find({ type: 'ListItem', label: 'The task I changed' })
+  assert.equal(resume?.props.icon, 'hammer')
+  assert.equal(resume?.props.description, 'task · in progress', 'the stage is words, not a row badge')
+  const goal = mounted.find({ type: 'ListItem', label: 'Goal 1' })
+  assert.equal(goal?.props.icon, 'flag')
+  assert.equal(goal?.props.description, 'goal', 'a way in names no state its heading already says')
+  const recent = mounted.find({ type: 'ListItem', label: 'A recent task' })
+  assert.equal(recent?.props.description, 'task · backlog · +temper-dev/contrib')
+  assert.equal(mounted.find({ type: 'ListItem', label: 'contrib' })?.props.icon, 'folder')
+  for (const row of mounted.findAll({ type: 'ListItem' })) {
+    assert.equal(mounted.findAll({ type: 'Badge' }).some((b) => b.path.startsWith(row.path)), false, 'no row carries a badge')
+  }
+
+  const more = mounted.find({ type: 'Button', text: 'Show more' })
+  assert.equal(more?.props.variant, 'ghost')
+  assert.equal(more?.props.size, 'sm')
+  assert.equal(more?.props.icon, 'expand')
+  assert.deepEqual(mounted.errors, [])
+  assert.deepEqual(mounted.warnings, [])
 })

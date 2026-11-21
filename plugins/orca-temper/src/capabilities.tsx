@@ -6,7 +6,7 @@
 // the host's `grantedCapabilities` (a request away, below); the panel fills the one atom here,
 // and every gated action reads it. An unanswered request leaves the atom empty, which lights
 // nothing: the safe direction.
-import { atom, Button, plugin, read, set, Stack, Text, type Press } from 'orca'
+import { atom, Button, plugin, read, set, Stack, Text, type IconName, type Press, type Tone } from 'orca'
 
 /** The host's consent kinds for this plugin, as the worker's `temper.capabilities` answers. */
 export type GrantedCapabilities = readonly string[]
@@ -84,18 +84,21 @@ export function GatedAction(props: {
   label: string
   onPress?: Press
   variant?: 'solid' | 'outline' | 'ghost'
+  /** Weight only: the label always carries the act. */
+  tone?: Tone
+  icon?: IconName
 }) {
   const missing = missingConsents(props.needs, props.granted)
   if (missing.length === 0) {
     return (
-      <Button onPress={props.onPress} variant={props.variant}>
+      <Button onPress={props.onPress} variant={props.variant} tone={props.tone} icon={props.icon}>
         {props.label}
       </Button>
     )
   }
   return (
     <Stack gap="xs">
-      <Button disabled variant={props.variant}>
+      <Button disabled variant={props.variant} tone={props.tone} icon={props.icon}>
         {props.label}
       </Button>
       <Text muted size="xs">

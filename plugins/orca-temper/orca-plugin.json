@@ -15,7 +15,7 @@
       {
         "id": "orca-temper",
         "title": "Temper",
-        "icon": "flag",
+        "icon": "layers",
         "entry": "src/panel.tsx",
         "ui": "components"
       }

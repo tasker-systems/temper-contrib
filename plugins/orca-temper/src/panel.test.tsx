@@ -14,7 +14,8 @@ function item(suffix: string, title: string, docType: string, contextRef: string
     title,
     docType,
     contextRef,
-    updated: '2026-11-20T01:00:00Z'
+    updated: '2026-11-20T01:00:00Z',
+    stage: null
   }
 }
 
@@ -79,7 +80,7 @@ test('shows the refusal text when the worker reports temper is not connected', a
   const state = mounted.find({ type: 'EmptyState' })
   assert.match(String(state?.props.description), /sign in with the temper CLI/)
   assert.equal(mounted.find({ label: 'Goal one' }), null)
-  assert.equal(mounted.find({ text: 'goals (0)' }), null, 'no region claims a count over a refusal')
+  assert.equal(mounted.find({ type: 'Heading', text: 'goals 0' }), null, 'no region claims a count over a refusal')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
@@ -109,7 +110,7 @@ test('a failed region names what failed beside the regions that answered', async
     'the failed region names what failed, never showing as empty'
   )
   assert.equal(mounted.find({ text: '— No sessions of yours.' }), null, 'a failure never shows as empty')
-  assert.ok(mounted.find({ text: 'goals (0)' }), 'the regions that answered still render')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 0' }), 'the regions that answered still render')
   assert.equal(mounted.find({ type: 'EmptyState' }), null, 'one failure is not the signed-out refusal')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])

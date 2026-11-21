@@ -34,6 +34,14 @@ person works in, and recently updated — every list with its omission sentence 
   omission sentence — labelled "linked tasks", the `advances` edges, never "all tasks" — and
   the way out: "Open in temper" lights only on the person's https:// `webUrl` setting and opens
   `<webUrl>/vault/r/<id>` with `shell.openExternal`, never derived from the API origin.
+- The look is Orca's own controls (`src/look.ts`): a row wears its doc-type icon beside the
+  doc-type word and says its state in words ("task · in progress"); a region's count is a badge
+  on its heading; the latest handoff is a card, its Resume sheet opening below the card; a
+  detail's header is the doc-type word, the state as a badge holding its word, then the title;
+  one solid accent act per view, the others outlined; the meta sits collapsed, without the
+  repeated `doc_type` row and with `updated` as a time. No icon or colour carries meaning alone.
+  The `look-*` scenarios in `src/panel.check.ts` render Home, a task's detail and a goal's
+  detail from fixtures, for `orca plugin shot . --scenario <name> --theme light|dark`.
 - The launcher (`src/launcher.tsx`, prompts in `src/prompts.ts`): a backlog task's detail gets
   **Start agent**, an in-progress one **Resume agent**, an active goal **Work this goal**, and
   the latest-handoff card on Home **Resume**. Each opens a sheet where the press happened with
