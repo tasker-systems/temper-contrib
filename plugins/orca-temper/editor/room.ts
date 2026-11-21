@@ -19,6 +19,7 @@
 // versions and offers carry-over, discard, or handing the disagreement to an agent.
 import type {
   BaseCheckOutput,
+  HandoffPlaceOutput,
   HeldBase,
   LocalSaveOutput,
   RebaseOutput,
@@ -101,6 +102,8 @@ export interface RoomDeps {
   save(id: string, text: string): Promise<SaveOutput>
   /** The worker's `temper.body.rebase`. */
   rebase(id: string, discard: boolean): Promise<RebaseOutput>
+  /** The worker's `temper.body.handoff-place`: the view workspace's project and the absolute view path. */
+  place(workspaceId: string, path: string): Promise<HandoffPlaceOutput>
   /** The launcher's `temper.launch.agents`. */
   agents(): Promise<LaunchAgentsOutput>
   /** The launcher's `temper.launch.go`. */
@@ -116,7 +119,10 @@ export interface Room {
   carryOver(): Promise<void>
   /** After a refused save: the person's text is dropped for the current version. */
   discard(): Promise<void>
-  /** After a refused save: carries over, then hands the three versions to an agent here. */
+  /**
+   * After a refused save: carries over, then hands the three versions to an agent started in a
+   * new workspace of the view's project; it writes its proposal into this view's file.
+   */
   handOff(agent: string, intent: string): Promise<void>
   dispose(): void
 }
@@ -335,14 +341,28 @@ export function openRoom(deps: RoomDeps, draw: (state: RoomState) => void): Room
     const { versions } = state.save
     const { header } = state.view
     const held = state.base.held
-    const prompt = viewHandoffPrompt(intent, versions, header.title, held.path)
+    // Where the agent starts (ruling 25): a new workspace in the view workspace's project, and
+    // the view file by its absolute path. A place that cannot be named starts nothing and
+    // moves nothing.
+    let place: HandoffPlaceOutput
+    try {
+      place = await deps.place(held.workspaceId, held.path)
+    } catch (error) {
+      place = { state: 'refused', message: error instanceof Error ? error.message : String(error) }
+    }
+    if (place.state !== 'ok') {
+      if (state === null || state.kind !== 'record' || state.save.kind !== 'stale') return
+      emit({ ...state, save: { ...state.save, note: `The agent did not start: ${place.message}` } })
+      return
+    }
+    const prompt = viewHandoffPrompt(intent, versions, header.title, place.path)
     // The agent reconciles onto the current version, so the view moves onto it first.
     if (!(await moveOnto(false))) return
     let launched: LaunchOutput
     try {
       launched = await deps.launch({
-        destination: 'this-workspace',
-        workspaceId: held.workspaceId,
+        destination: 'new-workspace',
+        projectId: place.projectId,
         agent,
         prompt,
         item: { id: header.id, ref: header.ref, title: header.title, contextRef: null }
@@ -353,7 +373,7 @@ export function openRoom(deps: RoomDeps, draw: (state: RoomState) => void): Room
     if (state === null || state.kind !== 'record') return
     const note =
       launched.state === 'launched'
-        ? `Handed to ${agent}: it reconciles in the view file against temper's current version. Review the difference, then Save.`
+        ? `Handed to ${agent}, started in a new workspace, ${launched.workspaceName ?? launched.workspaceId}, beside ${place.workspace}. Its proposal will appear in this view's difference, against temper's current version: review it, then Save.`
         : `Your text is now worked against temper's current version, but the agent did not start: ${launched.message}`
     emit({ ...state, save: { kind: 'idle', note }, freshness: { kind: 'checking' } })
     await recheck()

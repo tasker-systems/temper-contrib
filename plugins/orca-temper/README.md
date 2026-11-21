@@ -68,8 +68,7 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   guessing; a link without one offers no Reopen. It is offered on a task's detail, one per
   linked workspace carrying a session, labelled with the workspace's name. A link whose
   workspace is removed (`workspace.removed`, or missing from a complete `workspace.list`) is
-  dropped. `agent.launch` (into the named workspace) is used only by the editor room's "Hand
-  to an agent", whose agent works on the view file in that workspace.
+  dropped. No launch goes through `agent.launch`: every one makes a new workspace.
 - **Open body** on a record's detail (lit by `workspace:read`, `workspace:write` and
   `storage:own`) opens the record's body in an Orca editor tab of the focused workspace, beside
   the person's view (`src/editor-room/`). The worker reads the record with its body and
@@ -92,8 +91,11 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   reopening never write to temper, and the view says when the file on disk holds a local save
   temper does not have. A save temper refuses as stale writes nothing and shows the base, the
   person's version and temper's current, with carry-over, discard, or handing the three to an
-  agent in the workspace (the desktop's refused-save prompt, `vendor/desktop-handoff.ts`, sent
-  through `temper.launch.go`'s `agent.launch`). Witnesses: `orca_only_a_save_reaches_temper` and
+  agent (the desktop's refused-save prompt, `vendor/desktop-handoff.ts`). The agent starts in a
+  new workspace of the view workspace's project, through `temper.launch.go`'s
+  `workspace.create`; `temper.body.handoff-place` names that project and the view file's
+  absolute path from `workspace.list`, and the prompt names the file by that path, so the
+  agent's proposal lands in the view's difference. Witnesses: `orca_only_a_save_reaches_temper` and
   `orca_stale_save_writes_nothing` in `editor/save.test.ts`.
 - The settings are the API origin override and the "Temper web address" (`webUrl`); the
   context-scoped settings and reads were retired when Home became person-scoped (the design

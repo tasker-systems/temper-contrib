@@ -43,6 +43,7 @@ function follow(text: string) {
       local: async () => ({ state: 'clean' }),
       save: async () => ({ state: 'failed', message: 'this test saves nothing' }),
       rebase: async () => ({ state: 'failed', message: 'this test rebases nothing' }),
+      place: async () => ({ state: 'refused', message: 'this test hands nothing off' }),
       agents: async () => ({ state: 'ok', agents: [] }),
       launch: async () => ({ state: 'failed', message: 'this test launches nothing' })
     },

@@ -239,14 +239,14 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   // One launch. The press itself writes nothing to temper — the prompt the person saw goes to
   // workspace.create in the picked project, the host re-checks every consent itself, and a
-  // refused call comes back as what Orca said. The launcher sends only new-workspace (decision
-  // ruling 23): Orca's agent.launch drops its prompt today (stablyai/orca#41107). agent.launch
-  // is the editor room's "Hand to an agent" alone, whose agent must work in the workspace the
-  // view file lives in. On success the workspace ↔ item link lands in the plugin's own storage
+  // refused call comes back as what Orca said. Every launch makes a new workspace — the
+  // launcher's (decision ruling 23) and the editor room's "Hand to an agent" (ruling 25), in the
+  // view workspace's project: Orca's agent.launch drops its prompt today (stablyai/orca#41107).
+  // The new workspace is named as Orca then lists it. On success the workspace ↔ item link lands in the plugin's own storage
   // with the agent and its terminal, so its session can be learned for Reopen agent; a link
   // that cannot be stored rides along as `linkError` and never takes the launch back.
   orca.panels.handle('temper.launch.go', async (input: LaunchInput): Promise<LaunchOutput> => {
-    if (input.destination !== 'new-workspace' && input.destination !== 'this-workspace') {
+    if (input.destination !== 'new-workspace') {
       return { state: 'failed', message: `unknown launch destination: ${String(input.destination)}` }
     }
     if (typeof input.agent !== 'string' || input.agent.trim() === '') {
@@ -258,33 +258,20 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (!UUID.test(String(input.item?.id ?? ''))) {
       return { state: 'failed', message: 'a bare UUID names the item, and none was sent' }
     }
-    if (input.destination === 'new-workspace' && (typeof input.projectId !== 'string' || input.projectId.trim() === '')) {
+    if (typeof input.projectId !== 'string' || input.projectId.trim() === '') {
       return { state: 'failed', message: 'a new workspace needs the picked project, and none was sent' }
-    }
-    if (input.destination === 'this-workspace' && (typeof input.workspaceId !== 'string' || input.workspaceId.trim() === '')) {
-      return { state: 'failed', message: 'this workspace was named by no id' }
     }
 
     let workspaceId: string
     let terminalId: string | null = null
     try {
-      if (input.destination === 'new-workspace') {
-        const created = await orca.host.call('workspace.create', {
-          projectId: input.projectId as string,
-          agent: input.agent,
-          prompt: input.prompt
-        })
-        workspaceId = created.workspaceId
-        terminalId = created.terminalId ?? null
-      } else {
-        const launched = await orca.host.call('agent.launch', {
-          workspaceId: input.workspaceId as string,
-          agent: input.agent,
-          prompt: input.prompt
-        })
-        workspaceId = input.workspaceId as string
-        terminalId = launched.terminalId
-      }
+      const created = await orca.host.call('workspace.create', {
+        projectId: input.projectId,
+        agent: input.agent,
+        prompt: input.prompt
+      })
+      workspaceId = created.workspaceId
+      terminalId = created.terminalId ?? null
     } catch (error) {
       return {
         state: 'refused',
@@ -307,7 +294,15 @@ export default function activate(orca: OrcaWorkerApi): void {
     } catch (error) {
       linkError = error instanceof Error ? error.message : String(error)
     }
-    return { state: 'launched', workspaceId, terminalId, linkError }
+    // The name the person knows the workspace by; a list that fails or lacks it names none.
+    let workspaceName: string | null = null
+    try {
+      const listed = await orca.host.call('workspace.list')
+      workspaceName = listed.workspaces.find((entry) => entry.id === workspaceId)?.name ?? null
+    } catch {
+      workspaceName = null
+    }
+    return { state: 'launched', workspaceId, workspaceName, terminalId, linkError }
   })
 
   // The workspaces an item is linked to, named as Orca lists them — the sheet names them

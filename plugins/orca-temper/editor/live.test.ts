@@ -143,6 +143,7 @@ async function openedTab() {
       local: (id) => worker.request('temper.body.local', { id }),
       save: (id, text) => worker.request('temper.body.save', { id, text }),
       rebase: (id, discard) => worker.request('temper.body.rebase', { id, discard }),
+      place: (workspaceId, path) => worker.request('temper.body.handoff-place', { workspaceId, path }),
       agents: () => worker.request('temper.launch.agents'),
       launch: (input) => worker.request('temper.launch.go', input)
     },
