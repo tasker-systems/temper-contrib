@@ -5,7 +5,18 @@
 // them with no answers in hand: unchecked, never resolved by a guess.
 import { prepareMarkdown, sanitizeMarkdownHtml } from '../vendor/temper-design-frame.mjs'
 
-/** Sanitized HTML for a body, for the `.md-body` wrapper the frame draws it in. */
+/**
+ * Sanitized HTML for a body, for the `.md-body` wrapper the frame draws it in, with every
+ * `<style>` element removed — HTML and SVG alike. The sanitizer drops `style` attributes but
+ * admits `<style>` elements, and a record's own CSS must not restyle its body or anything
+ * beside it; the frame also renders the body in its own shadow root (`view.ts`).
+ */
 export function renderBody(markdown: string): string {
-  return sanitizeMarkdownHtml(prepareMarkdown(markdown))
+  const holder = document.createElement('template')
+  holder.innerHTML = sanitizeMarkdownHtml(prepareMarkdown(markdown))
+  // A type selector matches `style` in every namespace, so this takes SVG's too.
+  for (const style of Array.from(holder.content.querySelectorAll('style'))) {
+    style.remove()
+  }
+  return holder.innerHTML
 }

@@ -4,15 +4,19 @@
 import { JSDOM } from 'jsdom'
 import { assert, test } from 'orca/testing'
 
-const dom = new JSDOM('<!doctype html><html><body></body></html>')
+// One window for every DOM test in this run: the sanitizer binds to the first window it sees.
 const globals = globalThis as unknown as Record<string, unknown>
-for (const name of ['window', 'document', 'Element', 'Node', 'DocumentFragment', 'NodeFilter', 'HTMLElement']) {
-  globals[name] = name === 'window' ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]
+if (globals.document === undefined) {
+  const dom = new JSDOM('<!doctype html><html><body></body></html>')
+  for (const name of ['window', 'document', 'Element', 'Node', 'DocumentFragment', 'NodeFilter', 'HTMLElement']) {
+    globals[name] = name === 'window' ? dom.window : (dom.window as unknown as Record<string, unknown>)[name]
+  }
 }
+const frameWindow = globals.window as Window & typeof globalThis
 const { renderBody } = await import('./render')
 
 function parse(html: string): Document {
-  return new dom.window.DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+  return new frameWindow.DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
 }
 
 test('the default view renders headings, lists and code through the sanitizer', () => {
