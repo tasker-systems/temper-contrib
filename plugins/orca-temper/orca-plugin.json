@@ -1,6 +1,6 @@
 {
   "manifestVersion": 2,
-  "id": "orca-temper",
+  "id": "temper",
   "name": "Temper",
   "version": "0.1.0",
   "description": "The person's temper in view from Orca: resume, the latest handoff, the ways in (goals, in progress, sessions), places and recently updated — temper-ui's home, list by list, read through the temper API on a credential borrowed from the temper CLI.",
@@ -13,7 +13,7 @@
   "contributes": {
     "panels": [
       {
-        "id": "orca-temper",
+        "id": "temper",
         "title": "Temper",
         "icon": "layers",
         "entry": "src/panel.tsx",
