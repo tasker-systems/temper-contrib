@@ -20,12 +20,14 @@ plugins/<pkg>/               # self-contained plugin packages
   tests/fixtures/            # conforming/ + broken/ open_meta payloads
 plugins/orca-temper/         # Orca plugin (code-bearing): orca-plugin.json, src/, vendor/,
                              # scripts/gates.sh; node_modules/ and .orca/ never committed
+orca-catalog.json            # Orca plugin catalog: publishes plugins/orca-temper as tasker-systems.temper
 apps/desktop/                # temper-desktop — Tauri app (SvelteKit UI in src/, Rust core in src-tauri/)
 docker/                      # local Linux environments matching CI jobs (see docker/*/README.md)
 Makefile.toml                # cargo-make: `check`, `test`, `fix`, `setup` across every package
 githooks/                    # selective pre-commit, pre-push test suites (core.hooksPath)
 tools/setup-claude-web.sh    # cloud-session SessionStart hook: toolchain + hooks
 tools/check-no-design-contract.sh  # refuses a copy of the theme contract (it lives in a package)
+tools/check-orca-catalog.sh  # the catalog against each manifest and pinned commit (witnesses: test-check-orca-catalog.sh)
 tools/test-conventions-witnesses.py  # seeds violations; the conventions check must refuse each
 .github/workflows/ci.yml     # the same gates, fanned into `CI Success`
 ```

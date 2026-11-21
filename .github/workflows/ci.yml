@@ -54,7 +54,7 @@ jobs:
         run: ./plugins/author-tools/scripts/lint.sh --self-check
 
   orca-temper:
-    name: Orca plugin (orca-temper types, tsc, plugin test, vendor reproducibility)
+    name: Orca plugin (orca-temper types, tsc, plugin test, vendor reproducibility, catalog)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -62,6 +62,9 @@ jobs:
       ORCA_DEB_SHA512: 8870e66a02e859adfab168d5659e7c145669be08abc00b1694aced5d431262e5072589a74579349ef291880a96a05752541bbc48a0fbc684ae4be5f65dd10dd3
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The catalog check needs every release's pinned commit in history.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -98,6 +101,15 @@ jobs:
       - name: orca plugin test
         run: orca-ide plugin test .
         working-directory: plugins/orca-temper
+
+      - name: orca plugin validate (the plugin folder)
+        run: orca-ide plugin validate plugins/orca-temper --json
+
+      - name: orca-catalog.json (orca plugin validate, entries against manifest and pinned commit)
+        run: |
+          set -euo pipefail
+          ./tools/check-orca-catalog.sh orca-catalog.json orca-ide
+          ./tools/test-check-orca-catalog.sh orca-ide
 
   desktop:
     name: Desktop (frontend + cargo check)

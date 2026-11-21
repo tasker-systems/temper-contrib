@@ -54,6 +54,7 @@ dependencies = [
   "shell-lint",
   "plugins-self-check",
   "orca-temper-check",
+  "orca-catalog",
   "design-contract-absent",
   "conventions",
   "workflows-lint",
@@ -258,6 +259,17 @@ args = ["install", "--frozen-lockfile"]
 description = "orca-temper: vendor build, Orca typings, tsc type-check (skips loudly when bun/orca are absent)"
 command = "./plugins/orca-temper/scripts/gates.sh"
 args = ["--check"]
+
+[tasks.orca-catalog]
+description = "orca-catalog.json: orca plugin validate, the plugin manifest validated, every entry matching its manifest and pinned commit, and the check's witnesses (skips loudly when orca is absent)"
+script = '''
+set -e
+if command -v orca >/dev/null 2>&1; then
+  orca plugin validate plugins/orca-temper --json >/dev/null
+fi
+./tools/check-orca-catalog.sh orca-catalog.json
+./tools/test-check-orca-catalog.sh
+'''
 
 [tasks.orca-temper-test]
 description = "orca-temper: orca plugin test (skips loudly when bun/orca are absent)"
