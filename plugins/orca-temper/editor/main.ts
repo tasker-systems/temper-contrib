@@ -1,44 +1,55 @@
-// The custom editor for `.temper.md` view files: a header naming the record and when its base
-// was read, then the body, read-only. Colours are Orca's own `--orca-*` variables, so the frame
-// follows the person's theme; no colour is literal here.
-import { follow, readTimeWords, type EditorView } from './sync'
+// The custom editor for `.temper.md` view files: a header naming the record, when its base was
+// read and whether temper has moved past it; the difference between that base and the working
+// text, as it happens; then the working text rendered as temper-ui renders a body. The frame
+// paints with temper-design's roles: the contract's stylesheets and the house theme matching
+// Orca's light or dark, all from the vendored package — no colour is literal here.
+//
+// This view edits nothing. Editing happens in Orca's own editor of the same file (the toolbar
+// switches to it), or on disk by an agent; each change reaches this frame through
+// `orca.document.onDidChange` and redraws the difference.
+import { heldBaseKey, type HeldBase } from '../src/editor-room/protocol'
+import { THEMES } from '../vendor/temper-design-frame.mjs'
+import { openRoom } from './room'
+import { FRAME_STYLES, roomView } from './view'
+
+const style = document.createElement('style')
+style.textContent = FRAME_STYLES
+document.head.append(style)
+
+/** The house theme for Orca's light or dark, by the package's own index. */
+function applyTheme(scheme: 'light' | 'dark'): void {
+  const theme = THEMES.find((entry) => entry.appearance === scheme) ?? THEMES[0]
+  if (theme) {
+    document.documentElement.dataset.theme = theme.name
+  }
+}
+applyTheme(document.documentElement.classList.contains('light') ? 'light' : 'dark')
+orca.on('theme', (theme) => applyTheme(theme.colorScheme))
 
 const root = document.createElement('main')
-root.style.cssText =
-  'box-sizing:border-box;min-height:100vh;margin:0;padding:16px 20px;' +
-  'color:var(--orca-foreground);background:var(--orca-background);font:13px system-ui,sans-serif'
-document.body.style.margin = '0'
+root.className = 'room'
 document.body.append(root)
+const draw = roomView(root, { openExternal: (href) => void orca.shell?.openExternal(href) })
 
-function draw(state: EditorView): void {
-  root.replaceChildren()
-  if (state.kind === 'unreadable') {
-    const message = document.createElement('p')
-    message.textContent = state.message
-    root.append(message)
-    return
-  }
-  const { header, body } = state.view
-
-  const kind = document.createElement('div')
-  kind.textContent = header.docType
-  kind.style.cssText = 'font-size:11px;opacity:0.7'
-
-  const title = document.createElement('h1')
-  title.textContent = header.title
-  title.style.cssText = 'font-size:18px;margin:4px 0'
-
-  const base = document.createElement('div')
-  base.textContent = `Base ${readTimeWords(header.readAt)} · read-only — editing and Save arrive later`
-  base.style.cssText = 'font-size:11px;opacity:0.7;margin-bottom:12px'
-
-  const text = document.createElement('pre')
-  text.textContent = body
-  text.style.cssText =
-    'white-space:pre-wrap;word-wrap:break-word;margin:0;padding-top:12px;' +
-    'border-top:1px solid var(--orca-border, currentColor);font:13px ui-monospace,monospace'
-
-  root.append(kind, title, base, text)
+const documentApi = orca.document
+if (!documentApi) {
+  throw new Error('this file runs as a custom editor')
 }
+const room = openRoom(
+  {
+    document: documentApi,
+    held: async (id) => (await orca.storage.get(heldBaseKey(id))) as HeldBase | null,
+    check: (id) => orca.plugin.request('temper.body.base', { id }),
+    every: (ms, tick) => {
+      const timer = setInterval(tick, ms)
+      return () => clearInterval(timer)
+    }
+  },
+  draw
+)
 
-follow(draw)
+// Focus asks again: the person looking at the tab is when "behind" matters most.
+window.addEventListener('focus', () => void room.recheck())
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') void room.recheck()
+})
