@@ -66,7 +66,10 @@ function behindState(body: string): RoomState {
       },
       change: diffLines(BASE, body)
     },
-    freshness: { kind: 'behind', checkedAt: '2026-11-20T17:52:00Z', updatedAt: '2026-11-20T17:45:00Z' }
+    text: body,
+    freshness: { kind: 'behind', checkedAt: '2026-11-20T17:52:00Z', updatedAt: '2026-11-20T17:45:00Z' },
+    local: { kind: 'unknown' },
+    save: { kind: 'idle', note: null }
   }
 }
 
@@ -81,7 +84,7 @@ function drawn(body: string) {
   const root = doc.createElement('main')
   root.className = 'room'
   doc.body.append(root)
-  roomView(root, { openExternal: () => {} })(behindState(body))
+  roomView(root, { openExternal: () => {}, save: () => {}, carryOver: () => {}, discard: () => {}, handOff: () => {} })(behindState(body))
 
   const chrome = {
     header: root.querySelector('header'),

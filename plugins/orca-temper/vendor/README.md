@@ -20,3 +20,8 @@ bun run build
 `temper-ts.d.mts` is not generated: it re-exports the package's own declarations so `tsc`
 type-checks the worker against the package while Orca runs the bundle. `temper-ts.entry.mjs` is
 the bundler's entry.
+
+`desktop-handoff.ts` is a byte copy of `apps/desktop/src/lib/handoff.ts`, the desktop's
+refused-save handoff prompt, made by the same `bun run build`: the body view's "Hand to an agent"
+composes the same prompt, and a plugin cannot import from outside its own folder. The gate's
+`git diff --exit-code vendor/` refuses a copy that drifts from the desktop's file.

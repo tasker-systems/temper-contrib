@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "build": "esbuild vendor/temper-ts.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-ts.mjs && esbuild vendor/temper-design.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-design.mjs && esbuild vendor/temper-design-frame.entry.mjs --bundle --platform=browser --format=esm --loader:.css=text --outfile=vendor/temper-design-frame.mjs",
+    "build": "esbuild vendor/temper-ts.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-ts.mjs && esbuild vendor/temper-design.entry.mjs --bundle --platform=neutral --format=esm --outfile=vendor/temper-design.mjs && esbuild vendor/temper-design-frame.entry.mjs --bundle --platform=browser --format=esm --loader:.css=text --outfile=vendor/temper-design-frame.mjs && cp ../../apps/desktop/src/lib/handoff.ts vendor/desktop-handoff.ts",
     "typecheck": "tsc -p ."
   },
   "dependencies": {

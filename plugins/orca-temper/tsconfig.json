@@ -12,5 +12,5 @@
       "orca-testing"
     ]
   },
-  "include": ["src", "editor", "vendor/temper-ts.d.mts", "vendor/temper-design.d.mts", "vendor/temper-design-frame.d.mts"]
+  "include": ["src", "editor", "vendor/temper-ts.d.mts", "vendor/temper-design.d.mts", "vendor/temper-design-frame.d.mts", "vendor/desktop-handoff.ts"]
 }
