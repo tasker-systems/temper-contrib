@@ -29,6 +29,7 @@ import {
 import type { RegionFailure } from '../protocol'
 import { GrantLostError, type TemperRead } from '../reads'
 import { registerBaseCheck } from './base-check'
+import { registerHandoffPlace } from './handoff-place'
 import { roomDeps } from './deps'
 import { registerSave } from './save'
 import {
@@ -270,4 +271,5 @@ export function registerEditorRoom(orca: OrcaWorkerApi, gate: Gate): void {
   orca.panels.handle('temper.body.open', (input: OpenBodyInput) => openBody(orca, gate, input))
   registerBaseCheck(orca, gate)
   registerSave(orca, gate)
+  registerHandoffPlace(orca)
 }

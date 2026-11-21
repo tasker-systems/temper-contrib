@@ -292,7 +292,7 @@ async function confirmLaunch(): Promise<void> {
     ...read(lastProjectByContext),
     [compose.item.contextRef ?? '']: pick.projectId
   })
-  // Always a new workspace (ruling 23): the launcher never sends this-workspace.
+  // Always a new workspace (ruling 23): the only destination there is.
   const input: LaunchInput = {
     destination: 'new-workspace',
     projectId: pick.projectId,

@@ -21,7 +21,7 @@
 //   temper.launch.task-handoff — the task's own newest linked session and its Next section —
 //                           never the person's latest (Review 1); feeds the task prompts
 //   temper.launch.go      — the launch itself: workspace.create with the prompt the person
-//                           saw (agent.launch only for the editor room's hand-off); stores the workspace ↔ item link in the
+//                           saw; stores the workspace ↔ item link in the
 //                           plugin's own storage on success. No temper write happens here
 //                           (Rulings Q3): temper changes only when the agent acts.
 //   temper.launch.links   — the workspaces an item is linked to, named as Orca lists them,
@@ -218,21 +218,18 @@ export interface LaunchItem {
 }
 
 /**
- * Where a launch lands the agent: a new workspace in a picked project (`workspace.create`) —
- * the launcher's only destination — or the workspace named (`agent.launch`), which only the
- * editor room's "Hand to an agent" sends, since its view file lives in that workspace. The
- * launcher sends only `new-workspace` (decision ruling 23): Orca's `agent.launch` drops its
- * prompt today (stablyai/orca#41107).
+ * Where a launch lands the agent: a new workspace in a picked project (`workspace.create`).
+ * It is the only destination — the launcher's (decision ruling 23) and the editor room's
+ * "Hand to an agent" (ruling 25), which picks the view workspace's project. Orca's
+ * `agent.launch` drops its prompt today (stablyai/orca#41107), so no launch goes through it.
  */
-export type LaunchDestination = 'new-workspace' | 'this-workspace'
+export type LaunchDestination = 'new-workspace'
 
 /** `temper.launch.go`: one launch, the prompt exactly as the person saw it. */
 export interface LaunchInput {
   destination: LaunchDestination
-  /** Required for `new-workspace`: the pick from `temper.launch.projects`. */
-  projectId?: string
-  /** Required for `this-workspace`: the editor room's view workspace. */
-  workspaceId?: string
+  /** The project the new workspace is made in: the launcher's pick, or the view's project. */
+  projectId: string
   agent: string
   prompt: string
   item: LaunchItem
@@ -241,8 +238,10 @@ export interface LaunchInput {
 export type LaunchOutput =
   | {
       state: 'launched'
-      /** The workspace the agent now runs in (created, or the one named). */
+      /** The workspace the agent now runs in, as `workspace.create` made it. */
       workspaceId: string
+      /** Its name as `workspace.list` gives it; null or absent when Orca did not list it after the create. */
+      workspaceName?: string | null
       terminalId: string | null
       /** Set when the launch landed but the link could not be stored (e.g. no storage:own). */
       linkError: string | null
@@ -367,7 +366,7 @@ declare module 'orca' {
     'temper.launch.projects': { output: LaunchProjectsOutput }
     /** The agents Orca can launch on this host. */
     'temper.launch.agents': { output: LaunchAgentsOutput }
-    /** One launch: workspace.create (or the editor room's agent.launch), then the local link. */
+    /** One launch: workspace.create, then the local link. */
     'temper.launch.go': { input: LaunchInput; output: LaunchOutput }
     /** The workspaces an item is linked to, named, each with its stored session or none. */
     'temper.launch.links': { input: LinkedWorkspacesInput; output: LinkedWorkspacesOutput }

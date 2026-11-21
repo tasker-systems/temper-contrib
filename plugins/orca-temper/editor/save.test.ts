@@ -8,9 +8,9 @@
 import { execFileSync } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 import { JSDOM } from 'jsdom'
-import { afterEach, assert, mockEditorHost, mockHost, mountWorker, test, type TestWorker } from 'orca/testing'
+import { afterEach, assert, hostError, mockEditorHost, mockHost, mountWorker, test, type TestWorker } from 'orca/testing'
 import { deps } from '../src/deps'
 import { roomDeps } from '../src/editor-room/deps'
 import { heldBaseKey, type HeldBase } from '../src/editor-room/protocol'
@@ -36,6 +36,8 @@ const BODY = '## Problem\n\nThe body, as temper stores it.\n\n## What to build\n
 const OPENED_AT = new Date('2026-11-20T17:38:00Z')
 const SAVED_AT = new Date('2026-11-20T18:05:00Z')
 const WORKSPACE_ID = 'fixture-repo::linked'
+const PROJECT_ID = 'fixture-repo'
+const NEW_WORKSPACE_ID = 'fixture-repo::handoff'
 
 function fakeToken(expiresAtSeconds: number): string {
   const encode = (value: object) =>
@@ -107,7 +109,8 @@ interface Seen {
   cli: string[][]
   sentBodies: string[]
   reads: Request[]
-  launches: { workspaceId: string; agent: string; prompt?: string }[]
+  /** Every `workspace.create` the worker made: the hand-off's launches. */
+  launches: { projectId: string; agent?: string; prompt?: string }[]
 }
 
 /** The CLI runs that would write to temper. */
@@ -167,13 +170,21 @@ function roomDepsFor(worker: TestWorker, document: RoomDeps['document']): RoomDe
     local: (id) => worker.request('temper.body.local', { id }),
     save: (id, text) => worker.request('temper.body.save', { id, text }),
     rebase: (id, discard) => worker.request('temper.body.rebase', { id, discard }),
+    place: (workspaceId, path) => worker.request('temper.body.handoff-place', { workspaceId, path }),
     agents: () => worker.request('temper.launch.agents'),
     launch: (input) => worker.request('temper.launch.go', input)
   }
 }
 
+interface TabOptions {
+  /** `workspace.create` refuses, as Orca would. */
+  refuseCreate?: boolean
+  /** Room deps the tab uses in place of the worker's, given the worker and the view folder. */
+  overrides?: (worker: TestWorker, folder: string) => Partial<RoomDeps>
+}
+
 /** The worker opened on the record, the view file on disk, and the tab following it. */
-async function openedTab() {
+async function openedTab(options: TabOptions = {}) {
   const path = await worktree()
   const seen: Seen = { cli: [], sentBodies: [], reads: [], launches: [] }
   signedIn(seen)
@@ -183,13 +194,19 @@ async function openedTab() {
     results: {
       'workspace.readContext': () => ({ workspaceId: WORKSPACE_ID, branch: 'linked', displayName: 'linked', terminals: [] }),
       'workspace.list': () => ({
-        workspaces: [{ id: WORKSPACE_ID, kind: 'worktree', name: 'linked', path, branch: 'linked', hostId: 'local' }],
+        workspaces: [
+          { id: WORKSPACE_ID, kind: 'worktree', name: 'linked', projectId: PROJECT_ID, path, branch: 'linked', hostId: 'local' },
+          ...(seen.launches.length > 0 && options.refuseCreate !== true
+            ? [{ id: NEW_WORKSPACE_ID, kind: 'worktree', name: 'handoff', projectId: PROJECT_ID, path: `${path}-handoff`, branch: 'handoff', hostId: 'local' }]
+            : [])
+        ],
         truncated: false
       }),
       'editor.open': () => ({ opened: true }),
-      'agent.launch': (params: { workspaceId: string; agent: string; prompt?: string }) => {
+      'workspace.create': (params: { projectId: string; agent?: string; prompt?: string }) => {
         seen.launches.push(params)
-        return { terminalId: 'terminal-1' }
+        if (options.refuseCreate === true) throw hostError('action_failed', 'the project has no base branch to work from')
+        return { workspaceId: NEW_WORKSPACE_ID, terminalId: 'terminal-1' }
       }
     }
   })
@@ -199,18 +216,18 @@ async function openedTab() {
   assert.equal(opened.state, 'opened', JSON.stringify(opened))
   if (opened.state !== 'opened') throw new Error('not opened')
   const file = join(path, opened.path)
-  const tab = await follow(worker, await readFile(file, 'utf8'))
-  return { ...tab, worker, seen, file }
+  const tab = await follow(worker, await readFile(file, 'utf8'), options.overrides?.(worker, path))
+  return { ...tab, worker, seen, file, host }
 }
 
 /** A tab on the view: the room following a mock editor host's document. */
-async function follow(worker: TestWorker, text: string) {
+async function follow(worker: TestWorker, text: string, overrides: Partial<RoomDeps> = {}) {
   const editor = mockEditorHost({ text })
   cleanups.push(() => editor.dispose())
   const states: RoomState[] = []
   const document = editor.orca.document
   if (!document) throw new Error('the mock editor host has no document')
-  const room: Room = openRoom(roomDepsFor(worker, document), (state) => states.push(state))
+  const room: Room = openRoom({ ...roomDepsFor(worker, document), ...overrides }, (state) => states.push(state))
   cleanups.push(() => room.dispose())
   await settle()
   return { editor, room, states }
@@ -429,36 +446,106 @@ test('discarding drops the person’s text for the current version, and writes n
   assert.equal(temper.body, theirs)
 })
 
-test('handing a refused save to an agent sends the desktop’s handoff prompt through agent.launch, here', async () => {
-  const { editor, room, states, seen, file } = await openedTab()
-  const original = await readFile(file, 'utf8')
+/** A tab whose save was just refused: the person's edit on disk, another writer's in temper. */
+async function refusedTab(options: TabOptions = {}) {
+  const tab = await openedTab(options)
+  const original = await readFile(tab.file, 'utf8')
   const edited = edit(original)
-  await writeFile(file, edited, 'utf8')
-  editor.replace(edited)
+  await writeFile(tab.file, edited, 'utf8')
+  tab.editor.replace(edited)
   await settle()
   const theirs = `${BODY}\n## Another writer's section\n`
   Object.assign(temper, { body: theirs, token: 'bt1.other' })
-  await room.save()
+  await tab.room.save()
   await settle()
+  assert.equal(lastRecord(tab.states).save.kind, 'stale', 'the save was refused')
+  return { ...tab, original, edited, theirs }
+}
+
+test('handing a refused save to an agent sends the desktop’s handoff prompt through workspace.create, in the view’s project', async () => {
+  const { room, states, seen, file, host, original, theirs } = await refusedTab()
 
   await room.handOff('claude', 'keep both sections')
   await settle()
   assert.equal(seen.launches.length, 1)
   const [launch] = seen.launches
-  assert.equal(launch?.workspaceId, WORKSPACE_ID)
+  assert.equal(launch?.projectId, PROJECT_ID, 'the new workspace is made in the view workspace’s project')
   assert.equal(launch?.agent, 'claude')
+  assert.deepEqual(host.callsOf('agent.launch'), [], 'a hand-off never goes through agent.launch')
   const prompt = launch?.prompt ?? ''
   assert.match(prompt, /^I was editing "The save room" in temper, but the document changed since I opened it/)
   assert.match(prompt, /Intent: keep both sections/)
   assert.ok(prompt.includes(`### What I had written (my draft)\n\n\`\`\`markdown\n${editedBody(original)}\n\`\`\``))
   assert.ok(prompt.includes(`### What the document reads now (the newer version)\n\n\`\`\`markdown\n${theirs}\n\`\`\``))
   assert.ok(prompt.includes(`### What the document read when I opened it (the base)\n\n\`\`\`markdown\n${BODY}\n\`\`\``))
-  assert.ok(prompt.includes(file), 'the prompt names the view file the agent works in')
+  assert.ok(file.startsWith('/'), 'the view file is named by an absolute path')
+  assert.ok(prompt.includes(`My draft is the view file \`${file}\`, in a different Orca workspace from the one you are in.`),
+    'the prompt names the view file by its absolute path and says the agent is elsewhere')
   // The agent reconciles onto the current version: the base moved there first.
   const state = lastRecord(states)
   assert.equal(state.base.kind === 'held' && state.base.held.body_token, 'bt1.other')
   assert.equal(state.save.kind, 'idle')
+  const note = state.save.kind === 'idle' ? state.save.note ?? '' : ''
+  assert.match(note, /^Handed to claude, started in a new workspace, handoff, beside linked\./, 'the note names where the agent was started')
+  assert.match(note, /Its proposal will appear in this view's difference/)
   assert.equal(temperWrites(seen).length, 1, 'handing off writes nothing to temper')
+})
+
+test('a held view path that is not absolute is resolved against the view workspace’s folder', async () => {
+  let held = ''
+  const { room, seen, file } = await refusedTab({
+    overrides: (worker, folder) => ({
+      held: async (id) => {
+        const stored = worker.host.data().storage[heldBaseKey(id)] as HeldBase | undefined
+        if (stored === undefined) return null
+        held = relative(folder, stored.path)
+        return { ...stored, path: held }
+      }
+    })
+  })
+  assert.ok(held !== '' && !held.startsWith('/'), 'the room holds a relative path')
+
+  await room.handOff('claude', '')
+  await settle()
+  const prompt = seen.launches[0]?.prompt ?? ''
+  assert.ok(prompt.includes(`My draft is the view file \`${file}\``), 'the relative path was resolved to the absolute one')
+  assert.ok(!prompt.includes(`\`${held}\``), 'the relative path is never sent as it was held')
+})
+
+test('a refused workspace.create says the agent did not start and leaves the text where it was', async () => {
+  const { room, states, seen, file, host, edited } = await refusedTab({ refuseCreate: true })
+
+  await room.handOff('claude', 'keep both sections')
+  await settle()
+  assert.equal(seen.launches.length, 1, 'the create was asked for once')
+  assert.deepEqual(host.callsOf('agent.launch'), [])
+  const state = lastRecord(states)
+  assert.equal(state.save.kind, 'idle')
+  const note = state.save.kind === 'idle' ? state.save.note ?? '' : ''
+  assert.match(note, /the agent did not start: .*no base branch/)
+  assert.equal(await readFile(file, 'utf8'), edited, 'the view file still holds the person’s text')
+  assert.equal(state.text, edited, 'and so does the view')
+  assert.equal(temperWrites(seen).length, 1, 'nothing reached temper')
+})
+
+test('a hand-off whose place cannot be named starts no agent and moves nothing', async () => {
+  const { room, states, seen, file, edited } = await refusedTab({
+    overrides: (worker) => ({
+      place: async (workspaceId, path) => {
+        const answer = await worker.request('temper.body.handoff-place', { workspaceId: `${workspaceId}-gone`, path })
+        return answer
+      }
+    })
+  })
+
+  await room.handOff('claude', '')
+  await settle()
+  assert.equal(seen.launches.length, 0, 'no workspace was created')
+  const state = lastRecord(states)
+  assert.equal(state.save.kind, 'stale', 'the three versions stay held: nothing moved')
+  assert.equal(state.base.kind === 'held' && state.base.held.body_token, 'bt1.first', 'the base did not move')
+  assert.match(state.save.kind === 'stale' ? state.save.note ?? '' : '', /^The agent did not start: Orca no longer lists the view's workspace/)
+  assert.equal(await readFile(file, 'utf8'), edited)
 })
 
 test('no save runs without a held body token: refused before the CLI runs', async () => {

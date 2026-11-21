@@ -4,9 +4,10 @@
 // `orca_start_names_the_task_and_its_handoff` makes in launcher.test.tsx); the workspace ↔ item
 // link lands in the plugin's own storage on success, with the agent and its terminal; a
 // refused launch answers with what Orca said and stores nothing; and no press ever calls
-// temper — neither the network nor the CLI runs during a launch (Rulings Q3). `agent.launch`
-// is not the launcher's (decision ruling 23); only the editor room's "Hand to an agent" sends
-// it, pinned here by its this-workspace test. Reopen agent's end: a link learns its
+// temper — neither the network nor the CLI runs during a launch (Rulings Q3). No launch goes
+// through `agent.launch` (decision rulings 23 and 25): the editor room's "Hand to an agent" is a
+// new-workspace launch too, and the created workspace is named as Orca lists it. A relaunch of
+// one workspace × item pair replaces its link. Reopen agent's end: a link learns its
 // session only from Orca naming the launch's own terminal, a removed workspace's links are
 // dropped, and `temper.reopen.go` calls `agent.resume` with the stored session.
 import { assert, mockHost, mountWorker, test, afterEach } from 'orca/testing'
@@ -98,12 +99,18 @@ test('a new-workspace launch calls workspace.create with the project, agent and 
   await worker.deactivate()
 })
 
-test('the editor room\'s this-workspace hand-off calls agent.launch and relinking replaces the pair', async () => {
+test('a launch names the created workspace as Orca lists it, and relinking the same pair replaces its link', async () => {
   const { temperRuns, requests } = noTemper()
   const host = mockHost({
     capabilities: GRANTED,
     results: {
-      'agent.launch': { terminalId: 't-here' }
+      'workspace.create': { workspaceId: 'ws-current', terminalId: 't-here' },
+      'workspace.list': {
+        workspaces: [
+          { id: 'ws-current', kind: 'worktree', name: 'the-handoff', projectId: 'proj-two', path: '/w/current', branch: 'b', hostId: 'local' }
+        ],
+        truncated: false
+      }
     },
     storage: {
       'launch-links': [
@@ -114,19 +121,14 @@ test('the editor room\'s this-workspace hand-off calls agent.launch and relinkin
   })
   const worker = await mountWorker(main, { host })
 
-  const answer = await worker.request(
-    'temper.launch.go',
-    launchInput({ destination: 'this-workspace', workspaceId: 'ws-current', projectId: undefined })
-  )
+  const answer = await worker.request('temper.launch.go', launchInput())
 
   assert.equal(answer.state, 'launched')
   if (answer.state !== 'launched') return
   assert.equal(answer.workspaceId, 'ws-current')
+  assert.equal(answer.workspaceName, 'the-handoff', 'the created workspace is named as Orca lists it')
   assert.equal(answer.terminalId, 't-here')
-  assert.deepEqual(host.callsOf('agent.launch'), [
-    { workspaceId: 'ws-current', agent: 'opencode', prompt: PROMPT }
-  ])
-  assert.deepEqual(host.callsOf('workspace.create'), [], 'no workspace was created')
+  assert.deepEqual(host.callsOf('agent.launch'), [], 'no launch goes through agent.launch')
   const links = host.data().storage['launch-links'] as Record<string, unknown>[]
   assert.equal(links.length, 2, 'the relaunched pair was replaced, the other workspace kept')
   const here = links.find((link) => link.workspaceId === 'ws-current')
@@ -134,6 +136,21 @@ test('the editor room\'s this-workspace hand-off calls agent.launch and relinkin
   assert.equal(temperRuns.count, 0)
   assert.equal(requests.length, 0)
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('the retired this-workspace destination fails before any Orca call', async () => {
+  const host = mockHost({ capabilities: GRANTED })
+  const worker = await mountWorker(main, { host })
+
+  const answer = await worker.request(
+    'temper.launch.go',
+    { ...launchInput(), destination: 'this-workspace', workspaceId: 'ws-current' } as unknown as LaunchInput
+  )
+
+  assert.equal(answer.state, 'failed')
+  assert.deepEqual(host.callsOf('agent.launch'), [])
+  assert.deepEqual(host.callsOf('workspace.create'), [])
   await worker.deactivate()
 })
 

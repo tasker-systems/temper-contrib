@@ -28,6 +28,11 @@
 //                      is rewritten to the current version too (the person's text is dropped).
 //                      Neither writes to temper.
 //
+//   temper.body.handoff-place — before a refused save is handed to an agent: the view
+//                      workspace's project (where `workspace.create` makes the agent's
+//                      workspace) and the view file's absolute path (what the prompt names),
+//                      both from `workspace.list`. Reads Orca only; writes nothing.
+//
 // `opened` names the file and the read time; `refused` says why nothing was written or opened,
 // in words the panel shows as they come; `not-connected` and `failed` are the rail's own.
 import type { RegionFailure } from '../protocol'
@@ -138,6 +143,26 @@ export type RebaseOutput =
   | { state: 'refused'; message: string }
   | RegionFailure
 
+export interface HandoffPlaceInput {
+  /** The view's workspace, as the held base names it. */
+  workspaceId: string
+  /** The view file, as the held base names it; resolved against the workspace when relative. */
+  path: string
+}
+
+export type HandoffPlaceOutput =
+  | {
+      state: 'ok'
+      /** The view workspace's project: the agent's new workspace is made in it. */
+      projectId: string
+      /** The view workspace's name. */
+      workspace: string
+      /** The view file's absolute path: what the agent writes its reconciliation into. */
+      path: string
+    }
+  /** No agent may be started; `message` says why. */
+  | { state: 'refused'; message: string }
+
 /** The held base, as plugin storage keeps it under `heldBaseKey(id)`. */
 export interface HeldBase {
   id: string
@@ -179,5 +204,7 @@ declare module 'orca' {
     'temper.body.save': { input: SaveInput; output: SaveOutput }
     /** After a refused save: the current version becomes the base; writes nothing to temper. */
     'temper.body.rebase': { input: RebaseInput; output: RebaseOutput }
+    /** Before a hand-off: the view workspace's project and the view file's absolute path. */
+    'temper.body.handoff-place': { input: HandoffPlaceInput; output: HandoffPlaceOutput }
   }
 }
