@@ -57,6 +57,7 @@ room = openRoom(
     local: (id) => orca.plugin.request('temper.body.local', { id }),
     save: (id, text) => orca.plugin.request('temper.body.save', { id, text }),
     rebase: (id, discard) => orca.plugin.request('temper.body.rebase', { id, discard }),
+    place: (workspaceId, path) => orca.plugin.request('temper.body.handoff-place', { workspaceId, path }),
     agents: () => orca.plugin.request('temper.launch.agents'),
     launch: (input) => orca.plugin.request('temper.launch.go', input)
   },

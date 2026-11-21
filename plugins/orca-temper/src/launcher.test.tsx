@@ -289,7 +289,7 @@ test('Resume task opens Start\'s sheet with the resume prompt and launches throu
   assert.equal(served.launches.length, 1)
   const launch = served.launches[0]
   assert.equal(launch.destination, 'new-workspace', 'Resume task goes through workspace.create')
-  assert.equal(launch.workspaceId, undefined, 'never into an existing workspace')
+  assert.ok(!('workspaceId' in launch), 'never into an existing workspace')
   assert.equal(launch.projectId, 'proj-two')
   assert.ok(launch.prompt.includes('Resume the task:'), 'the resume prompt asks for the task-resume flow')
   assert.ok(launch.prompt.includes('- Land the launcher gates'), 'the task\'s own Next section rides')
