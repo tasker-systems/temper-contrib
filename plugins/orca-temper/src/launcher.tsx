@@ -1,18 +1,27 @@
-// The launcher: one press on Start agent / Resume agent / Resume (the handoff card) / Work
-// this goal opens the sheet in place — where the press happened (a detail view, or Home's
-// latest-handoff card) — with the destination, the project and agent picks, and the prompt
-// the person reads before it is sent. Confirm sends exactly that prompt through the worker
-// (`temper.launch.go`), which launches the agent and stores the workspace ↔ item link in the
-// plugin's own storage; nothing is written to temper on any press (design record, Rulings
-// Q3): temper changes only when the agent acts. Consents gate by Q9's table: the press needs
-// `workspace:read` + `agent:launch`; "New workspace" names `workspace:create` when it lacks
-// it; a refused launch shows what Orca said, in the sheet.
+// The launcher: one press on Start agent / Resume task (a task's detail, or Home's
+// latest-handoff card) / Work this goal opens the sheet in place — where the press happened —
+// with the project and agent picks and the prompt the person reads before it is sent. Confirm
+// sends exactly that prompt through the worker (`temper.launch.go`), which creates a new
+// workspace with the agent in it (`workspace.create`) and stores the workspace ↔ item link in
+// the plugin's own storage; nothing is written to temper on any press (design record,
+// Rulings Q3): temper changes only when the agent acts. Consents gate by Q9's "Start, new
+// workspace" row: the press needs `workspace:read`, `workspace:create` and `agent:launch`;
+// a refused launch shows what Orca said, in the sheet.
+//
+// Decision ruling 23 splits Resume in two. Resume task is temper's resume — a fresh agent
+// oriented to the latest handoff — so it is Start's act with the resume prompt, into a new
+// workspace; when the item already has a linked workspace the sheet names it before the
+// confirm, so a second worktree for the same work is never made unawares. The launcher never
+// launches into an existing workspace (`agent.launch`): Orca's `agent.launch` drops its prompt
+// today (stablyai/orca#41107). Reopen
+// agent is Orca's resume — the same agent session, back in its workspace (`agent.resume`) —
+// offered on a task only where a stored link carries a session, labelled with the workspace's
+// name, with no temper prompt.
 //
 // Q5 is ruled (a) for now: the project is picked from `project.list` on each Start, and the
-// rail remembers the last pick per context in local view state. Defaults: Start defaults to
-// a new workspace; Resume defaults to this workspace when the task is already linked here
-// (the launch links in plugin storage name it). The agent is picked from what Orca can launch
-// on this host (`orca agent installed` — the host API has no enumeration). A task's prompt
+// rail remembers the last pick per context in local view state. The agent is picked from
+// what Orca can launch on this host (`orca agent installed` — the host API has no
+// enumeration). A task's prompt
 // quotes the task's own newest linked session's Next section — the session→task `advances`
 // edge — and says so when none exists; the person's newest session is never quoted in a
 // task's place (Review 1). The Home card's Resume keeps the person's newest session: it is
@@ -23,15 +32,12 @@ import {
   Callout,
   Card,
   CodeView,
-  host,
   plugin,
-  RadioGroup,
   read,
   Row,
   Select,
   set,
   Stack,
-  storage,
   Text,
   type OrcaNode
 } from 'orca'
@@ -52,23 +58,20 @@ import {
 } from './prompts'
 import type {
   LaunchAgentsOutput,
-  LaunchDestination,
   LaunchInput,
   LaunchItem,
-  LaunchLink,
   LaunchOutput,
   LaunchProjectsOutput,
+  LinkedWorkspace,
+  LinkedWorkspacesOutput,
   NextSummary,
-  RecordDetail
+  RecordDetail,
+  ReopenOutput
 } from './protocol'
-import {
-  LAUNCH_LINKS_KEY,
-  LAUNCH_NEW_WORKSPACE_NEEDS,
-  LAUNCH_PRESS_NEEDS,
-  LAUNCH_THIS_WORKSPACE_NEEDS
-} from './protocol'
+import { LAUNCH_PRESS_NEEDS, REOPEN_NEEDS } from './protocol'
 
-/** The act a sheet launches: the four ruled buttons. */
+/** The act a sheet launches: the ruled buttons (Resume task stands on a task and on the
+ *  handoff card, each with its own prompt). */
 export type LaunchKind = 'task-start' | 'task-resume' | 'goal-work' | 'handoff-resume'
 
 interface LaunchCompose {
@@ -95,17 +98,12 @@ const launchHandoff = atom<TaskHandoffInfo | null>('launch-handoff', null)
 interface LaunchChoices {
   projects: LaunchProjectsOutput
   agents: LaunchAgentsOutput
-  /** The focused workspace, when Orca names one (and workspace:read lets us ask). */
-  workspace: { id: string; name: string } | null
-  /** True when the item is already linked to the focused workspace (the resume default). */
-  linkedHere: boolean
 }
 
 const launchChoices = atom<LaunchChoices | null>('launch-choices', null)
 
 /** The sheet's current picks. */
 interface LaunchPick {
-  destination: LaunchDestination
   projectId: string | null
   agent: string | null
 }
@@ -127,9 +125,37 @@ const launchOutcome = atom<LaunchOutput | null>('launch-outcome', null, { persis
 /** The words on each button and sheet heading, per act. */
 const KIND_LABEL: Record<LaunchKind, string> = {
   'task-start': 'Start agent',
-  'task-resume': 'Resume agent',
+  'task-resume': 'Resume task',
   'goal-work': 'Work this goal',
-  'handoff-resume': 'Resume'
+  'handoff-resume': 'Resume task'
+}
+
+/**
+ * The workspaces each item is linked to, as the worker names them (`temper.launch.links`);
+ * null while the read is out. Read again each time an item's detail or sheet opens, and after
+ * a launch lands — links change outside the panel (a workspace removed, a session learned).
+ */
+const itemLinks = atom<Record<string, LinkedWorkspacesOutput | null>>('item-links', {})
+
+/** Asks the worker for one item's linked workspaces. A read that never answers is a failure. */
+export async function loadItemLinks(itemId: string): Promise<void> {
+  set(itemLinks, { ...read(itemLinks), [itemId]: read(itemLinks)[itemId] ?? null })
+  let answer: LinkedWorkspacesOutput
+  try {
+    answer = await plugin.request('temper.launch.links', { itemId })
+  } catch (error) {
+    answer = {
+      state: 'failed',
+      message: `the linked-workspaces read never answered: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  set(itemLinks, { ...read(itemLinks), [itemId]: answer })
+}
+
+/** One item's linked workspaces as last read; empty while out or failed. */
+function linksOf(itemId: string): LinkedWorkspace[] {
+  const answer = read(itemLinks)[itemId] ?? null
+  return answer !== null && answer.state === 'ok' ? answer.links : []
 }
 
 /** A task's start and resume name the task's own latest linked session in their prompt;
@@ -156,9 +182,8 @@ function promptFor(compose: LaunchCompose): string {
 
 /**
  * Opens the sheet for one press. The sheet draws at once; the launch reads (projects, agents,
- * the focused workspace, the stored links, the handoff when the prompt quotes one) resolve
- * into their atoms and re-render it. When the item is a task already linked to this
- * workspace, Resume defaults there (Q5); everything else defaults to a new workspace.
+ * the item's linked workspaces, the handoff when the prompt quotes one) resolve into their
+ * atoms and re-render it.
  */
 async function openLaunch(
   kind: LaunchKind,
@@ -192,14 +217,9 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
     launchHandoff,
     kind === 'handoff-resume' ? { hasSession: true, session: null, next: compose.handoffNext } : null
   )
-  set(launchPick, {
-    destination: 'new-workspace',
-    projectId: null,
-    agent: null
-  })
+  set(launchPick, { projectId: null, agent: null })
 
-  const orNull = (promise: Promise<unknown>): Promise<null | unknown> => promise.catch(() => null)
-  const [projects, agents, workspace, links, taskRead] = await Promise.all([
+  const [projects, agents, , taskRead] = await Promise.all([
     plugin.request('temper.launch.projects').catch(
       (): LaunchProjectsOutput => ({
         state: 'failed',
@@ -212,8 +232,7 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
         message: 'the agents request never answered'
       })
     ),
-    orNull(host.call('workspace.readContext')),
-    orNull(storage.get(LAUNCH_LINKS_KEY)),
+    loadItemLinks(item.id),
     // A task's prompt quotes the task's own newest linked session — the session→task
     // `advances` edge — never the person's latest (Review 1).
     kind === 'task-start' || kind === 'task-resume'
@@ -221,20 +240,7 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
       : Promise.resolve(null)
   ])
 
-  const focused =
-    workspace !== null &&
-    typeof workspace === 'object' &&
-    typeof (workspace as { workspaceId?: unknown }).workspaceId === 'string'
-      ? {
-          id: (workspace as { workspaceId: string }).workspaceId,
-          name: (workspace as { displayName: string }).displayName
-        }
-      : null
-  const linkRows = Array.isArray(links) ? (links as LaunchLink[]) : []
-  const linkedHere =
-    focused !== null &&
-    linkRows.some((link) => link.itemId === item.id && link.workspaceId === focused.id)
-  set(launchChoices, { projects, agents, workspace: focused, linkedHere })
+  set(launchChoices, { projects, agents })
 
   if (taskRead !== null && (taskRead as { state?: string }).state === 'ok') {
     const handoff = (taskRead as { handoff: { id: string; ref: string; title: string; next: NextSummary | null } | null }).handoff
@@ -261,10 +267,7 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
     agents.state === 'ok'
       ? (agents.agents.find((choice) => choice.isDefault) ?? agents.agents[0])?.id ?? null
       : null
-  // Resume defaults to this workspace only when the task is already linked here (Q5).
-  const destination: LaunchDestination =
-    kind === 'task-resume' && linkedHere ? 'this-workspace' : 'new-workspace'
-  set(launchPick, { destination, projectId, agent })
+  set(launchPick, { projectId, agent })
 }
 
 /** Closes the sheet without sending. */
@@ -282,34 +285,28 @@ async function confirmLaunch(): Promise<void> {
   const compose = read(launchCompose)
   const pick = read(launchPick)
   const choices = read(launchChoices)
-  if (compose === null || pick === null || choices === null || pick.agent === null) {
+  if (compose === null || pick === null || choices === null || pick.agent === null || pick.projectId === null) {
     return
   }
-  if (pick.destination === 'new-workspace' && pick.projectId === null) {
-    return
-  }
-  if (pick.destination === 'this-workspace' && choices.workspace === null) {
-    return
-  }
-  if (pick.destination === 'new-workspace' && pick.projectId !== null) {
-    set(lastProjectByContext, {
-      ...read(lastProjectByContext),
-      [compose.item.contextRef ?? '']: pick.projectId
-    })
-  }
+  set(lastProjectByContext, {
+    ...read(lastProjectByContext),
+    [compose.item.contextRef ?? '']: pick.projectId
+  })
+  // Always a new workspace (ruling 23): the launcher never sends this-workspace.
   const input: LaunchInput = {
-    destination: pick.destination,
-    ...(pick.destination === 'new-workspace' ? { projectId: pick.projectId ?? undefined } : {}),
-    ...(pick.destination === 'this-workspace'
-      ? { workspaceId: choices.workspace?.id ?? undefined }
-      : {}),
+    destination: 'new-workspace',
+    projectId: pick.projectId,
     agent: pick.agent,
     prompt: promptFor(compose),
     item: compose.item
   }
   set(launchSending, true)
   try {
-    set(launchOutcome, await plugin.request('temper.launch.go', input))
+    const outcome = await plugin.request('temper.launch.go', input)
+    set(launchOutcome, outcome)
+    if (outcome.state === 'launched') {
+      void loadItemLinks(compose.item.id)
+    }
   } catch (error) {
     set(launchOutcome, {
       state: 'failed',
@@ -320,7 +317,7 @@ async function confirmLaunch(): Promise<void> {
   }
 }
 
-/** The press button — gated on the minimum consents; the sheet gates the destination further.
+/** The press button — gated on the consents a new-workspace launch needs.
  *  It is its view's one primary act: solid accent, its icon beside its label — until its
  *  sheet is open, when the sheet's confirm is the primary act and the press steps back to
  *  outline, so a view never holds two. */
@@ -348,7 +345,7 @@ function LaunchButton(props: {
 
 /**
  * Which launcher act a detail gets: a backlog task Start agent, an in-progress one Resume
- * agent, an active goal Work this goal (the ruled buttons); anything else none — a stage the
+ * task, an active goal Work this goal (the ruled buttons); anything else none — a stage the
  * register does not name is not guessed into a launch.
  */
 export function detailLaunchKind(detail: RecordDetail): LaunchKind | null {
@@ -386,7 +383,7 @@ export function DetailLaunchConsent(props: { detail: RecordDetail }): OrcaNode {
   )
 }
 
-/** The latest-handoff card's Resume (Home) — a session start from that session. Its sheet is
+/** The latest-handoff card's Resume task (Home) — a session start from that session. Its sheet is
  *  `LauncherSheet from="home"`, placed by Home after the card's omission sentence. */
 export function HandoffLaunchButton(props: {
   handoff: {
@@ -482,12 +479,9 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
   const pick = read(launchPick)
   const choices = read(launchChoices)
   const granted = read(grantedCapabilities)
-  const destination: LaunchDestination = pick?.destination ?? 'new-workspace'
-  const current: LaunchPick = pick ?? { destination, projectId: null, agent: null }
-  const needs =
-    destination === 'new-workspace' ? LAUNCH_NEW_WORKSPACE_NEEDS : LAUNCH_THIS_WORKSPACE_NEEDS
-  const missing = missingConsents(needs, granted)
-  const newWorkspaceBlocked = missingConsents(['workspace:create'], granted).length > 0
+  const current: LaunchPick = pick ?? { projectId: null, agent: null }
+  const missing = missingConsents(LAUNCH_PRESS_NEEDS, granted)
+  const linked = linksOf(compose.item.id)
 
   const projects = choices?.projects ?? null
   const agents = choices?.agents ?? null
@@ -510,11 +504,9 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
       ? 'Reading what Orca can launch…'
       : current.agent === null
         ? 'Pick an agent.'
-        : destination === 'new-workspace' && current.projectId === null
+        : current.projectId === null
           ? 'Pick a project.'
-          : destination === 'this-workspace' && choices.workspace === null
-            ? 'No workspace is focused in Orca.'
-            : null
+          : null
 
   const sending = read(launchSending)
   // Why the confirm is dark, said under the confirm row so Cancel stays aligned beside it:
@@ -547,39 +539,11 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
             prompt says the task has no handoff yet.
           </Text>
         ) : undefined}
-        <RadioGroup
-          label="Where the agent works"
-          value={destination}
-          onChange={(value) =>
-            set(launchPick, {
-              ...current,
-              destination: value === 'this-workspace' ? 'this-workspace' : 'new-workspace'
-            })
-          }
-          options={[
-            {
-              value: 'new-workspace',
-              label: 'New workspace',
-              disabled: newWorkspaceBlocked,
-              description: newWorkspaceBlocked
-                ? consentSentence(['workspace:create'])
-                : 'a new branch and worktree in the picked project'
-            },
-            {
-              value: 'this-workspace',
-              label:
-                choices?.workspace != null
-                  ? `This workspace — ${choices.workspace.name}`
-                  : 'This workspace',
-              disabled: choices === null || choices.workspace === null,
-              description:
-                choices !== null && choices.workspace === null
-                  ? 'No workspace is focused in Orca.'
-                  : 'the agent launches in the workspace Orca has focused'
-            }
-          ]}
-        />
-        {destination !== 'new-workspace' ? undefined : projects === null ? (
+        <Text muted size="xs">
+          The agent works in a new workspace: a new branch and worktree in the picked project.
+        </Text>
+        {linked.length === 0 ? undefined : <LinkedWorkspaceNote links={linked} />}
+        {projects === null ? (
           <Text muted size="xs">◌ Reading Orca's projects…</Text>
         ) : projects.state === 'failed' ? (
           <SheetReadFailure label="Orca's projects" message={projects.message} />
@@ -625,5 +589,134 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
         </Stack>
       </Stack>
     </Card>
+  )
+}
+
+/**
+ * The item's linked workspaces, named in the sheet before the confirm: a second worktree for
+ * the same work is never made unawares (decision ruling 23). The confirm still makes a new
+ * one; Reopen agent, on the task's detail, is the way back into a linked one.
+ */
+function LinkedWorkspaceNote(props: { links: readonly LinkedWorkspace[] }): OrcaNode {
+  const names = props.links.map((link) => link.name)
+  const title =
+    names.length === 1
+      ? `Already linked to the workspace ${names[0]}`
+      : `Already linked to ${names.length} workspaces: ${names.join(', ')}`
+  return (
+    <Callout tone="neutral" icon="link" title={title}>
+      <Text size="sm">
+        Confirming makes another workspace for the same work; this one stays as it is.
+      </Text>
+    </Callout>
+  )
+}
+
+/** The last Reopen agent answer, for the item and workspace it was pressed on. */
+interface ReopenAnswer {
+  itemId: string
+  workspaceId: string
+  name: string
+  output: ReopenOutput | null
+}
+
+const reopenAnswer = atom<ReopenAnswer | null>('reopen-answer', null)
+
+/** Reopen agent: the stored session, back in its workspace. The worker reads the session
+ *  from its own stored link; the panel names only the item and the workspace. */
+async function reopen(itemId: string, link: LinkedWorkspace): Promise<void> {
+  const pending: ReopenAnswer = { itemId, workspaceId: link.workspaceId, name: link.name, output: null }
+  set(reopenAnswer, pending)
+  let output: ReopenOutput
+  try {
+    output = await plugin.request('temper.reopen.go', { itemId, workspaceId: link.workspaceId })
+  } catch (error) {
+    output = {
+      state: 'failed',
+      message: `the reopen request never answered: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  set(reopenAnswer, { ...pending, output })
+}
+
+/** The links on which Reopen agent is offered: those carrying a session (and its agent). */
+function reopenable(itemId: string): LinkedWorkspace[] {
+  return linksOf(itemId).filter((link) => link.sessionId !== null && link.agent !== null)
+}
+
+/**
+ * Reopen agent on a task's detail, one per linked workspace whose link carries a session,
+ * each labelled with the workspace's name — outlined beside the view's one solid act. Not on
+ * other records, and not where no link carries a session (a link without one offers none).
+ */
+export function ReopenButtons(props: { detail: RecordDetail }): OrcaNode {
+  if (props.detail.docType !== 'task') {
+    return undefined
+  }
+  const links = reopenable(props.detail.id)
+  if (links.length === 0) {
+    return undefined
+  }
+  const granted = read(grantedCapabilities)
+  return (
+    <>
+      {links.map((link) => (
+        <GatedAction
+          key={`reopen-${link.workspaceId}`}
+          needs={REOPEN_NEEDS}
+          granted={granted}
+          label={`Reopen agent — ${link.name}`}
+          variant="outline"
+          icon="agent"
+          named={false}
+          onPress={() => void reopen(props.detail.id, link)}
+        />
+      ))}
+    </>
+  )
+}
+
+/** Reopen agent's missing consent, under the act row, when Reopen is offered at all. */
+export function ReopenConsent(props: { detail: RecordDetail }): OrcaNode {
+  if (props.detail.docType !== 'task' || reopenable(props.detail.id).length === 0) {
+    return undefined
+  }
+  return <ConsentNote act="Reopen agent" needs={REOPEN_NEEDS} granted={read(grantedCapabilities)} />
+}
+
+/** What the last Reopen agent press answered, on the detail it was pressed on. */
+export function ReopenOutcome(props: { itemId: string }): OrcaNode {
+  const answer = read(reopenAnswer)
+  if (answer === null || answer.itemId !== props.itemId) {
+    return undefined
+  }
+  const output = answer.output
+  if (output === null) {
+    return (
+      <Text muted size="xs">
+        {`◌ reopening the agent in ${answer.name} …`}
+      </Text>
+    )
+  }
+  if (output.state === 'reopened') {
+    return (
+      <Callout
+        tone="success"
+        title={
+          output.started
+            ? `The agent session was reopened in ${answer.name}.`
+            : `The agent session is already running in ${answer.name}.`
+        }
+      />
+    )
+  }
+  return output.state === 'refused' ? (
+    <Callout tone="danger" title="Orca refused">
+      <Text size="sm">{`${output.message}${output.code === null ? '' : ` (${output.code})`}`}</Text>
+    </Callout>
+  ) : (
+    <Callout tone="warning" title="The reopen never ran">
+      <Text size="sm">{output.message}</Text>
+    </Callout>
   )
 }

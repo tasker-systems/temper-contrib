@@ -298,7 +298,7 @@ test('one solid accent primary act; Open body and Open in temper outlined, each 
   })
   await mounted.settled()
   const solid = mounted.findAll({ type: 'Button' }).filter((button) => button.props.variant === 'solid')
-  assert.deepEqual(solid.map((button) => button.text), ['Resume agent'], 'one primary act on the view')
+  assert.deepEqual(solid.map((button) => button.text), ['Resume task'], 'one primary act on the view')
   assert.equal(solid[0]?.props.tone, 'accent')
   assert.equal(solid[0]?.props.icon, 'play')
   const body = mounted.find({ type: 'Button', text: 'Open body' })

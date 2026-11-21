@@ -10,7 +10,10 @@
 // so Home, a task's detail and a goal's detail can be shot the same on any machine
 // (`orca plugin shot . --scenario look-home --theme dark`). Their ids are placeholders. The
 // `look-sheet*` scenarios stand the launcher sheet up from a seeded run (the sheet is held
-// across runs, as the detail stack is), each outcome with it; the `look-state-*` scenarios
+// across runs, as the detail stack is), each outcome with it — `look-sheet-linked` with the
+// task's linked workspace named before the confirm; `look-task-reopen` draws a task's detail
+// whose stored link carries a session, so Reopen agent stands beside Resume task; the
+// `look-state-*` scenarios
 // draw every region state: signed out, failed, loading, empty, and a withheld consent.
 import { defineCheck } from 'orca/testing'
 
@@ -98,6 +101,14 @@ const GOAL_DETAIL = {
   ]
 }
 
+/** A workspace the task is already linked to, its agent session stored. */
+const LINKED = {
+  workspaceId: 'ws-linked',
+  name: "temper-contrib · pt/the-rails-look",
+  agent: 'claude' as string | null,
+  sessionId: 'session-placeholder' as string | null
+}
+
 const LOOK = {
   capabilities: GRANTED,
   settings: { webUrl: 'https://temper.example' },
@@ -169,6 +180,7 @@ const LOOK = {
         { id: 'codex', name: 'Codex', isDefault: false }
       ]
     }),
+    'temper.launch.links': () => ({ state: 'ok' as const, links: [] as typeof LINKED[] }),
     'temper.launch.task-handoff': () => ({
       state: 'ok' as const,
       handoff: {
@@ -185,7 +197,7 @@ const LOOK = {
   }
 }
 
-/** The sheet Resume agent opens on the in-progress task's detail. */
+/** The sheet Resume task opens on the in-progress task's detail. */
 const TASK_SHEET = {
   kind: 'task-resume',
   from: 'detail',
@@ -255,7 +267,19 @@ export default defineCheck({
   'look-sheet': { ...LOOK, persisted: sheet() },
   // The sheet ready: the remembered project picked, the confirm lit.
   'look-sheet-ready': { ...LOOK, persisted: sheet(REMEMBERED) },
-  // The handoff card's Resume, its sheet under the card.
+  // The task already has a linked workspace: the sheet names it before the confirm.
+  'look-sheet-linked': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.launch.links': () => ({ state: 'ok' as const, links: [LINKED] }) },
+    persisted: sheet(REMEMBERED)
+  },
+  // A task whose stored link carries a session: Reopen agent, labelled with the workspace.
+  'look-task-reopen': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.launch.links': () => ({ state: 'ok' as const, links: [LINKED] }) },
+    persisted: seeded({ id: TASK_ID, docType: 'task' })
+  },
+  // The handoff card's Resume task, its sheet under the card.
   'look-sheet-home': {
     ...LOOK,
     persisted: {

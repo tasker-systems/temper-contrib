@@ -30,6 +30,10 @@
         "priority": "default"
       }
     ],
+    "events": [
+      { "on": "workspace.removed" },
+      { "on": "agent.status.changed" }
+    ],
     "settings": [
       {
         "key": "apiUrl",

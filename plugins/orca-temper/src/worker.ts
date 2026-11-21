@@ -7,6 +7,7 @@
 // guess, and never partial or cached region data; the panel shows the refusal text. A read that
 // fails any other way is that region's failure, beside the regions that answered.
 import type { OrcaWorkerApi } from 'orca/worker'
+import type { HostParams } from 'orca/host'
 import { createCliCredentials, TemperNotConnectedError } from './credentials'
 import { deps } from './deps'
 import {
@@ -31,19 +32,34 @@ import type {
   LaunchOutput,
   LaunchProjectsOutput,
   LinkedTasksInput,
+  LinkedWorkspacesInput,
+  LinkedWorkspacesOutput,
   LinkedTasksOutput,
   PlacesOutput,
   RecentOutput,
   RecordDetailInput,
   RecordDetailOutput,
   RegionFailure,
+  ReopenInput,
+  ReopenOutput,
   ResumeOutput,
   TaskHandoffInput,
   TaskHandoffOutput,
   WayInInput,
   WayInOutput
 } from './protocol'
-import { LAUNCH_LINKS_KEY } from './protocol'
+import {
+  dropRemovedWorkspace,
+  learnSessionFromEvent,
+  linkedWorkspaces,
+  readLinks,
+  storeLink
+} from './links'
+
+/** The agent kinds `agent.resume` takes; a link stores the kind the launch started. */
+type ResumableAgent = HostParams<'agent.resume'>['agent']
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const NOT_CONNECTED_MESSAGE =
   'temper is not connected — sign in with the temper CLI (`temper auth login`), then try again'
@@ -222,11 +238,13 @@ export default function activate(orca: OrcaWorkerApi): void {
   })
 
   // One launch. The press itself writes nothing to temper — the prompt the person saw goes to
-  // workspace.create (a new workspace in the picked project) or agent.launch (this workspace),
-  // the host re-checks every consent itself, and a refused call comes back as what Orca said.
-  // On success the workspace ↔ item link lands in the plugin's own storage, for item 7's
-  // launch hook to read later; a link that cannot be stored rides along as `linkError` and
-  // never takes the launch back.
+  // workspace.create in the picked project, the host re-checks every consent itself, and a
+  // refused call comes back as what Orca said. The launcher sends only new-workspace (decision
+  // ruling 23): Orca's agent.launch drops its prompt today (stablyai/orca#41107). agent.launch
+  // is the editor room's "Hand to an agent" alone, whose agent must work in the workspace the
+  // view file lives in. On success the workspace ↔ item link lands in the plugin's own storage
+  // with the agent and its terminal, so its session can be learned for Reopen agent; a link
+  // that cannot be stored rides along as `linkError` and never takes the launch back.
   orca.panels.handle('temper.launch.go', async (input: LaunchInput): Promise<LaunchOutput> => {
     if (input.destination !== 'new-workspace' && input.destination !== 'this-workspace') {
       return { state: 'failed', message: `unknown launch destination: ${String(input.destination)}` }
@@ -237,7 +255,7 @@ export default function activate(orca: OrcaWorkerApi): void {
     if (typeof input.prompt !== 'string' || input.prompt.trim() === '') {
       return { state: 'failed', message: 'no prompt was sent — the launch asks for the one the person saw' }
     }
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(input.item?.id ?? ''))) {
+    if (!UUID.test(String(input.item?.id ?? ''))) {
       return { state: 'failed', message: 'a bare UUID names the item, and none was sent' }
     }
     if (input.destination === 'new-workspace' && (typeof input.projectId !== 'string' || input.projectId.trim() === '')) {
@@ -277,31 +295,80 @@ export default function activate(orca: OrcaWorkerApi): void {
 
     let linkError: string | null = null
     try {
-      const existing = await orca.storage.get(LAUNCH_LINKS_KEY)
-      const rows = (Array.isArray(existing) ? existing : []).map((entry) =>
-        entry !== null && typeof entry === 'object' && !Array.isArray(entry)
-          ? (entry as Record<string, unknown>)
-          : {}
-      )
-      const links = rows.filter(
-        (entry) => typeof entry['workspaceId'] === 'string' && typeof entry['itemId'] === 'string'
-      ) as { [key: string]: string | null }[]
-      const link = {
+      await storeLink(orca, {
         workspaceId,
         itemId: input.item.id,
         ref: input.item.ref,
         contextRef: input.item.contextRef ?? null,
-        startedAt: new Date().toISOString()
-      }
-      await orca.storage.set(LAUNCH_LINKS_KEY, [
-        ...links.filter(
-          (entry) => !(entry['workspaceId'] === link.workspaceId && entry['itemId'] === link.itemId)
-        ),
-        link
-      ])
+        startedAt: new Date().toISOString(),
+        agent: input.agent,
+        terminalId
+      })
     } catch (error) {
       linkError = error instanceof Error ? error.message : String(error)
     }
     return { state: 'launched', workspaceId, terminalId, linkError }
   })
+
+  // The workspaces an item is linked to, named as Orca lists them — the sheet names them
+  // before a second workspace is made, and Reopen agent is offered on the ones that carry a
+  // session. Not a temper read: no grant gate.
+  orca.panels.handle(
+    'temper.launch.links',
+    async (input: LinkedWorkspacesInput): Promise<LinkedWorkspacesOutput> => {
+      if (!UUID.test(String(input?.itemId ?? ''))) {
+        return { state: 'failed', message: 'a bare UUID names the item, and none was sent' }
+      }
+      try {
+        return { state: 'ok', links: await linkedWorkspaces(orca, input.itemId) }
+      } catch (error) {
+        return {
+          state: 'failed',
+          message: `the linked workspaces could not be read: ${error instanceof Error ? error.message : String(error)}`
+        }
+      }
+    }
+  )
+
+  // Reopen agent: the same agent session, back in its workspace, through agent.resume with the
+  // session the stored link carries — read here, never taken from the panel. No temper prompt
+  // is sent and nothing is written to temper.
+  orca.panels.handle('temper.reopen.go', async (input: ReopenInput): Promise<ReopenOutput> => {
+    let link
+    try {
+      link = (await readLinks(orca)).find(
+        (entry) => entry.itemId === input?.itemId && entry.workspaceId === input?.workspaceId
+      )
+    } catch (error) {
+      return {
+        state: 'failed',
+        message: `the stored link could not be read: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+    if (link === undefined) {
+      return { state: 'failed', message: 'no stored link joins this item to that workspace' }
+    }
+    if (typeof link.sessionId !== 'string' || typeof link.agent !== 'string') {
+      return { state: 'failed', message: 'the stored link carries no agent session to reopen' }
+    }
+    try {
+      const resumed = await orca.host.call('agent.resume', {
+        workspaceId: link.workspaceId,
+        agent: link.agent as ResumableAgent,
+        sessionId: link.sessionId
+      })
+      return { state: 'reopened', terminalId: resumed.terminalId, started: resumed.started }
+    } catch (error) {
+      return {
+        state: 'refused',
+        code: refusalCode(error),
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  // The link's upkeep: a removed workspace's links are dropped; a linked launch's session is
+  // learned when Orca names it in that launch's own terminal.
+  orca.events.on('workspace.removed', (payload) => dropRemovedWorkspace(orca, payload))
+  orca.events.on('agent.status.changed', (payload) => learnSessionFromEvent(orca, payload))
 }

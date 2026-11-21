@@ -20,10 +20,14 @@
 //   temper.launch.agents   — the agents Orca can launch on this host (`orca agent installed`)
 //   temper.launch.task-handoff — the task's own newest linked session and its Next section —
 //                           never the person's latest (Review 1); feeds the task prompts
-//   temper.launch.go      — the launch itself: workspace.create or agent.launch with the
-//                           prompt the person saw; stores the workspace ↔ item link in the
+//   temper.launch.go      — the launch itself: workspace.create with the prompt the person
+//                           saw (agent.launch only for the editor room's hand-off); stores the workspace ↔ item link in the
 //                           plugin's own storage on success. No temper write happens here
 //                           (Rulings Q3): temper changes only when the agent acts.
+//   temper.launch.links   — the workspaces an item is linked to, named as Orca lists them,
+//                           each with the agent session the link carries (or none)
+//   temper.reopen.go      — Reopen agent: `agent.resume` with the session a stored link
+//                           carries, back in its workspace; no temper prompt, no temper write
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -213,15 +217,21 @@ export interface LaunchItem {
   contextRef: string | null
 }
 
-/** Where the press lands the agent: a new workspace in a picked project, or this workspace. */
+/**
+ * Where a launch lands the agent: a new workspace in a picked project (`workspace.create`) —
+ * the launcher's only destination — or the workspace named (`agent.launch`), which only the
+ * editor room's "Hand to an agent" sends, since its view file lives in that workspace. The
+ * launcher sends only `new-workspace` (decision ruling 23): Orca's `agent.launch` drops its
+ * prompt today (stablyai/orca#41107).
+ */
 export type LaunchDestination = 'new-workspace' | 'this-workspace'
 
-/** `temper.launch.go`: one launch, the prompt exactly as the person saw it in the panel. */
+/** `temper.launch.go`: one launch, the prompt exactly as the person saw it. */
 export interface LaunchInput {
   destination: LaunchDestination
   /** Required for `new-workspace`: the pick from `temper.launch.projects`. */
   projectId?: string
-  /** Required for `this-workspace`: the focused workspace's id. */
+  /** Required for `this-workspace`: the editor room's view workspace. */
   workspaceId?: string
   agent: string
   prompt: string
@@ -245,30 +255,66 @@ export type LaunchOutput =
 /**
  * The workspace ↔ item link, stored in the plugin's own storage on a successful launch
  * (Rulings Q3 — the write-back stays local, never temper); item 7's launch hook reads it.
- * One entry per workspace × item; a relaunch of the same pair replaces its entry.
+ * One entry per workspace × item; a relaunch of the same pair replaces its entry. A link
+ * whose workspace is removed is dropped.
  */
 export interface LaunchLink {
+  /** The id the launch answered — `workspace.create`'s is the id `workspace.list` gives. */
   workspaceId: string
   itemId: string
   ref: string
   contextRef: string | null
   startedAt: string
+  /** The agent the launch started; absent on a link that names none (no Reopen offered). */
+  agent?: string
+  /** The terminal `workspace.create` started the agent in — how its session is recognised. */
+  terminalId?: string | null
+  /**
+   * The agent session running in that terminal, as Orca reported it (`agent.status.changed`
+   * or `agents.list`, matched by the terminal) — never guessed. `agent.resume` takes it.
+   * Absent until Orca names it; a link without one offers no Reopen.
+   */
+  sessionId?: string | null
 }
 
 /** The plugin-storage key under which the launch links sit, as a JSON array. */
 export const LAUNCH_LINKS_KEY = 'launch-links'
 
-/**
- * The consents behind each launch destination (Rulings Q9's table). A press that opens the
- * launcher needs nothing more than `workspace:read` + `agent:launch` — the sheet itself gates
- * "New workspace" further and names what it lacks.
- */
-export const LAUNCH_NEW_WORKSPACE_NEEDS = [
-  'workspace:read',
-  'workspace:create',
-  'agent:launch'
-] as const
-export const LAUNCH_THIS_WORKSPACE_NEEDS = ['workspace:read', 'agent:launch'] as const
+/** One workspace an item is linked to, as the sheet and Reopen agent name it. */
+export interface LinkedWorkspace {
+  workspaceId: string
+  /** The workspace's name as `workspace.list` gives it. */
+  name: string
+  agent: string | null
+  /** The session a Reopen resumes; null when the link carries none (no Reopen offered). */
+  sessionId: string | null
+}
+
+/** `temper.launch.links`: the workspaces one item is linked to. */
+export interface LinkedWorkspacesInput {
+  /** The item's bare UUID. */
+  itemId: string
+}
+
+export type LinkedWorkspacesOutput =
+  | { state: 'ok'; links: LinkedWorkspace[] }
+  | { state: 'failed'; message: string }
+
+/** `temper.reopen.go`: Reopen agent on one stored link — the worker reads the session itself. */
+export interface ReopenInput {
+  itemId: string
+  workspaceId: string
+}
+
+export type ReopenOutput =
+  | {
+      state: 'reopened'
+      terminalId: string
+      /** False when an Orca terminal already runs the session: Orca started nothing new. */
+      started: boolean
+    }
+  | { state: 'failed'; message: string }
+  | { state: 'refused'; code: string | null; message: string }
 /**
  * `temper.launch.task-handoff`: the task's own newest linked session and its Next section —
  * the session→task `advances` edge. null says the task has no handoff yet; it never falls
@@ -286,9 +332,18 @@ export type TaskHandoffOutput =
     }
   | RegionFailure
 
-/** What the launcher's press needs at minimum — the this-workspace path stays open without
- *  `workspace:create` (Q9: declining one consent leaves the others working). */
-export const LAUNCH_PRESS_NEEDS = ['workspace:read', 'agent:launch'] as const
+/**
+ * What the launcher's press needs (Rulings Q9's "Start, new workspace" row): every launch goes
+ * into a new workspace through `workspace.create`.
+ */
+export const LAUNCH_PRESS_NEEDS = ['workspace:read', 'workspace:create', 'agent:launch'] as const
+
+/**
+ * What Reopen agent needs: the stored link (`storage:own`), the workspace's name
+ * (`workspace:read`), and `agent.resume` (`agent:launch`). Learning the session id takes
+ * `agent:read`, but a link that already carries one reopens without it.
+ */
+export const REOPEN_NEEDS = ['workspace:read', 'agent:launch', 'storage:own'] as const
 
 declare module 'orca' {
   interface PluginRequests {
@@ -312,8 +367,12 @@ declare module 'orca' {
     'temper.launch.projects': { output: LaunchProjectsOutput }
     /** The agents Orca can launch on this host. */
     'temper.launch.agents': { output: LaunchAgentsOutput }
-    /** One launch: workspace.create or agent.launch, then the local link; never a temper write. */
+    /** One launch: workspace.create (or the editor room's agent.launch), then the local link. */
     'temper.launch.go': { input: LaunchInput; output: LaunchOutput }
+    /** The workspaces an item is linked to, named, each with its stored session or none. */
+    'temper.launch.links': { input: LinkedWorkspacesInput; output: LinkedWorkspacesOutput }
+    /** Reopen agent: agent.resume on the session a stored link carries; never a temper write. */
+    'temper.reopen.go': { input: ReopenInput; output: ReopenOutput }
     /** The task's own newest linked session and its Next section — never the person's latest. */
     'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
   }
