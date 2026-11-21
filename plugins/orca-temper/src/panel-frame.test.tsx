@@ -62,7 +62,7 @@ test('home holds first; explore and search say what arrives later', async () => 
     'the explore placeholder does not show while home holds'
   )
 
-  await mounted.select({ type: 'Tabs' }, 'explore')
+  await mounted.select({ type: 'Tabs', label: 'temper view' }, 'explore')
   assert.ok(
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     'explore names its placeholder'
@@ -70,7 +70,7 @@ test('home holds first; explore and search say what arrives later', async () => 
   assert.equal(mounted.find({ type: 'Heading', text: 'goals 1' }), null, 'the home body does not show under explore')
   assert.deepEqual(mounted.warnings, [])
 
-  await mounted.select({ type: 'Tabs' }, 'search')
+  await mounted.select({ type: 'Tabs', label: 'temper view' }, 'search')
   assert.ok(
     mounted.find({ text: 'Search arrives with a later iteration — exact and by-meaning matching.' }),
     'search names its placeholder'
@@ -129,16 +129,16 @@ test('the signed-out refusal holds on every tab', async () => {
     mounted.find({ label: 'temper is not connected' }),
     'the refusal stands on home'
   )
-  await mounted.select({ type: 'Tabs' }, 'explore')
+  await mounted.select({ type: 'Tabs', label: 'temper view' }, 'explore')
   assert.ok(mounted.find({ label: 'temper is not connected' }), 'the refusal holds on explore')
   assert.equal(
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     null,
     'no placeholder claims a region temper was never read for'
   )
-  await mounted.select({ type: 'Tabs' }, 'search')
+  await mounted.select({ type: 'Tabs', label: 'temper view' }, 'search')
   assert.ok(mounted.find({ label: 'temper is not connected' }), 'the refusal holds on search')
-  await mounted.select({ type: 'Tabs' }, 'home')
+  await mounted.select({ type: 'Tabs', label: 'temper view' }, 'home')
   assert.ok(mounted.find({ label: 'temper is not connected' }))
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])

@@ -2,8 +2,10 @@
 
 The person's temper in view from Orca, on the person's own grant and nothing else. Home mirrors
 temper-ui's home for the same person, list by list: resume, the latest handoff with its Next
-section, the standing ways in (goals, in progress, sessions) with Show more, the places the
+section, the standing ways in (goals, tasks, sessions) with Show more, the places the
 person works in, and recently updated — every list with its omission sentence and its order.
+Goals toggle between active and done, and Tasks between backlog, in progress and done; the
+defaults are the statuses temper-ui's home reads, and the pick is held on this device.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.home.*`,
   `temper.capabilities`, `src/protocol.ts`), the worker's one credential strategy

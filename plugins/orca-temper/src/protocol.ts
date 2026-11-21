@@ -6,8 +6,8 @@
 //
 //   temper.home.resume    — the one resource the person last changed
 //   temper.home.handoff   — the person's newest session, its Next section quoted
-//   temper.home.way-in    — one of the standing ways in (goals, in progress, sessions),
-//                           grown by the panel's Show more bound
+//   temper.home.way-in    — one of the standing ways in (goals, tasks, sessions), grown by
+//                           the panel's Show more bound, goals and tasks by a picked status
 //   temper.home.places    — the contexts the person changed something in
 //   temper.home.recent    — recently updated across everything the person can read
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
@@ -96,6 +96,11 @@ export type LatestHandoffOutput =
 export interface WayInInput {
   id: string
   bound: number
+  /**
+   * The status a toggled way is read by (./way-status: a task stage, a goal status); absent
+   * reads the way's WAYS_IN default. A way without toggles takes none.
+   */
+  status?: string
 }
 
 export type WayInOutput =
@@ -105,6 +110,8 @@ export type WayInOutput =
       id: string
       label: string
       scope: string
+      /** The status the rows were read by; null for a way without toggles. */
+      status?: string | null
       rows: ResourceSummary[]
       total: number
       bound: number
@@ -351,7 +358,7 @@ declare module 'orca' {
     'temper.home.resume': { output: ResumeOutput }
     /** The person's newest session and its Next section, or a signed-out refusal. */
     'temper.home.handoff': { output: LatestHandoffOutput }
-    /** One way in (goals, in progress, sessions) at the panel's bound, or a signed-out refusal. */
+    /** One way in (goals, tasks, sessions) at the panel's bound and status, or a signed-out refusal. */
     'temper.home.way-in': { input: WayInInput; output: WayInOutput }
     /** The contexts the person changed something in, by their own latest change in each. */
     'temper.home.places': { output: PlacesOutput }

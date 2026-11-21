@@ -9,6 +9,7 @@
 import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
+import { WAY_TOGGLES, wayStatus } from './way-status'
 import type {
   NextSummary,
   PlaceInUse,
@@ -299,18 +300,23 @@ export async function taskHandoff(
 }
 
 /**
- * One of the standing ways in — goals, in progress, sessions — at the bound the panel asks for:
- * the filter is the way's own from WAYS_IN (`owner: '@me'`, the workflow state where one
- * applies), newest update first. An id WAYS_IN does not name is the caller's error, not a read.
+ * One of the standing ways in — goals, tasks, sessions — at the bound the panel asks for: the
+ * filter is the way's own from WAYS_IN (`owner: '@me'`, the workflow state where one applies),
+ * newest update first. A toggled way (goals, tasks) may name another of its statuses
+ * (./way-status): the read swaps only the stage or status it narrows on, keeping `owner: '@me'`,
+ * and answers under that status's scope words. An id WAYS_IN does not name, or a status the way
+ * does not offer, is the caller's error, not a read.
  */
 export async function wayIn(
   read: TemperRead,
   id: string,
-  bound: number
+  bound: number,
+  status?: string
 ): Promise<{
   id: string
   label: string
   scope: string
+  status: string | null
   rows: ResourceSummary[]
   total: number
   bound: number
@@ -319,11 +325,21 @@ export async function wayIn(
   if (!way) {
     throw new Error(`unknown way in: ${id}`)
   }
-  const page = await listResources(read, way.scope, {
+  const toggle = WAY_TOGGLES[id]
+  const picked = status === undefined ? null : wayStatus(id, status)
+  if (status !== undefined && picked === null) {
+    throw new Error(`the ${id} way in offers no "${status}" status`)
+  }
+  const filter = { status: way.filter.status, stage: way.filter.stage }
+  if (toggle !== undefined && picked !== null) {
+    filter[toggle.key] = picked.value
+  }
+  const scope = picked?.scope ?? way.scope
+  const page = await listResources(read, scope, {
     doc_type_name: way.filter.docType,
     owner: way.filter.owner,
-    status: way.filter.status,
-    stage: way.filter.stage,
+    status: filter.status,
+    stage: filter.stage,
     sort: 'updated',
     order: 'desc',
     limit: bound
@@ -331,7 +347,8 @@ export async function wayIn(
   return {
     id: way.id,
     label: way.label,
-    scope: way.scope,
+    scope,
+    status: toggle === undefined ? null : (picked?.value ?? toggle.defaultStatus),
     rows: page.rows.map(summaryOf),
     total: page.total,
     bound

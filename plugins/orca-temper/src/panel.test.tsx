@@ -134,7 +134,7 @@ test('a region still out keeps its muted words over a skeleton', async () => {
 
 test('an empty region keeps its words and its count at 0, with no skeleton left', async () => {
   mounted = await mount(panel, { host: servedHost() })
-  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'empty keeps its count at 0')
+  assert.ok(mounted.find({ type: 'Heading', text: 'tasks 0' }), 'empty keeps its count at 0')
   assert.ok(mounted.find({ text: '— No tasks in progress of yours.' }), 'and its own empty words')
   assert.equal(mounted.find({ type: 'Skeleton' }), null, 'answered, no skeleton stands')
   assert.deepEqual(mounted.errors, [])
