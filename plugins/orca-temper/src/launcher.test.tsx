@@ -5,18 +5,23 @@
 // read that prompt on the sheet before it is sent. It bites against main, where no launcher
 // exists (there is nothing to press, and `temper.launch.go` is unknown to the worker — the
 // companion worker tests in worker-launch.test.ts pin that end of the chain). The companions
-// here: Resume defaults to this workspace when the task is already linked here, Work this goal
-// sends the ruled goal prompt, the handoff card's Resume names the session and its Next, and a
-// withheld consent draws the action disabled with the consent named — never attempted.
+// here: Resume task opens Start's sheet with the resume prompt and launches into a new
+// workspace, naming a linked workspace before the confirm (decision ruling 23; never into an
+// existing workspace); Reopen agent appears only where a stored link carries a
+// session, labelled with the workspace's name, and asks for exactly that link; Work this goal
+// sends the ruled goal prompt; the handoff card's Resume task names the session and its Next;
+// and a withheld consent draws the action disabled with the consent named — never attempted.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
-import type { JsonValue } from 'orca'
 import * as panel from './panel'
 import type {
   LatestHandoffOutput,
   LaunchInput,
   LaunchOutput,
+  LinkedWorkspace,
   RecordDetailInput,
   RecordDetailOutput,
+  ReopenInput,
+  ReopenOutput,
   TaskHandoffOutput
 } from './protocol'
 
@@ -125,23 +130,22 @@ const ALL_GRANTED = [
 
 interface Served {
   launches: LaunchInput[]
+  reopens: ReopenInput[]
 }
 
 function servedHost(options: {
   granted?: readonly string[]
   detail?: unknown
-  links?: readonly object[]
+  links?: readonly LinkedWorkspace[]
   handoff?: unknown
   taskHandoff?: unknown
   launch?: LaunchOutput
+  reopen?: ReopenOutput
 }): { host: ReturnType<typeof mockHost>; served: Served } {
-  const served: Served = { launches: [] }
+  const served: Served = { launches: [], reopens: [] }
   const host = mockHost({
     capabilities: [...(options.granted ?? ALL_GRANTED)],
     results: { 'workspace.readContext': FOCUSED },
-    ...(options.links !== undefined
-      ? { storage: { 'launch-links': [...options.links] } as Record<string, JsonValue> }
-      : {}),
     requests: {
       'temper.capabilities': () => ({ granted: [...(options.granted ?? ALL_GRANTED)] }),
       'temper.home.resume': () => ({ state: 'ok', resume: null }),
@@ -162,6 +166,11 @@ function servedHost(options: {
       'temper.launch.go': (input: LaunchInput): LaunchOutput => {
         served.launches.push(input)
         return options.launch ?? { state: 'launched', workspaceId: 'ws-new', terminalId: 't-new', linkError: null }
+      },
+      'temper.launch.links': () => ({ state: 'ok', links: [...(options.links ?? [])] }),
+      'temper.reopen.go': (input: ReopenInput): ReopenOutput => {
+        served.reopens.push(input)
+        return options.reopen ?? { state: 'reopened', terminalId: 't-back', started: true }
       }
     }
   })
@@ -226,7 +235,7 @@ test('orca_start_names_the_task_and_its_handoff', async () => {
 
   assert.equal(served.launches.length, 1, 'one launch goes on the confirm')
   const launch = served.launches[0]
-  assert.equal(launch.destination, 'new-workspace', 'Start defaults to a new workspace')
+  assert.equal(launch.destination, 'new-workspace', 'Start launches into a new workspace')
   assert.equal(launch.projectId, 'proj-two', 'the chosen project rides')
   assert.equal(launch.agent, 'opencode', 'the chosen agent rides')
   assert.equal(launch.item.id, TASK_ID)
@@ -250,44 +259,121 @@ test('orca_start_names_the_task_and_its_handoff', async () => {
   assert.deepEqual(mounted.refusals, [])
 })
 
-test('resume on a task linked here defaults to this workspace and calls for an agent launch', async () => {
-  const { host, served } = servedHost({
-    detail: taskDetail('in-progress'),
-    links: [
-      {
-        workspaceId: 'ws-current',
-        itemId: TASK_ID,
-        ref: TASK_REF,
-        contextRef: TASK_CONTEXT,
-        startedAt: '2026-11-20T00:00:00Z'
-      }
-    ]
-  })
+const LINKED: LinkedWorkspace = {
+  workspaceId: 'ws-linked',
+  name: 'contrib · pt/the-launch-task',
+  agent: 'claude',
+  sessionId: 'sess-linked'
+}
+
+test('Resume task opens Start\'s sheet with the resume prompt and launches through workspace.create', async () => {
+  const { host, served } = servedHost({ detail: taskDetail('in-progress') })
   mounted = await mount(panel, {
     host,
     ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
   })
   await mounted.settled()
 
-  const resume = mounted.find({ type: 'Button', text: 'Resume agent' })
-  assert.notEqual(resume, null, 'Resume agent is on an in-progress task\'s detail')
+  const resume = mounted.find({ type: 'Button', text: 'Resume task' })
+  assert.notEqual(resume, null, 'Resume task is on an in-progress task\'s detail')
   await mounted.press(resume!)
   await mounted.settled()
 
-  assert.ok(
-    mounted.find({ text: /Resume the task:/ }),
-    'the sheet shows the resume prompt, its full ref and context named'
-  )
-  await pressConfirm('Resume agent')
+  assert.ok(mounted.find({ type: 'Card', label: 'Resume task' }), 'the sheet is titled with the act')
+  assert.ok(mounted.find({ text: /Resume the task:/ }), 'the sheet shows the resume-from-handoff prompt')
+  assert.equal(mounted.find({ type: 'RadioGroup' }), null, 'no this-workspace destination is offered')
+  assert.equal(mounted.find({ text: /Already linked/ }), null, 'an unlinked task names no workspace')
+  await mounted.select({ label: 'Project' }, 'proj-two')
+  await pressConfirm('Resume task')
 
   assert.equal(served.launches.length, 1)
   const launch = served.launches[0]
-  assert.equal(launch.destination, 'this-workspace', 'Resume defaults here when the task is linked here')
-  assert.equal(launch.workspaceId, 'ws-current', 'the launch lands in this workspace')
+  assert.equal(launch.destination, 'new-workspace', 'Resume task goes through workspace.create')
+  assert.equal(launch.workspaceId, undefined, 'never into an existing workspace')
+  assert.equal(launch.projectId, 'proj-two')
   assert.ok(launch.prompt.includes('Resume the task:'), 'the resume prompt asks for the task-resume flow')
   assert.ok(launch.prompt.includes('- Land the launcher gates'), 'the task\'s own Next section rides')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
+})
+
+test('the sheet names an existing linked workspace before the confirm', async () => {
+  const { host, served } = servedHost({ detail: taskDetail('in-progress'), links: [LINKED] })
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+
+  await mounted.press(mounted.find({ type: 'Button', text: 'Resume task' })!)
+  await mounted.settled()
+
+  const card = mounted.find({ type: 'Card', label: 'Resume task' })!
+  const note = mounted.find({ type: 'Callout', label: `Already linked to the workspace ${LINKED.name}` })
+  assert.ok(note && note.path.startsWith(card.path), 'the sheet names the linked workspace')
+  const confirm = mounted.findAll({ type: 'Button', text: 'Resume task' }).find((b) => b.path.startsWith(card.path))!
+  assert.ok(drawnBefore(note, confirm), 'named before the confirm')
+  assert.ok(mounted.find({ text: /makes another workspace for the same work/ }), 'it says what the confirm makes')
+
+  await mounted.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Resume task')
+  assert.equal(served.launches[0]?.destination, 'new-workspace', 'the confirm still makes a new workspace')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('Reopen agent appears only where a stored link carries a session, and asks for that link', async () => {
+  const unsessioned: LinkedWorkspace = { workspaceId: 'ws-old', name: 'contrib · pt/older', agent: null, sessionId: null }
+  const { host, served } = servedHost({ detail: taskDetail('in-progress'), links: [unsessioned, LINKED] })
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+
+  const reopens = mounted.findAll({ type: 'Button', text: /^Reopen agent/ })
+  assert.deepEqual(
+    reopens.map((button) => button.text),
+    [`Reopen agent — ${LINKED.name}`],
+    'one Reopen, labelled with the workspace\'s name; a link without a session offers none'
+  )
+  assert.equal(reopens[0]?.props.variant, 'outline', 'beside the view\'s one solid act')
+  await mounted.press(reopens[0]!)
+  await mounted.settled()
+
+  assert.deepEqual(served.reopens, [{ itemId: TASK_ID, workspaceId: LINKED.workspaceId }])
+  assert.equal(served.launches.length, 0, 'no launch, no temper prompt')
+  assert.ok(mounted.find({ type: 'Callout', label: `The agent session was reopened in ${LINKED.name}.` }))
+  assert.deepEqual(mounted.errors, [])
+  assert.deepEqual(mounted.refusals, [])
+})
+
+test('no Reopen agent without a stored session', async () => {
+  const { host } = servedHost({ detail: taskDetail('in-progress') })
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+  assert.equal(mounted.find({ type: 'Button', text: /^Reopen agent/ }), null)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('Reopen agent refused by Orca says what Orca said', async () => {
+  const { host } = servedHost({
+    detail: taskDetail('in-progress'),
+    links: [LINKED],
+    reopen: { state: 'refused', code: 'invalid_params', message: 'no such session' }
+  })
+  mounted = await mount(panel, {
+    host,
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+  await mounted.press(mounted.find({ type: 'Button', text: /^Reopen agent/ })!)
+  await mounted.settled()
+  assert.equal(mounted.find({ type: 'Callout', label: 'Orca refused' })?.props.tone, 'danger')
+  assert.ok(mounted.find({ text: 'no such session (invalid_params)' }))
+  assert.deepEqual(mounted.errors, [])
 })
 
 test('a task with no linked session has no handoff quoted — the prompt says so', async () => {
@@ -378,13 +464,13 @@ test('the remembered project picks the project for the same context', async () =
   assert.deepEqual(mounted.errors, [])
 })
 
-test('the handoff card\'s Resume names the session and its Next', async () => {
+test('the handoff card\'s Resume task names the session and its Next', async () => {
   const { host, served } = servedHost({})
   mounted = await mount(panel, { host })
   await mounted.settled()
 
-  const resume = mounted.find({ type: 'Button', text: 'Resume' })
-  assert.notEqual(resume, null, 'Resume is on the latest-handoff card')
+  const resume = mounted.find({ type: 'Button', text: 'Resume task' })
+  assert.notEqual(resume, null, 'Resume task is on the latest-handoff card')
   await mounted.press(resume!)
   await mounted.settled()
 
@@ -395,7 +481,7 @@ test('the handoff card\'s Resume names the session and its Next', async () => {
   assert.ok(mounted.find({ text: /Run the live check/ }), 'the Next section is quoted before send')
 
   await mounted.select({ label: 'Project' }, 'proj-one')
-  await pressConfirm('Resume')
+  await pressConfirm('Resume task')
 
   assert.equal(served.launches.length, 1)
   assert.equal(served.launches[0].item.id, HANDOFF.handoff.id)
@@ -426,7 +512,7 @@ test('a withheld launch consent draws the action disabled, named, never attempte
   assert.deepEqual(mounted.errors, [])
 })
 
-test('without workspace:create the new-workspace destination is named and the this-workspace path stays open', async () => {
+test('without workspace:create the press is dark and names the consent — no other path is offered', async () => {
   const withoutCreate = ALL_GRANTED.filter((kind) => kind !== 'workspace:create')
   const { host, served } = servedHost({ granted: withoutCreate })
   mounted = await mount(panel, {
@@ -435,21 +521,13 @@ test('without workspace:create the new-workspace destination is named and the th
   })
   await mounted.settled()
 
-  await mounted.press(mounted.find({ type: 'Button', text: 'Start agent' })!)
-  await mounted.settled()
-
+  const start = mounted.find({ type: 'Button', text: 'Start agent' })
+  assert.equal(start?.disabled, true, 'every launch needs workspace:create')
   assert.ok(
-    mounted.find({ text: new RegExp(`Needs the 'Create workspaces`) }),
-    'the New workspace destination names the withheld consent'
+    mounted.find({ text: /^Start agent needs the 'Create workspaces/ }),
+    'the withheld consent is named with its act'
   )
-  // The this-workspace path still works (Q9): switch destination and confirm.
-  await mounted.select({ label: 'Where the agent works' }, 'this-workspace')
-  await mounted.settled()
-  await pressConfirm('Start agent')
-
-  assert.equal(served.launches.length, 1)
-  assert.equal(served.launches[0].destination, 'this-workspace')
-  assert.equal(served.launches[0].workspaceId, 'ws-current')
+  assert.equal(served.launches.length, 0)
   assert.deepEqual(mounted.errors, [])
 })
 
@@ -470,8 +548,8 @@ test('the handoff card\'s sheet opens below the card\'s omission sentence, outsi
   mounted = await mount(panel, { host })
   await mounted.settled()
 
-  const resume = mounted.find({ type: 'Button', text: 'Resume' })
-  assert.equal(resume?.props.variant, 'solid', 'Resume is the card\'s one primary act')
+  const resume = mounted.find({ type: 'Button', text: 'Resume task' })
+  assert.equal(resume?.props.variant, 'solid', 'Resume task is the card\'s one primary act')
   assert.equal(resume?.props.tone, 'accent')
   assert.equal(resume?.props.icon, 'play')
   await mounted.press(resume!)
@@ -479,7 +557,7 @@ test('the handoff card\'s sheet opens below the card\'s omission sentence, outsi
 
   const card = mounted.find({ type: 'Card', label: 'latest handoff' })
   const omission = mounted.find({ text: '1 of 4 sessions of yours; 3 not shown.' })
-  const sheet = mounted.find({ type: 'Card', label: 'Resume' })
+  const sheet = mounted.find({ type: 'Card', label: 'Resume task' })
   assert.ok(card && omission && sheet, 'the card, its omission sentence and the sheet are drawn')
   assert.ok(omission.path.startsWith(card.path), 'the omission sentence is the card\'s own')
   assert.ok(!sheet.path.startsWith(card.path), 'the sheet stands outside the card')
@@ -586,17 +664,33 @@ test('a launch that never ran is a warning callout, titled in words', async () =
   assert.deepEqual(mounted!.errors, [])
 })
 
-test('a missing consent darkens the confirm and names it in warning text under the row', async () => {
+test('a missing consent on a carried sheet darkens the confirm and names it in warning text under the row', async () => {
   const withoutCreate = ALL_GRANTED.filter((kind) => kind !== 'workspace:create')
-  await openStartSheet({ granted: withoutCreate })
+  const { host } = servedHost({ granted: withoutCreate })
+  mounted = await mount(panel, {
+    host,
+    persisted: {
+      plugin: {
+        'detail-stack': [{ id: TASK_ID, ref: '', title: '', docType: 'task' }],
+        'launch-compose': {
+          kind: 'task-start',
+          from: 'detail',
+          item: { id: TASK_ID, ref: TASK_REF, title: 'The item detail', contextRef: TASK_CONTEXT },
+          handoffNext: null
+        },
+        'last-project-by-context': { [TASK_CONTEXT]: 'proj-one' }
+      }
+    }
+  })
+  await mounted.settled()
 
-  const sentence = mounted!.findAll({ type: 'Text', text: /Needs the 'Create workspaces/ })
-  assert.ok(sentence.length > 0, 'the withheld consent is named')
+  const card = mounted.find({ type: 'Card', label: 'Start agent' })!
+  const sentence = mounted.findAll({ type: 'Text', text: /^Needs the 'Create workspaces/ }).filter((s) => s.path.startsWith(card.path))
+  assert.ok(sentence.length > 0, 'the withheld consent is named in the sheet')
   assert.ok(sentence.every((s) => s.props.tone === 'warning'), 'in warning text')
-  const card = mounted!.find({ type: 'Card', label: 'Start agent' })!
-  const confirm = mounted!.findAll({ type: 'Button', text: 'Start agent' }).find((b) => b.path.startsWith(card.path))
+  const confirm = mounted.findAll({ type: 'Button', text: 'Start agent' }).find((b) => b.path.startsWith(card.path))
   assert.equal(confirm?.disabled, true)
-  assert.deepEqual(mounted!.errors, [])
+  assert.deepEqual(mounted.errors, [])
 })
 
 test('a sheet carried from the last run draws again with its reads asked, on its own item only', async () => {

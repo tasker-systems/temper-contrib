@@ -62,6 +62,10 @@ import {
   DetailLaunchConsent,
   HandoffLaunchButton,
   LauncherSheet,
+  loadItemLinks,
+  ReopenButtons,
+  ReopenConsent,
+  ReopenOutcome,
   setupLauncher
 } from './launcher'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
@@ -137,6 +141,7 @@ function pushDetail(entry: DetailEntry): void {
   set(detailStack, [...read(detailStack), entry])
   loadDetail(entry)
   loadLinkedTasks(entry)
+  void loadItemLinks(entry.id)
 }
 
 function popDetail(): void {
@@ -277,6 +282,7 @@ export function setup(ctx: PanelContext): void {
   if (carried !== undefined) {
     void loadDetail(carried)
     void loadLinkedTasks(carried)
+    void loadItemLinks(carried.id)
   }
   setupLauncher()
   void refresh()
@@ -728,7 +734,8 @@ function Frame() {
 /**
  * A pushed detail view: out, refused, failed, or answered. The header names the doc type, the
  * record's state as a badge holding its word, and the title; the acts stand in one row — the
- * launcher press the one solid accent act, Open body and Open in temper outlined — with the
+ * launcher press the one solid accent act, Reopen agent (where a link carries a session), Open
+ * body and Open in temper outlined — with the
  * launcher's sheet under them; the meta closes the view, collapsed.
  */
 function DetailView(props: { entry: DetailEntry }) {
@@ -755,10 +762,13 @@ function DetailView(props: { entry: DetailEntry }) {
       <Stack gap="xs">
         <Row gap="xs" wrap>
           {detail === null ? undefined : <DetailLaunchButton detail={detail} />}
+          {detail === null ? undefined : <ReopenButtons detail={detail} />}
           <OpenBodyButton id={props.entry.id} named={false} />
           <WayOutButton id={props.entry.id} />
         </Row>
         {detail === null ? undefined : <DetailLaunchConsent detail={detail} />}
+        {detail === null ? undefined : <ReopenConsent detail={detail} />}
+        <ReopenOutcome itemId={props.entry.id} />
         <OpenBodyConsent />
         <OpenBodyAnswer id={props.entry.id} />
         <WayOutNote id={props.entry.id} />

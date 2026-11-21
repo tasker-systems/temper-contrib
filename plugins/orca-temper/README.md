@@ -43,20 +43,31 @@ person works in, and recently updated — every list with its omission sentence 
   The `look-*` scenarios in `src/panel.check.ts` render Home, a task's detail and a goal's
   detail from fixtures, for `orca plugin shot . --scenario <name> --theme light|dark`.
 - The launcher (`src/launcher.tsx`, prompts in `src/prompts.ts`): a backlog task's detail gets
-  **Start agent**, an in-progress one **Resume agent**, an active goal **Work this goal**, and
-  the latest-handoff card on Home **Resume**. Each opens a sheet where the press happened with
-  the destination (a new workspace in a project picked from `project.list` — the last pick
-  remembered per context in local view state — or this workspace), the agent (what
-  `orca agent installed` says the host can launch), and the first prompt in full before it is
-  sent: harness-agnostic text naming the temper skill and CLI, the item's full ref and context,
-  and — for a task — the task's own latest linked session's Next section (design record,
-  Rulings Q4/Q4a; Review 1: never the person's newest session, which belongs to other work; a
-  task with no linked session gets "no handoff yet", quoted nothing). Confirm
-  sends `temper.launch.go` to the worker: `workspace.create { projectId, agent, prompt }` or
-  `agent.launch { workspaceId, agent, prompt }`, then the workspace ↔ item link in the plugin's
-  own storage (`launch-links`, for the launch hook a later item adds). No press writes to temper
-  (Rulings Q3). Consents gate per Q9's table — a lit action needs every consent it uses, a
-  missing one is named and never attempted — and a refused launch shows what Orca said.
+  **Start agent**, an in-progress one **Resume task**, an active goal **Work this goal**, and
+  the latest-handoff card on Home **Resume task**. Each opens a sheet where the press happened
+  with the project (picked from `project.list` — the last pick remembered per context in local
+  view state), the agent (what `orca agent installed` says the host can launch), and the first
+  prompt in full before it is sent: harness-agnostic text naming the temper skill and CLI, the
+  item's full ref and context, and — for a task — the task's own latest linked session's Next
+  section (design record, Rulings Q4/Q4a; Review 1: never the person's newest session, which
+  belongs to other work; a task with no linked session gets "no handoff yet", quoted nothing).
+  Resume task is temper's resume — a fresh agent oriented to the latest handoff — so it is
+  Start's act with the resume prompt. Every launch goes into a new workspace: confirm sends
+  `temper.launch.go` to the worker, `workspace.create { projectId, agent, prompt }`, then the
+  workspace ↔ item link in the plugin's own storage (`launch-links`) with the agent and the
+  terminal it started in. When the item is already linked to a workspace, the sheet names it
+  before the confirm. No press writes to temper (Rulings Q3). Consents gate per Q9's table — a
+  lit action needs every consent it uses, a missing one is named and never attempted — and a
+  refused launch shows what Orca said.
+- **Reopen agent** (`src/links.ts`) is Orca's resume: the same agent session, back in its
+  workspace, through `agent.resume { workspaceId, agent, sessionId }`, with no temper prompt.
+  A link learns its session only from Orca naming the launch's own terminal — an
+  `agent.status.changed` event or an `agents.list` row for the linked workspace — never by
+  guessing; a link without one offers no Reopen. It is offered on a task's detail, one per
+  linked workspace carrying a session, labelled with the workspace's name. A link whose
+  workspace is removed (`workspace.removed`, or missing from a complete `workspace.list`) is
+  dropped. `agent.launch` (into the named workspace) is used only by the editor room's "Hand
+  to an agent", whose agent works on the view file in that workspace.
 - **Open body** on a record's detail (lit by `workspace:read`, `workspace:write` and
   `storage:own`) opens the record's body in an Orca editor tab of the focused workspace, beside
   the person's view (`src/editor-room/`). The worker reads the record with its body and
@@ -80,7 +91,7 @@ person works in, and recently updated — every list with its omission sentence 
   temper does not have. A save temper refuses as stale writes nothing and shows the base, the
   person's version and temper's current, with carry-over, discard, or handing the three to an
   agent in the workspace (the desktop's refused-save prompt, `vendor/desktop-handoff.ts`, sent
-  through the launcher's `agent.launch`). Witnesses: `orca_only_a_save_reaches_temper` and
+  through `temper.launch.go`'s `agent.launch`). Witnesses: `orca_only_a_save_reaches_temper` and
   `orca_stale_save_writes_nothing` in `editor/save.test.ts`.
 - The settings are the API origin override and the "Temper web address" (`webUrl`); the
   context-scoped settings and reads were retired when Home became person-scoped (the design
