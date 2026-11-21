@@ -291,7 +291,8 @@ async function confirmLaunch(): Promise<void> {
   }
 }
 
-/** The press button — gated on the minimum consents; the sheet gates the destination further. */
+/** The press button — gated on the minimum consents; the sheet gates the destination further.
+ *  It is its view's one primary act: solid accent, its icon beside its label. */
 function LaunchButton(props: {
   kind: LaunchKind
   from: 'detail' | 'home'
@@ -303,45 +304,48 @@ function LaunchButton(props: {
       needs={LAUNCH_PRESS_NEEDS}
       granted={read(grantedCapabilities)}
       label={KIND_LABEL[props.kind]}
+      variant="solid"
+      tone="accent"
+      icon={props.kind === 'goal-work' ? 'rocket' : 'play'}
       onPress={() => void openLaunch(props.kind, props.from, props.item, props.handoffNext ?? null)}
     />
   )
 }
 
 /**
- * A detail view's launcher acts: a backlog task gets Start agent, an in-progress one Resume
- * agent, an active goal Work this goal (the ruled buttons); anything else gets nothing — a
- * stage the register does not name is not guessed into a launch.
+ * Which launcher act a detail gets: a backlog task Start agent, an in-progress one Resume
+ * agent, an active goal Work this goal (the ruled buttons); anything else none — a stage the
+ * register does not name is not guessed into a launch.
  */
-export function DetailLaunchActions(props: { detail: RecordDetail }): OrcaNode {
+export function detailLaunchKind(detail: RecordDetail): LaunchKind | null {
+  return detail.docType === 'task' && detail.stage === 'backlog'
+    ? 'task-start'
+    : detail.docType === 'task' && detail.stage === 'in-progress'
+      ? 'task-resume'
+      : detail.docType === 'goal' && detail.status === 'active'
+        ? 'goal-work'
+        : null
+}
+
+/** A detail view's launcher press, for the view's act row; its sheet is `LauncherSheet`. */
+export function DetailLaunchButton(props: { detail: RecordDetail }): OrcaNode {
   const detail = props.detail
+  const kind = detailLaunchKind(detail)
+  if (kind === null) {
+    return undefined
+  }
   const item: LaunchItem = {
     id: detail.id,
     ref: detail.ref,
     title: detail.title,
     contextRef: detail.contextRef
   }
-  const kind: LaunchKind | null =
-    detail.docType === 'task' && detail.stage === 'backlog'
-      ? 'task-start'
-      : detail.docType === 'task' && detail.stage === 'in-progress'
-        ? 'task-resume'
-        : detail.docType === 'goal' && detail.status === 'active'
-          ? 'goal-work'
-          : null
-  if (kind === null) {
-    return undefined
-  }
-  return (
-    <Stack gap="sm">
-      <LaunchButton kind={kind} from="detail" item={item} />
-      <LauncherRegion from="detail" />
-    </Stack>
-  )
+  return <LaunchButton kind={kind} from="detail" item={item} />
 }
 
-/** The latest-handoff card's Resume (Home) — a session start from that session. */
-export function HandoffLaunchAction(props: {
+/** The latest-handoff card's Resume (Home) — a session start from that session. Its sheet is
+ *  `LauncherSheet from="home"`, placed by Home after the card's omission sentence. */
+export function HandoffLaunchButton(props: {
   handoff: {
     id: string
     ref: string
@@ -357,20 +361,17 @@ export function HandoffLaunchAction(props: {
     contextRef: props.handoff.contextRef
   }
   return (
-    <Stack gap="sm">
-      <LaunchButton
-        kind="handoff-resume"
-        from="home"
-        item={item}
-        handoffNext={props.handoff.next}
-      />
-      <LauncherRegion from="home" />
-    </Stack>
+    <LaunchButton
+      kind="handoff-resume"
+      from="home"
+      item={item}
+      handoffNext={props.handoff.next}
+    />
   )
 }
 
 /** The sheet itself, rendered where the pressed button lives; undefined while nothing was pressed. */
-function LauncherRegion(props: { from: 'detail' | 'home' }): OrcaNode {
+export function LauncherSheet(props: { from: 'detail' | 'home' }): OrcaNode {
   const compose = read(launchCompose)
   if (compose === null || compose.from !== props.from) {
     return undefined

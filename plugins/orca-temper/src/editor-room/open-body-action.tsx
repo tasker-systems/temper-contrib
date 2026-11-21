@@ -45,17 +45,30 @@ function AnswerLine(props: { answer: OpenBodyOutput | 'pending' | undefined }) {
   )
 }
 
+/** The press, for the detail's act row: a secondary act, outlined, its icon beside its label. */
+export function OpenBodyButton(props: { id: string }) {
+  return (
+    <GatedAction
+      needs={OPEN_BODY_NEEDS}
+      granted={read(grantedCapabilities)}
+      label="Open body"
+      variant="outline"
+      icon="file-text"
+      onPress={() => void openBody(props.id)}
+    />
+  )
+}
+
+/** The press's answer, under the act row. */
+export function OpenBodyAnswer(props: { id: string }) {
+  return <AnswerLine answer={read(openBodyResults)[props.id]} />
+}
+
 export function OpenBodyAction(props: { id: string }) {
   return (
     <Stack gap="xs">
-      <GatedAction
-        needs={OPEN_BODY_NEEDS}
-        granted={read(grantedCapabilities)}
-        label="Open body"
-        variant="outline"
-        onPress={() => void openBody(props.id)}
-      />
-      <AnswerLine answer={read(openBodyResults)[props.id]} />
+      <OpenBodyButton id={props.id} />
+      <OpenBodyAnswer id={props.id} />
     </Stack>
   )
 }

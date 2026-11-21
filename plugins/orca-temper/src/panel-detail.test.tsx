@@ -5,6 +5,7 @@
 // the panel alone: the request answers are fixture data, typed here rather than imported, so
 // this one file stands on its own.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
+import { metaItems } from './look'
 import * as panel from './panel'
 import type { RecordDetailOutput } from './protocol'
 
@@ -72,7 +73,8 @@ const LINKED_TASKS = {
       title: 'Task one',
       docType: 'task',
       contextRef: '+temper-dev/contrib',
-      updated: '2026-11-20T00:00:00Z'
+      updated: '2026-11-20T00:00:00Z',
+      stage: 'done'
     },
     {
       id: TASK_ID,
@@ -80,7 +82,8 @@ const LINKED_TASKS = {
       title: 'The item detail',
       docType: 'task',
       contextRef: '+temper-dev/contrib',
-      updated: '2026-11-20T01:00:00Z'
+      updated: '2026-11-20T01:00:00Z',
+      stage: 'in-progress'
     }
   ],
   total: 9,
@@ -126,9 +129,25 @@ test('a task detail shows exactly the meta the worker answered, in temper-ui\'s 
   })
   await mounted.settled()
 
+  // The meta is collapsed by default: nothing of it shows until the person opens it.
+  assert.equal(mounted.find({ type: 'KeyValue' }), null, 'the meta waits collapsed')
+  await mounted.toggle({ type: 'Collapsible' })
   const kv = mounted.find({ type: 'KeyValue' })
   assert.notEqual(kv, null, 'the meta table is on the detail')
-  assert.deepEqual(kv?.props.items, TASK_DETAIL.detail.properties)
+  assert.deepEqual(kv?.props.items, metaItems(TASK_DETAIL.detail))
+  assert.deepEqual(
+    (kv?.props.items as { label: string }[]).map((item) => item.label),
+    ['temper-stage', 'temper-mode', 'temper-effort', 'context', 'owner', 'updated', 'ref'],
+    'temper-ui\'s order, without the doc_type row the header already says, the ref closing it'
+  )
+  assert.deepEqual(
+    (kv?.props.items as { label: string; value: unknown; code?: boolean }[]).slice(-2),
+    [
+      { label: 'updated', value: '20 Nov 2026, 01:00 UTC' },
+      { label: 'ref', value: TASK_DETAIL.detail.ref, code: true }
+    ],
+    'updated reads as a time; the ref is mono'
+  )
   assert.equal(
     (kv?.props as { label?: string }).label,
     'meta',
@@ -200,7 +219,7 @@ test('a goal detail lists its linked tasks with the label and omission sentence'
   })
   await mounted.settled()
 
-  assert.ok(mounted.find({ text: 'linked tasks (9)' }), 'the list is labelled linked tasks')
+  assert.ok(mounted.find({ type: 'Heading', text: 'linked tasks 9' }), 'the list is labelled linked tasks')
   assert.ok(
     mounted.find({ text: '2 of 9 linked tasks; 7 not shown.' }),
     'the omission sentence stands under the bound'
@@ -221,13 +240,14 @@ test('pressing a linked task pushes its detail', async () => {
   await mounted.settled()
 
   // The pushed task's own detail read answers, and the goal's list is gone from view.
+  await mounted.toggle({ type: 'Collapsible' })
   const kv = mounted.find({ type: 'KeyValue' })
   assert.equal(
-    (kv?.props as { items?: { label: string; value: string }[] }).items?.[0]?.value,
-    'task',
+    (kv?.props as { items?: { label: string; value: string }[] }).items?.find((item) => item.label === 'ref')?.value,
+    TASK_DETAIL.detail.ref,
     'the pushed task\'s own detail drew the meta'
   )
-  assert.equal(mounted.find({ text: 'linked tasks (9)' }), null, 'the goal\'s list is not on the task detail')
+  assert.equal(mounted.find({ type: 'Heading', text: 'linked tasks 9' }), null, 'the goal\'s list is not on the task detail')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
@@ -246,4 +266,62 @@ test('signed out, the pushed detail is the refusal and no item data answers', as
   assert.equal(mounted.find({ text: 'The item detail' }), null, 'no item data rides the refusal')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
+})
+
+test('the detail header names the doc type, then the state as a badge holding its word', async () => {
+  const cases: { detail: RecordDetailOutput; word: string; tone: string }[] = [
+    { detail: TASK_DETAIL, word: 'in progress', tone: 'accent' },
+    { detail: { state: 'ok', detail: { ...TASK_DETAIL.detail, stage: 'done' } }, word: 'done', tone: 'success' },
+    { detail: { state: 'ok', detail: { ...TASK_DETAIL.detail, stage: 'backlog' } }, word: 'backlog', tone: 'neutral' },
+    { detail: GOAL_DETAIL, word: 'active', tone: 'accent' }
+  ]
+  for (const one of cases) {
+    mounted = await mount(panel, {
+      host: servedHost({ detail: one.detail }),
+      ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+    })
+    await mounted.settled()
+    const badge = mounted.find({ type: 'Badge', text: one.word })
+    assert.notEqual(badge, null, `the ${one.word} badge holds its word`)
+    assert.equal(badge?.props.tone, one.tone, `${one.word} is ${one.tone}`)
+    assert.ok(mounted.find({ type: 'Heading', text: one.detail.state === 'ok' ? one.detail.detail.title : '' }))
+    assert.deepEqual(mounted.errors, [])
+    await mounted.unmount()
+    mounted = undefined
+  }
+})
+
+test('one solid accent primary act; Open body and Open in temper outlined, each with its icon', async () => {
+  mounted = await mount(panel, {
+    host: servedHost({ webUrl: 'https://web-temper.example' }),
+    ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' })
+  })
+  await mounted.settled()
+  const solid = mounted.findAll({ type: 'Button' }).filter((button) => button.props.variant === 'solid')
+  assert.deepEqual(solid.map((button) => button.text), ['Resume agent'], 'one primary act on the view')
+  assert.equal(solid[0]?.props.tone, 'accent')
+  assert.equal(solid[0]?.props.icon, 'play')
+  const body = mounted.find({ type: 'Button', text: 'Open body' })
+  assert.equal(body?.props.variant, 'outline')
+  assert.equal(body?.props.icon, 'file-text')
+  const out = mounted.find({ type: 'Button', text: 'Open in temper' })
+  assert.equal(out?.props.variant, 'outline')
+  assert.equal(out?.props.icon, 'open-external')
+  assert.equal(mounted.find({ type: 'IconButton' }), null, 'no act is an icon without words')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a goal\'s linked tasks wear the task icon and say their stage in words', async () => {
+  mounted = await mount(panel, {
+    host: servedHost(),
+    ...seededStack({ id: GOAL_ID, ref: '', title: '', docType: 'goal' })
+  })
+  await mounted.settled()
+  const done = mounted.find({ type: 'ListItem', label: 'Task one' })
+  assert.equal(done?.props.icon, 'hammer')
+  assert.equal(done?.props.description, 'task · done')
+  const worked = mounted.find({ type: 'ListItem', label: 'The item detail' })
+  assert.equal(worked?.props.description, 'task · in progress')
+  assert.equal(mounted.find({ type: 'Button', text: 'Work this goal' })?.props.icon, 'rocket')
+  assert.deepEqual(mounted.errors, [])
 })

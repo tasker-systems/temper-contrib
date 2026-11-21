@@ -21,7 +21,8 @@ const GOAL_ONE = {
   title: 'Goal one',
   docType: 'goal',
   contextRef: '+temper-dev/contrib',
-  updated: '2026-11-20T01:00:00Z'
+  updated: '2026-11-20T01:00:00Z',
+  stage: null
 }
 
 const WAY_LABELS: Record<string, string> = { goals: 'goals', tasks: 'in progress', sessions: 'sessions' }
@@ -54,7 +55,7 @@ function servedHost(): ReturnType<typeof mockHost> {
 
 test('home holds first; explore and search say what arrives later', async () => {
   mounted = await mount(panel, { host: servedHost() })
-  assert.ok(mounted.find({ text: 'goals (1)' }), 'home is the tab that holds first')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 1' }), 'home is the tab that holds first')
   assert.equal(
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     null,
@@ -66,7 +67,7 @@ test('home holds first; explore and search say what arrives later', async () => 
     mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
     'explore names its placeholder'
   )
-  assert.equal(mounted.find({ text: 'goals (1)' }), null, 'the home body does not show under explore')
+  assert.equal(mounted.find({ type: 'Heading', text: 'goals 1' }), null, 'the home body does not show under explore')
   assert.deepEqual(mounted.warnings, [])
 
   await mounted.select({ type: 'Tabs' }, 'search')
@@ -84,29 +85,30 @@ test('pressing an item pushes a detail view; Back returns to the tab', async () 
   await mounted.press({ label: 'Goal one' })
   assert.ok(mounted.find({ text: 'Goal one' }), 'the detail carries the item title')
   assert.ok(mounted.find({ text: 'goal' }), 'the detail leads with the doc-type word')
-  assert.ok(
-    mounted.find({ text: 'goal-one-00000000-0000-7000-8000-0000000000a1' }),
-    'the detail carries the ref'
+  assert.equal(
+    mounted.find({ text: /goal-one-00000000-0000-7000-8000-0000000000a1/ }),
+    null,
+    'the ref does not wrap over the header — it lives in the meta'
   )
   assert.equal(mounted.find({ type: 'Tabs' }), null, 'the detail holds the panel; no tabs beside it')
 
   await mounted.press({ text: 'Back' })
-  assert.ok(mounted.find({ text: 'goals (1)' }), 'back returns to the tab that held')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 1' }), 'back returns to the tab that held')
 
   // Pushing twice pops once only: the stack holds the pushed views.
   await mounted.press({ label: 'Goal one' })
   await mounted.press({ text: 'Back' })
-  assert.ok(mounted.find({ text: 'goals (1)' }), 'a single pop lands back on the frame')
+  assert.ok(mounted.find({ type: 'Heading', text: 'goals 1' }), 'a single pop lands back on the frame')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })
 
-test('rows carry the doc-type word, not icons', async () => {
+test('rows carry the doc-type word beside their doc-type icon', async () => {
   mounted = await mount(panel, { host: servedHost() })
   const row = mounted.find({ type: 'ListItem' })
   assert.notEqual(row, null)
   assert.equal(row?.props.description, 'goal', 'the doc-type word leads the row')
-  assert.equal(row?.props.icon, undefined, 'no icon stands for the doc type')
+  assert.equal(row?.props.icon, 'flag', 'the icon sits beside the word, never instead of it')
   assert.ok(row?.props.onPress, 'the row opens its detail')
   assert.deepEqual(mounted.warnings, [])
 })

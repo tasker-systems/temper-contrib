@@ -88,6 +88,7 @@ interface ListRow {
   context_ref?: string | null
   updated: string
   changed_by_me_at?: string | null
+  managed_meta?: Record<string, unknown> | null
 }
 
 interface ListPage {
@@ -102,8 +103,15 @@ function summaryOf(row: ListRow): ResourceSummary {
     title: row.title,
     docType: row.doc_type_name,
     contextRef: row.context_ref ?? null,
-    updated: row.updated
+    updated: row.updated,
+    stage: managedWord(row.managed_meta, 'temper-stage') ?? managedWord(row.managed_meta, 'temper-status')
   }
+}
+
+/** A managed key's non-empty string value, or null. */
+function managedWord(meta: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = meta?.[key]
+  return typeof value === 'string' && value.trim() !== '' ? value : null
 }
 
 /** The query every Home list asks, each part named by its caller. */
