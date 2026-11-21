@@ -1,0 +1,47 @@
+{
+  "catalogVersion": 2,
+  "name": "Temper",
+  "owner": "tasker-systems",
+  "plugins": [
+    {
+      "id": "tasker-systems.temper",
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/tasker-systems/temper-contrib.git",
+        "ref": "main",
+        "path": "plugins/orca-temper"
+      },
+      "description": "The person's temper in view from Orca: resume, the latest handoff, the ways in (goals, in progress, sessions), places and recently updated — temper-ui's home, list by list, read through the temper API on a credential borrowed from the temper CLI.",
+      "releases": [
+        {
+          "version": "0.1.0",
+          "commit": "7e3c7d7b55b8df5e4e5d69226eba7afc3f3f7640",
+          "contentHash": "dce45e7580fca541661c3f5dc0f83992f3c7ca99ad7559f90c46a9acd99e3ff3",
+          "execution": "trusted-worker",
+          "minimumOrca": "1.4.259",
+          "name": "Temper",
+          "contributes": [
+            {
+              "kind": "panels",
+              "name": "Temper"
+            },
+            {
+              "kind": "customEditors",
+              "name": "Temper body",
+              "detail": ".temper.md"
+            }
+          ],
+          "capabilities": [
+            "settings:own",
+            "workspace:read",
+            "workspace:create",
+            "agent:launch",
+            "agent:read",
+            "storage:own",
+            "workspace:write"
+          ]
+        }
+      ]
+    }
+  ]
+}

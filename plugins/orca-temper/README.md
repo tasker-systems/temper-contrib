@@ -91,8 +91,45 @@ person works in, and recently updated — every list with its omission sentence 
 ```sh
 bun install
 bun run build            # rebuild vendor/*.mjs (after bumping a pinned package)
-orca plugin dev watch .  # loads this folder into Orca; Ctrl-C unloads it
+orca plugin dev watch .  # loads this folder into Orca as local.temper; Ctrl-C unloads it
 ```
+
+The plugin's id is `temper`. Orca names an install `<publisher>.<id>`: `local.temper` from a
+development folder, `tasker-systems.temper` from this repository's catalog. Ids starting `orca-`
+install only from Orca's official catalog, so the id carries no prefix; the folder keeps its name.
+
+## Release and install
+
+The plugin is published through [`orca-catalog.json`](../../orca-catalog.json) at the repository
+root: one entry, `tasker-systems.temper`, whose `source` is this repository at `main` with
+`path: plugins/orca-temper` (Orca's direct Git install reads only a repository root). Each
+release in the entry pins a full commit and the content hash of this folder at that commit.
+
+To release:
+
+1. Bump `version` in `orca-plugin.json` (semver; raise `engines.orca` if a field needs it) and
+   commit.
+2. From the repository root, on that commit: `orca plugin release-entry plugins/orca-temper --json`.
+   It hashes the committed files of `HEAD`, never the working tree.
+3. Put the printed release first in the entry's `releases` (newest first; keep older releases,
+   at most 32) and commit. `cargo make check` validates the catalog and refuses an entry whose
+   newest release is not the manifest's version.
+4. Merge with a merge commit, so the pinned commit lands on `main` unchanged. A rebase or squash
+   rewrites it: run `release-entry` again on the rewritten commit.
+5. Tag the pinned commit `orca-temper-v<version>` and push the tag. The tag marks the release for
+   people; Orca follows the pinned commit. Not a bare `v<version>`: that is the version tag Orca's
+   direct install looks for, and this repository's root is not a plugin.
+
+To install, in Orca's Settings → Plugins (add the catalog, then install Temper), or:
+
+```sh
+orca plugin catalog add tasker-systems/temper-contrib   # asks once to approve the catalog
+orca plugin install tasker-systems.temper               # asks to approve what it is granted
+orca plugin update tasker-systems.temper                # moves to the catalog's newest release
+```
+
+Both approvals are the person's: the catalog decides which repositories Orca installs from, and
+the install lists the access the plugin asks for.
 
 ## Gates
 
