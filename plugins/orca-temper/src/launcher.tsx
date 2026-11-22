@@ -471,6 +471,13 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
               </Text>
             </Callout>
           )}
+          {outcome.markerError === null || outcome.markerError === undefined ? undefined : (
+            <Callout tone="warning" title="The workspace has no serves marker">
+              <Text muted size="xs">
+                {outcome.markerError}
+              </Text>
+            </Callout>
+          )}
           <Row>
             <Button variant="ghost" onPress={cancelLaunch}>
               Close

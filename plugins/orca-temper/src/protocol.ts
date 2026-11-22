@@ -261,6 +261,12 @@ export type LaunchOutput =
       terminalId: string | null
       /** Set when the launch landed but the link could not be stored (e.g. no storage:own). */
       linkError: string | null
+      /**
+       * Set when a task's launch landed but its serves marker (`.temper-views/serves.json`) was
+       * not written, or a goal or session launch could not remove an old one. Absent from an
+       * answer made before the marker existed.
+       */
+      markerError?: string | null
     }
   /** The caller's input was wrong before any Orca call; the panel's error, not a refusal. */
   | { state: 'failed'; message: string }

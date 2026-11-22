@@ -7,8 +7,16 @@
 // host answers that hook once the launch has answered; ./serves.test.ts drives the hook while
 // the launch is still out); then a second agent the person opens later in the same workspace;
 // then an agent in another workspace no launch linked. The hook hears each workspace by Orca's own worktree id
-// (`<project>::<path>`), not the id `workspace.create` answered. This file imports nothing but
-// the worker, so the same file runs against a worker without the hook and fails there.
+// (`<project>::<path>`), not the id `workspace.create` answered. Decision ruling 27 adds the
+// marker: after the launch, the linked workspace's folder holds `.temper-views/serves.json`
+// naming the task and its context, which any agent there can read (a chat agent the hook never
+// reaches among them), and the unlinked workspace's folder holds none. Both folders are real git
+// repositories. This file imports nothing of the plugin's but the worker, so the same file runs
+// against a worker without the hook or the marker and fails there.
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { assert, mockHost, mountWorker, test, afterEach, type HookDecision, type TestWorker } from 'orca/testing'
 import { deps } from './deps'
 import * as main from './worker'
@@ -28,8 +36,23 @@ const TASK = {
   docType: 'task'
 }
 const PROJECT = 'repo-0001'
-const LINKED_PATH = '/work/project/the-served-task'
 const LINKED_LIST_ID = 'identity:wt2:local:linked-instance'
+
+const folders: string[] = []
+afterEach(() => {
+  for (const dir of folders.splice(0)) {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/** A fresh git repository standing in for one workspace's folder. */
+function gitFolder(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'orca-temper-witness-')))
+  folders.push(dir)
+  execFileSync('git', ['init', '--quiet', dir])
+  return dir
+}
+const MARKER = join('.temper-views', 'serves.json')
 
 function launchEvent(workspaceId: string | null) {
   return {
@@ -42,6 +65,8 @@ function launchEvent(workspaceId: string | null) {
 }
 
 test('orca_agent_knows_the_task_it_serves', async () => {
+  const LINKED_PATH = gitFolder()
+  const UNLINKED_PATH = gitFolder()
   // No temper read and no CLI run belongs to a launch or its hook.
   deps.run = async () => {
     throw new Error('the temper CLI ran')
@@ -97,10 +122,19 @@ test('orca_agent_knows_the_task_it_serves', async () => {
   if (later.kind !== 'continue') return
   assert.deepEqual(later.event.env, served, 'a later agent in the linked workspace is told the same')
 
-  const elsewhere = await worker.hooks.fire('agent.launch.before', launchEvent(`${PROJECT}::/work/project/unlinked`))
+  const elsewhere = await worker.hooks.fire('agent.launch.before', launchEvent(`${PROJECT}::${UNLINKED_PATH}`))
   assert.equal(elsewhere.kind, 'continue')
   if (elsewhere.kind !== 'continue') return
   assert.deepEqual(elsewhere.event.env, {}, 'an agent in an unlinked workspace is told no task')
+
+  // Any agent in the workspace — chat, terminal, another harness — reads the same in its folder.
+  const markerFile = join(LINKED_PATH, MARKER)
+  assert.ok(existsSync(markerFile), 'the linked workspace holds a serves marker')
+  const marker = JSON.parse(readFileSync(markerFile, 'utf8')) as Record<string, unknown>
+  assert.equal(marker.task_ref, TASK.ref, 'the marker names the task')
+  assert.equal(marker.task_id, TASK.id)
+  assert.equal(marker.context_ref, TASK.contextRef, 'and its context')
+  assert.ok(!existsSync(join(UNLINKED_PATH, MARKER)), 'an unlinked workspace holds no marker')
 
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()

@@ -21,14 +21,20 @@
 //   in memory and before any host call — only when exactly one item is pending there, never a
 //   guess between two. Otherwise it reads the stored links.
 //
+// When no stored link names the workspace, both read its serves marker (./serves-marker.ts) as
+// the fallback for which task it was started for — the pointer only, never the task's stage.
+// The hook finds the folder in Orca's worktree id itself (`<project>::<path>`), so it reads one
+// local file and makes no host call.
+//
 // The strip's read. `temper.serves` names the stored link for the focused workspace and reads
 // the item's record on the grant (its own region state: a signed-out or failed read leaves the
 // link standing, named by its stored title and ref). A link stored before it carried a doc
-// type, title, project or path learns them here — from the record read and `workspace.list` —
-// so an older link is hook-ready once its workspace has been shown.
+// type, title, context, project or path learns them here — from the record read and
+// `workspace.list` — so an older link is hook-ready once its workspace has been shown.
 import type { OrcaWorkerApi } from 'orca/worker'
 import type { Gate } from './editor-room/open-body'
-import { readLinks, writeLinks } from './links'
+import { patchLink, readLinks } from './links'
+import { pathOfWorktreeId, readMarker, type ServesMarker } from './serves-marker'
 import type { LaunchLink, RecordDetailOutput, ServesInput, ServesOutput } from './protocol'
 import { resourceDetail } from './reads'
 
@@ -102,13 +108,27 @@ export function taskEnv(link: Pick<LaunchLink, 'docType' | 'ref' | 'itemId' | 'c
   }
 }
 
-/** The env the hook adds for one launch from the stored links. */
-export function storedEnv(links: readonly LaunchLink[], event: LaunchEvent): Record<string, string> {
-  if (event.workspaceId === null) {
+/** A marker as the link it points at — a task's, and nothing the marker does not say. */
+export function linkOfMarker(marker: ServesMarker, workspaceId: string): LaunchLink {
+  return {
+    workspaceId,
+    itemId: marker.task_id,
+    ref: marker.task_ref,
+    contextRef: marker.context_ref,
+    startedAt: marker.written_at,
+    docType: 'task',
+    ...(marker.title === null ? {} : { title: marker.title })
+  }
+}
+
+/** The env a workspace's serves marker gives, read from the folder its worktree id names. */
+async function markerEnv(workspaceId: string): Promise<Record<string, string>> {
+  const path = pathOfWorktreeId(workspaceId)
+  if (path === null) {
     return {}
   }
-  const link = servingLink(links, event.workspaceId)
-  return link === null ? {} : taskEnv(link)
+  const marker = await readMarker(path)
+  return marker === null ? {} : taskEnv(linkOfMarker(marker, workspaceId))
 }
 
 /** The launches this worker has sent and not yet linked; the hook reads it, the launch fills it. */
@@ -126,11 +146,15 @@ export function registerServes(orca: OrcaWorkerApi, gate: Gate, pending: Set<Pen
     if (starting !== null) {
       env = taskEnv(starting)
     } else {
+      let link: LaunchLink | null = null
+      let read = true
       try {
-        env = storedEnv(await readLinks(orca), event)
+        link = servingLink(await readLinks(orca), event.workspaceId)
       } catch {
-        env = {}
+        read = false
       }
+      // The marker answers only where no stored link names the workspace at all.
+      env = link !== null ? taskEnv(link) : read ? await markerEnv(event.workspaceId) : {}
     }
     if (Object.keys(env).length === 0) {
       return next(event)
@@ -154,6 +178,11 @@ async function serves(orca: OrcaWorkerApi, gate: Gate, input: ServesInput): Prom
       message: `the stored links could not be read: ${error instanceof Error ? error.message : String(error)}`
     }
   }
+  let fromMarker = false
+  if (link === null) {
+    link = await markerLink(orca, input.workspaceId)
+    fromMarker = link !== null
+  }
   if (link === null) {
     return { state: 'unlinked' }
   }
@@ -162,7 +191,7 @@ async function serves(orca: OrcaWorkerApi, gate: Gate, input: ServesInput): Prom
     state: 'ok' as const,
     detail: await resourceDetail(read, served.itemId)
   }))
-  const learned = await learnLink(orca, served, record)
+  const learned = fromMarker ? served : await learnLink(orca, served, record)
   return {
     state: 'linked',
     item: {
@@ -176,8 +205,27 @@ async function serves(orca: OrcaWorkerApi, gate: Gate, input: ServesInput): Prom
   }
 }
 
+/** The link a focused workspace's marker points at, found by its folder in `workspace.list`. */
+async function markerLink(orca: OrcaWorkerApi, workspaceId: string): Promise<LaunchLink | null> {
+  let path = pathOfWorktreeId(workspaceId)
+  if (path === null) {
+    try {
+      const listed = await orca.host.call('workspace.list')
+      const row = listed.workspaces.find((workspace) => workspace.id === workspaceId)
+      if (row === undefined || (row.hostId !== null && row.hostId !== 'local')) {
+        return null
+      }
+      path = row.path
+    } catch {
+      return null
+    }
+  }
+  const marker = await readMarker(path)
+  return marker === null ? null : linkOfMarker(marker, workspaceId)
+}
+
 /**
- * Fills what an older link lacks — its doc type and title from the record read, its project
+ * Fills what an older link lacks — its doc type, title and context from the record read, its project
  * and path from `workspace.list` — and stores it. Best effort: a refused list or write leaves
  * the link as it was, and the strip still answers.
  */
@@ -189,6 +237,9 @@ async function learnLink(orca: OrcaWorkerApi, link: LaunchLink, record: RecordDe
     }
     if (link.title !== record.detail.title) {
       patch.title = record.detail.title
+    }
+    if ((link.contextRef === null || link.contextRef === '') && record.detail.contextRef !== null) {
+      patch.contextRef = record.detail.contextRef
     }
   }
   if (worktreeIdOf(link) === null) {
@@ -207,13 +258,7 @@ async function learnLink(orca: OrcaWorkerApi, link: LaunchLink, record: RecordDe
     return link
   }
   try {
-    const links = await readLinks(orca)
-    await writeLinks(
-      orca,
-      links.map((entry) =>
-        entry.workspaceId === link.workspaceId && entry.itemId === link.itemId ? { ...entry, ...patch } : entry
-      )
-    )
+    await patchLink(orca, link, patch)
   } catch {
     // The answer stands without the stored lesson; the next read tries again.
   }

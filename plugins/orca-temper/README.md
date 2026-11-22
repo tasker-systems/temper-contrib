@@ -67,8 +67,11 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   `agent.status.changed` event or an `agents.list` row for the linked workspace — never by
   guessing; a link without one offers no Reopen. It is offered on a task's detail, one per
   linked workspace carrying a session, labelled with the workspace's name. A link whose
-  workspace is removed (`workspace.removed`, or missing from a complete `workspace.list`) is
-  dropped. No launch goes through `agent.launch`: every one makes a new workspace.
+  workspace is removed (`workspace.removed`, or missing from a complete `workspace.list` in
+  both of Orca's id forms, once it is more than ten minutes old) is dropped. Every write to the
+  stored links is one read-modify-write, and the worker runs them one at a time, so no writer
+  puts back a stale copy over a link another just stored. No launch goes through
+  `agent.launch`: every one makes a new workspace.
 - **This workspace** (`src/serves.ts`, `src/serves-strip.tsx`). Home's strip names the focused
   workspace (`workspace.readContext`, followed through `workspace.changed`), the temper task its
   stored link names — title, stage, ref and context, read on the grant through
@@ -82,7 +85,29 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   network, so it reads the stored link only — matched by the id `workspace.list` gives or by
   Orca's own worktree id (`<project>::<path>`, the id the hook hears) — and a launch still out
   to `workspace.create` answers from memory, since Orca starts its agent before the create
-  returns. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
+  returns. With no stored link, the hook and the strip fall back to the workspace's serves
+  marker. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
+- **The serves marker** (`src/serves-marker.ts`). Orca runs `agent.launch.before` only for agent
+  CLIs it starts in a terminal, so a chat agent, another harness, or an agent started outside
+  Orca gets no env. Each launch for a task therefore also writes
+  `.temper-views/serves.json` in the new workspace's folder — the folder Open body uses, kept
+  out of git by the same `info/exclude` entry, which the write makes sure of first:
+
+  ```json
+  {
+    "task_ref": "<the task's ref>",
+    "task_id": "<the task's bare UUID>",
+    "context_ref": "<its context's ref, e.g. +team/context, or null when cogmap-homed>",
+    "title": "<the task's title, or null>",
+    "written_at": "<ISO-8601 time of the launch>"
+  }
+  ```
+
+  It names which task the workspace was started for, and nothing else: no stage, claim or work
+  in flight — read those from temper. A launch for a goal or a session writes none, and removes
+  one left there. A marker that cannot be written (no folder on this machine, a folder without
+  git, tracked files under `.temper-views/`) never stops the launch; the sheet says why. An
+  agent learning its task checks `TEMPER_TASK` first, then this file at the workspace root.
 - **Open body** on a record's detail (lit by `workspace:read`, `workspace:write` and
   `storage:own`) opens the record's body in an Orca editor tab of the focused workspace, beside
   the person's view (`src/editor-room/`). The worker reads the record with its body and
