@@ -373,7 +373,8 @@ export function DetailLaunchButton(props: { detail: RecordDetail }): OrcaNode {
     id: detail.id,
     ref: detail.ref,
     title: detail.title,
-    contextRef: detail.contextRef
+    contextRef: detail.contextRef,
+    docType: detail.docType
   }
   return <LaunchButton kind={kind} from="detail" item={item} named={false} />
 }
@@ -401,7 +402,8 @@ export function HandoffLaunchButton(props: {
     id: props.handoff.id,
     ref: props.handoff.ref,
     title: props.handoff.title,
-    contextRef: props.handoff.contextRef
+    contextRef: props.handoff.contextRef,
+    docType: 'session'
   }
   return (
     <LaunchButton

@@ -14,7 +14,9 @@
 // and Tasks each take a status toggle (ruling 24: active · completed; backlog · in progress · done),
 // defaulting to the status temper-ui's home reads, so Home opens as temper-ui's does; the pick
 // is device-local view state, and every status keeps the count, the omission sentence, Show
-// more and the region states. A goal's linked tasks grow by the same Show more.
+// more and the region states. A goal's linked tasks grow by the same Show more. Home opens on
+// the "this workspace" strip (./serves-strip.tsx): the focused workspace, the task it serves
+// and its agents.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -74,6 +76,7 @@ import {
 } from './launcher'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
 import { loadSkillReadiness, SkillReadinessRegion } from './skill-readiness/region'
+import { refreshServes, ServesRegion, setupServes } from './serves-strip'
 import {
   ACT_ICON,
   docTypeIcon,
@@ -291,6 +294,7 @@ async function refresh(): Promise<void> {
   set(loading, true)
   // Agent skill readiness reads beside temper's regions, on its own: no grant rides it.
   void loadSkillReadiness()
+  refreshServes()
   try {
     const [resume, handoff, places, recent, ...ways] = await Promise.all([
       plugin.request('temper.home.resume'),
@@ -371,6 +375,7 @@ export function setup(ctx: PanelContext): void {
     void loadItemLinks(carried.id)
   }
   setupLauncher()
+  setupServes(ctx)
   void refresh()
 }
 
@@ -818,6 +823,7 @@ function HomeTab() {
   }
   return (
     <Stack gap="md">
+      <ServesRegion onOpen={pushDetail} />
       <ResumeRegion />
       <HandoffRegion />
       {WAYS_IN.map((way) => (

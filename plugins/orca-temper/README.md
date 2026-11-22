@@ -69,6 +69,20 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   linked workspace carrying a session, labelled with the workspace's name. A link whose
   workspace is removed (`workspace.removed`, or missing from a complete `workspace.list`) is
   dropped. No launch goes through `agent.launch`: every one makes a new workspace.
+- **This workspace** (`src/serves.ts`, `src/serves-strip.tsx`). Home's strip names the focused
+  workspace (`workspace.readContext`, followed through `workspace.changed`), the temper task its
+  stored link names — title, stage, ref and context, read on the grant through
+  `temper.serves` — and its agents with their status words (`agents.list`, read again on
+  `agent.status.changed`). An unlinked workspace says it serves no temper task; a link to a goal
+  or a handoff's session says the same and names what the workspace was started from. Without
+  `workspace:read` and `storage:own` the strip names the consent and reads nothing; without
+  `agent:read` its agents line does. The `agent.launch.before` hook gives every agent Orca starts
+  in a workspace linked to a task `TEMPER_TASK` (the task's ref) and `TEMPER_CONTEXT`, beside its
+  first prompt; elsewhere it adds nothing and never refuses a launch. Hooks get 2 s and no
+  network, so it reads the stored link only — matched by the id `workspace.list` gives or by
+  Orca's own worktree id (`<project>::<path>`, the id the hook hears) — and a launch still out
+  to `workspace.create` answers from memory, since Orca starts its agent before the create
+  returns. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
 - **Open body** on a record's detail (lit by `workspace:read`, `workspace:write` and
   `storage:own`) opens the record's body in an Orca editor tab of the focused workspace, beside
   the person's view (`src/editor-room/`). The worker reads the record with its body and
