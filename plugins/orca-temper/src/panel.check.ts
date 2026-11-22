@@ -336,6 +336,18 @@ const FAILED = (what: string) => ({ state: 'failed' as const, message: `temper a
 
 const WITHHELD = GRANTED.filter((kind) => kind !== 'agent:launch' && kind !== 'workspace:create')
 
+/** Home's temper lists all answered empty — so a shot reaches the regions drawn under them. */
+const EMPTY_HOME = {
+  'temper.home.resume': () => ({ state: 'ok' as const, resume: null }),
+  'temper.home.handoff': () => ({ state: 'ok' as const, sessionCount: 0, handoff: null }),
+  'temper.home.way-in': (input: { id: string; bound: number }) => {
+    const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
+    return { state: 'ok' as const, id: input.id, ...way, rows: [], total: 0, bound: input.bound }
+  },
+  'temper.home.places': () => ({ state: 'ok' as const, rows: [], total: 0 }),
+  'temper.home.recent': () => ({ state: 'ok' as const, rows: [], total: 0 })
+}
+
 function seeded(entry: { id: string; docType: string }) {
   const title = entry.id === GOAL_ID ? GOAL_DETAIL.title : TASK_DETAIL.title
   return { plugin: { 'detail-stack': [{ id: entry.id, ref: '', title, docType: entry.docType }] } }
@@ -440,20 +452,24 @@ export default defineCheck({
     requests: { ...LOOK.requests, 'temper.capabilities': () => ({ granted: WITHHELD }) },
     persisted: sheet(REMEMBERED)
   },
-  // Agent skill readiness on Home (shoot with --height to reach the region under the lists):
+  // Agent skill readiness on Home, its temper lists empty so the region under them is in frame:
   // a line per agent — ready, missing, unknown — and Install for the target not ready, its
   // path named before the press.
-  'look-skill': { ...LOOK, persisted: { plugin: { 'detail-stack': [] } } },
+  'look-skill': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
   // Out of date for Claude; the agents target unknown, its check having read another directory.
   'look-skill-stale': {
     ...LOOK,
-    requests: { ...LOOK.requests, 'temper.skill.readiness': () => SKILL_STALE },
+    requests: { ...LOOK.requests, ...EMPTY_HOME, 'temper.skill.readiness': () => SKILL_STALE },
     persisted: { plugin: { 'detail-stack': [] } }
   },
   // After the press: every line ready, the install's answer naming where it wrote.
   'look-skill-installed': {
     ...LOOK,
-    requests: { ...LOOK.requests, 'temper.skill.readiness': () => SKILL_READY },
+    requests: { ...LOOK.requests, ...EMPTY_HOME, 'temper.skill.readiness': () => SKILL_READY },
     persisted: {
       plugin: {
         'detail-stack': [],
@@ -466,6 +482,7 @@ export default defineCheck({
   // A press whose install failed: still missing, the CLI's words under the press.
   'look-skill-install-failed': {
     ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
     persisted: {
       plugin: {
         'detail-stack': [],
@@ -484,6 +501,7 @@ export default defineCheck({
     ...LOOK,
     requests: {
       ...LOOK.requests,
+      ...EMPTY_HOME,
       'temper.skill.readiness': (): SkillReadinessOutput => ({ state: 'failed', message: 'Orca would not name its agents: exit 1' })
     },
     persisted: { plugin: { 'detail-stack': [] } }
@@ -549,17 +567,7 @@ export default defineCheck({
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {
     ...LOOK,
-    requests: {
-      ...LOOK.requests,
-      'temper.home.resume': () => ({ state: 'ok' as const, resume: null }),
-      'temper.home.handoff': () => ({ state: 'ok' as const, sessionCount: 0, handoff: null }),
-      'temper.home.way-in': (input: { id: string; bound: number }) => {
-        const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
-        return { state: 'ok' as const, id: input.id, ...way, rows: [], total: 0, bound: input.bound }
-      },
-      'temper.home.places': () => ({ state: 'ok' as const, rows: [], total: 0 }),
-      'temper.home.recent': () => ({ state: 'ok' as const, rows: [], total: 0 })
-    },
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
     persisted: { plugin: { 'detail-stack': [] } }
   },
   // Reads still out: the house words over a skeleton. A check settles every request before
