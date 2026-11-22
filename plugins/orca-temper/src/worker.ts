@@ -24,6 +24,8 @@ import {
 } from './reads'
 import { TemperOriginRefusedError } from './origin'
 import { registerEditorRoom } from './editor-room/open-body'
+import { readLaunchableAgents } from './agents'
+import { registerSkillReadiness } from './skill-readiness/worker'
 import type {
   CapabilitiesOutput,
   LatestHandoffOutput,
@@ -157,6 +159,8 @@ export default function activate(orca: OrcaWorkerApi): void {
   )
   // The editor room (Open body): its own module, gated on the same grant.
   registerEditorRoom(orca, answer)
+  // Agent skill readiness: the CLI's skill check per install target, and the Install press.
+  registerSkillReadiness(orca)
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
@@ -193,49 +197,8 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
   })
 
-  // The agents Orca can launch on this host: the host API has no enumeration, so the question
-  // goes to the host's own CLI (`orca agent installed --json` — the public command, never the
-  // undocumented RPC beneath it). A failed run fails the pick list rather than guessing a set.
-  orca.panels.handle('temper.launch.agents', async (): Promise<LaunchAgentsOutput> => {
-    let result
-    try {
-      result = await deps.runOrca(['agent', 'installed', '--json'], process.env)
-    } catch (error) {
-      return {
-        state: 'failed',
-        message: `the Orca CLI could not be run: ${error instanceof Error ? error.message : String(error)}`
-      }
-    }
-    if (result.code !== 0) {
-      const words = (result.stderr.trim() || result.stdout.trim()).split('\n')[0] ?? ''
-      return { state: 'failed', message: `Orca would not name its agents: ${words || `exit ${result.code}`}` }
-    }
-    try {
-      const parsed: unknown = JSON.parse(result.stdout)
-      const box = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
-      const resultBox =
-        box['result'] !== null && typeof box['result'] === 'object'
-          ? (box['result'] as Record<string, unknown>)
-          : box
-      const agents = Array.isArray(resultBox['agents']) ? resultBox['agents'] : []
-      const named = agents
-        .filter(
-          (agent): agent is { id: string; name?: unknown; default?: unknown } =>
-            agent !== null && typeof agent === 'object' && typeof (agent as { id?: unknown }).id === 'string'
-        )
-        .map((agent) => ({
-          id: agent.id,
-          name: typeof agent['name'] === 'string' ? (agent['name'] as string) : agent.id,
-          isDefault: agent['default'] === true
-        }))
-      return { state: 'ok', agents: named }
-    } catch (error) {
-      return {
-        state: 'failed',
-        message: `Orca's agent list could not be read: ${error instanceof Error ? error.message : String(error)}`
-      }
-    }
-  })
+  // The agents Orca can launch on this host (`orca agent installed`, ./agents.ts).
+  orca.panels.handle('temper.launch.agents', async (): Promise<LaunchAgentsOutput> => readLaunchableAgents())
 
   // One launch. The press itself writes nothing to temper — the prompt the person saw goes to
   // workspace.create in the picked project, the host re-checks every consent itself, and a

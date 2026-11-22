@@ -69,6 +69,7 @@ import type {
   ReopenOutput
 } from './protocol'
 import { LAUNCH_PRESS_NEEDS, REOPEN_NEEDS } from './protocol'
+import { ensureSkillReadiness, SheetSkillNote } from './skill-readiness/region'
 
 /** The act a sheet launches: the ruled buttons (Resume task stands on a task and on the
  *  handoff card, each with its own prompt). */
@@ -218,6 +219,8 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
     kind === 'handoff-resume' ? { hasSession: true, session: null, next: compose.handoffNext } : null
   )
   set(launchPick, { projectId: null, agent: null })
+  // The picked agent's skill line reads Home's readiness answer, asked here if Home never did.
+  ensureSkillReadiness()
 
   const [projects, agents, , taskRead] = await Promise.all([
     plugin.request('temper.launch.projects').catch(
@@ -569,6 +572,7 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
             onChange={(value) => set(launchPick, { ...current, agent: value })}
           />
         )}
+        {agents !== null && agents.state === 'ok' ? <SheetSkillNote agent={current.agent} /> : undefined}
         {outcome === null ? undefined : <OutcomeCallout outcome={outcome} />}
         <Stack gap="xs">
           <Row gap="sm" align="center">

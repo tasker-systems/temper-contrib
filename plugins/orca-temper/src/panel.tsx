@@ -73,6 +73,7 @@ import {
   setupLauncher
 } from './launcher'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
+import { loadSkillReadiness, SkillReadinessRegion } from './skill-readiness/region'
 import {
   ACT_ICON,
   docTypeIcon,
@@ -288,6 +289,8 @@ async function askWayIn(id: string): Promise<WayInOutput | null> {
 
 async function refresh(): Promise<void> {
   set(loading, true)
+  // Agent skill readiness reads beside temper's regions, on its own: no grant rides it.
+  void loadSkillReadiness()
   try {
     const [resume, handoff, places, recent, ...ways] = await Promise.all([
       plugin.request('temper.home.resume'),
@@ -822,6 +825,7 @@ function HomeTab() {
       ))}
       <RecentRegion />
       <PlacesRegion />
+      <SkillReadinessRegion />
     </Stack>
   )
 }

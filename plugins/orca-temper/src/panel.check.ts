@@ -15,8 +15,12 @@
 // whose stored link carries a session, so Reopen agent stands beside Resume task; the
 // `look-home-tasks-backlog` and `look-home-goals-done` draw Home's ways in by another status
 // than the default (ruling 24); the `look-state-*` scenarios
-// draw every region state: signed out, failed, loading, empty, and a withheld consent.
+// draw every region state: signed out, failed, loading, empty, and a withheld consent. The
+// `look-skill*` scenarios draw agent skill readiness on Home (ready, missing, out of date,
+// unknown, installed, install failed, read failed), and `look-sheet-skill-*` the sheet's line
+// for a picked agent whose skill is missing or unknown.
 import { defineCheck } from 'orca/testing'
+import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
 const named = process.env['ORCA_TEMPER_DETAIL_ID']?.trim()
 
@@ -150,6 +154,58 @@ const LINKED = {
   sessionId: 'session-placeholder' as string | null
 }
 
+/** Agent skill readiness, a line per agent Orca can launch; placeholder paths. */
+const SKILL_HOME = '/home/someone'
+const AGENTS_SKILL = `${SKILL_HOME}/.agents/skills/temper`
+const CLAUDE_SKILL = `${SKILL_HOME}/.claude/skills/temper`
+const CLAUDE_WRITES = [CLAUDE_SKILL, `${SKILL_HOME}/.claude/commands/temper.md`]
+const ANTIGRAVITY: HarnessReadiness = {
+  agent: 'antigravity',
+  name: 'Antigravity',
+  target: null,
+  state: 'unknown' as const,
+  detail: 'it reads its skills from ~/.gemini/config/skills, which no temper install target writes'
+}
+
+/** Claude ready, Codex and OpenCode missing (the agents target), Antigravity unknown. */
+const SKILL_MIXED: SkillReadinessOutput & { state: 'ok' } = {
+  state: 'ok' as const,
+  harnesses: [
+    { agent: 'claude', name: 'Claude', target: 'claude', state: 'ready' as const, detail: CLAUDE_SKILL },
+    { agent: 'codex', name: 'Codex', target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}` },
+    { agent: 'opencode', name: 'OpenCode', target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}` },
+    ANTIGRAVITY
+  ],
+  targets: [
+    { target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}`, writes: [AGENTS_SKILL] },
+    { target: 'claude', state: 'ready' as const, detail: CLAUDE_SKILL, writes: CLAUDE_WRITES }
+  ]
+}
+
+/** Claude out of date; the agents target unknown, its check having read another directory. */
+const MISMATCH = `temper skill check reads ${CLAUDE_SKILL} (its skill.output setting), not ${AGENTS_SKILL}`
+const SKILL_STALE: SkillReadinessOutput = {
+  state: 'ok' as const,
+  harnesses: [
+    { agent: 'claude', name: 'Claude', target: 'claude', state: 'out-of-date' as const, detail: `${CLAUDE_SKILL} was installed for an older temper config` },
+    { agent: 'codex', name: 'Codex', target: 'agents', state: 'unknown' as const, detail: MISMATCH },
+    ANTIGRAVITY
+  ],
+  targets: [
+    { target: 'agents', state: 'unknown' as const, detail: MISMATCH, writes: [AGENTS_SKILL] },
+    { target: 'claude', state: 'out-of-date' as const, detail: `${CLAUDE_SKILL} was installed for an older temper config`, writes: CLAUDE_WRITES }
+  ]
+}
+
+/** Every target ready, after an install. */
+const SKILL_READY: SkillReadinessOutput = {
+  ...SKILL_MIXED,
+  harnesses: SKILL_MIXED.harnesses.map((harness) =>
+    harness.target === 'agents' ? { ...harness, state: 'ready' as const, detail: AGENTS_SKILL } : harness
+  ),
+  targets: SKILL_MIXED.targets.map((target) => ({ ...target, state: 'ready' as const, detail: target.writes[0] }))
+}
+
 const LOOK = {
   capabilities: GRANTED,
   settings: { webUrl: 'https://temper.example' },
@@ -219,6 +275,7 @@ const LOOK = {
       ]
     }),
     'temper.launch.links': () => ({ state: 'ok' as const, links: [] as typeof LINKED[] }),
+    'temper.skill.readiness': () => SKILL_MIXED,
     'temper.launch.task-handoff': () => ({
       state: 'ok' as const,
       handoff: {
@@ -381,6 +438,84 @@ export default defineCheck({
     ...LOOK,
     capabilities: WITHHELD,
     requests: { ...LOOK.requests, 'temper.capabilities': () => ({ granted: WITHHELD }) },
+    persisted: sheet(REMEMBERED)
+  },
+  // Agent skill readiness on Home (shoot with --height to reach the region under the lists):
+  // a line per agent — ready, missing, unknown — and Install for the target not ready, its
+  // path named before the press.
+  'look-skill': { ...LOOK, persisted: { plugin: { 'detail-stack': [] } } },
+  // Out of date for Claude; the agents target unknown, its check having read another directory.
+  'look-skill-stale': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.skill.readiness': () => SKILL_STALE },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  // After the press: every line ready, the install's answer naming where it wrote.
+  'look-skill-installed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.skill.readiness': () => SKILL_READY },
+    persisted: {
+      plugin: {
+        'detail-stack': [],
+        'skill-installs': {
+          agents: { state: 'installed', target: 'agents', skillDir: AGENTS_SKILL, total: 14, changed: 14 }
+        }
+      }
+    }
+  },
+  // A press whose install failed: still missing, the CLI's words under the press.
+  'look-skill-install-failed': {
+    ...LOOK,
+    persisted: {
+      plugin: {
+        'detail-stack': [],
+        'skill-installs': {
+          agents: {
+            state: 'failed',
+            target: 'agents',
+            message: `temper skill install failed: Permission denied (os error 13) at ${AGENTS_SKILL}`
+          }
+        }
+      }
+    }
+  },
+  // The readiness read itself failed: Orca would not name its agents.
+  'look-skill-failed': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.skill.readiness': (): SkillReadinessOutput => ({ state: 'failed', message: 'Orca would not name its agents: exit 1' })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  // The sheet with an agent whose skill is missing picked: named in warning text, confirm lit.
+  'look-sheet-skill-missing': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.launch.agents': () => ({
+        state: 'ok' as const,
+        agents: [
+          { id: 'codex', name: 'Codex', isDefault: true },
+          { id: 'claude', name: 'Claude', isDefault: false }
+        ]
+      })
+    },
+    persisted: sheet(REMEMBERED)
+  },
+  // The sheet with an agent no target reaches: unknown, said muted.
+  'look-sheet-skill-unknown': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.launch.agents': () => ({
+        state: 'ok' as const,
+        agents: [
+          { id: 'antigravity', name: 'Antigravity', isDefault: true },
+          { id: 'claude', name: 'Claude', isDefault: false }
+        ]
+      })
+    },
     persisted: sheet(REMEMBERED)
   },
   'look-state-signed-out': {
