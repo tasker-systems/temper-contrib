@@ -15,8 +15,12 @@
 // whose stored link carries a session, so Reopen agent stands beside Resume task; the
 // `look-home-tasks-backlog` and `look-home-goals-completed` draw Home's ways in by another status
 // than the default (ruling 24); the `look-state-*` scenarios
-// draw every region state: signed out, failed, loading, empty, and a withheld consent.
+// draw every region state: signed out, failed, loading, empty, and a withheld consent. The
+// `look-skill*` scenarios draw agent skill readiness on Home (ready, missing, out of date,
+// unknown, installed, install failed, read failed), and `look-sheet-skill-*` the sheet's line
+// for a picked agent whose skill is missing or unknown.
 import { defineCheck } from 'orca/testing'
+import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
 const named = process.env['ORCA_TEMPER_DETAIL_ID']?.trim()
 
@@ -150,6 +154,58 @@ const LINKED = {
   sessionId: 'session-placeholder' as string | null
 }
 
+/** Agent skill readiness, a line per agent Orca can launch; placeholder paths. */
+const SKILL_HOME = '/home/someone'
+const AGENTS_SKILL = `${SKILL_HOME}/.agents/skills/temper`
+const CLAUDE_SKILL = `${SKILL_HOME}/.claude/skills/temper`
+const CLAUDE_WRITES = [CLAUDE_SKILL, `${SKILL_HOME}/.claude/commands/temper.md`]
+const ANTIGRAVITY: HarnessReadiness = {
+  agent: 'antigravity',
+  name: 'Antigravity',
+  target: null,
+  state: 'unknown' as const,
+  detail: 'it reads its skills from ~/.gemini/config/skills, which no temper install target writes'
+}
+
+/** Claude ready, Codex and OpenCode missing (the agents target), Antigravity unknown. */
+const SKILL_MIXED: SkillReadinessOutput & { state: 'ok' } = {
+  state: 'ok' as const,
+  harnesses: [
+    { agent: 'claude', name: 'Claude', target: 'claude', state: 'ready' as const, detail: CLAUDE_SKILL },
+    { agent: 'codex', name: 'Codex', target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}` },
+    { agent: 'opencode', name: 'OpenCode', target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}` },
+    ANTIGRAVITY
+  ],
+  targets: [
+    { target: 'agents', state: 'missing' as const, detail: `nothing at ${AGENTS_SKILL}`, writes: [AGENTS_SKILL] },
+    { target: 'claude', state: 'ready' as const, detail: CLAUDE_SKILL, writes: CLAUDE_WRITES }
+  ]
+}
+
+/** Claude out of date; the agents target unknown, its check having read another directory. */
+const MISMATCH = `temper skill check reads ${CLAUDE_SKILL} (its skill.output setting), not ${AGENTS_SKILL}`
+const SKILL_STALE: SkillReadinessOutput = {
+  state: 'ok' as const,
+  harnesses: [
+    { agent: 'claude', name: 'Claude', target: 'claude', state: 'out-of-date' as const, detail: `${CLAUDE_SKILL} was installed for an older temper config` },
+    { agent: 'codex', name: 'Codex', target: 'agents', state: 'unknown' as const, detail: MISMATCH },
+    ANTIGRAVITY
+  ],
+  targets: [
+    { target: 'agents', state: 'unknown' as const, detail: MISMATCH, writes: [AGENTS_SKILL] },
+    { target: 'claude', state: 'out-of-date' as const, detail: `${CLAUDE_SKILL} was installed for an older temper config`, writes: CLAUDE_WRITES }
+  ]
+}
+
+/** Every target ready, after an install. */
+const SKILL_READY: SkillReadinessOutput = {
+  ...SKILL_MIXED,
+  harnesses: SKILL_MIXED.harnesses.map((harness) =>
+    harness.target === 'agents' ? { ...harness, state: 'ready' as const, detail: AGENTS_SKILL } : harness
+  ),
+  targets: SKILL_MIXED.targets.map((target) => ({ ...target, state: 'ready' as const, detail: target.writes[0] }))
+}
+
 const LOOK = {
   capabilities: GRANTED,
   settings: { webUrl: 'https://temper.example' },
@@ -219,6 +275,7 @@ const LOOK = {
       ]
     }),
     'temper.launch.links': () => ({ state: 'ok' as const, links: [] as typeof LINKED[] }),
+    'temper.skill.readiness': () => SKILL_MIXED,
     'temper.launch.task-handoff': () => ({
       state: 'ok' as const,
       handoff: {
@@ -278,6 +335,18 @@ function allAnswer(answer: typeof NOT_CONNECTED) {
 const FAILED = (what: string) => ({ state: 'failed' as const, message: `temper answered 503 on the ${what} read` })
 
 const WITHHELD = GRANTED.filter((kind) => kind !== 'agent:launch' && kind !== 'workspace:create')
+
+/** Home's temper lists all answered empty — so a shot reaches the regions drawn under them. */
+const EMPTY_HOME = {
+  'temper.home.resume': () => ({ state: 'ok' as const, resume: null }),
+  'temper.home.handoff': () => ({ state: 'ok' as const, sessionCount: 0, handoff: null }),
+  'temper.home.way-in': (input: { id: string; bound: number }) => {
+    const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
+    return { state: 'ok' as const, id: input.id, ...way, rows: [], total: 0, bound: input.bound }
+  },
+  'temper.home.places': () => ({ state: 'ok' as const, rows: [], total: 0 }),
+  'temper.home.recent': () => ({ state: 'ok' as const, rows: [], total: 0 })
+}
 
 function seeded(entry: { id: string; docType: string }) {
   const title = entry.id === GOAL_ID ? GOAL_DETAIL.title : TASK_DETAIL.title
@@ -383,6 +452,90 @@ export default defineCheck({
     requests: { ...LOOK.requests, 'temper.capabilities': () => ({ granted: WITHHELD }) },
     persisted: sheet(REMEMBERED)
   },
+  // Agent skill readiness on Home, its temper lists empty so the region under them is in frame:
+  // a line per agent — ready, missing, unknown — and Install for the target not ready, its
+  // path named before the press.
+  'look-skill': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  // Out of date for Claude; the agents target unknown, its check having read another directory.
+  'look-skill-stale': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME, 'temper.skill.readiness': () => SKILL_STALE },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  // After the press: every line ready, the install's answer naming where it wrote.
+  'look-skill-installed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME, 'temper.skill.readiness': () => SKILL_READY },
+    persisted: {
+      plugin: {
+        'detail-stack': [],
+        'skill-installs': {
+          agents: { state: 'installed', target: 'agents', skillDir: AGENTS_SKILL, total: 14, changed: 14 }
+        }
+      }
+    }
+  },
+  // A press whose install failed: still missing, the CLI's words under the press.
+  'look-skill-install-failed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
+    persisted: {
+      plugin: {
+        'detail-stack': [],
+        'skill-installs': {
+          agents: {
+            state: 'failed',
+            target: 'agents',
+            message: `temper skill install failed: Permission denied (os error 13) at ${AGENTS_SKILL}`
+          }
+        }
+      }
+    }
+  },
+  // The readiness read itself failed: Orca would not name its agents.
+  'look-skill-failed': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      ...EMPTY_HOME,
+      'temper.skill.readiness': (): SkillReadinessOutput => ({ state: 'failed', message: 'Orca would not name its agents: exit 1' })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  // The sheet with an agent whose skill is missing picked: named in warning text, confirm lit.
+  'look-sheet-skill-missing': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.launch.agents': () => ({
+        state: 'ok' as const,
+        agents: [
+          { id: 'codex', name: 'Codex', isDefault: true },
+          { id: 'claude', name: 'Claude', isDefault: false }
+        ]
+      })
+    },
+    persisted: sheet(REMEMBERED)
+  },
+  // The sheet with an agent no target reaches: unknown, said muted.
+  'look-sheet-skill-unknown': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.launch.agents': () => ({
+        state: 'ok' as const,
+        agents: [
+          { id: 'antigravity', name: 'Antigravity', isDefault: true },
+          { id: 'claude', name: 'Claude', isDefault: false }
+        ]
+      })
+    },
+    persisted: sheet(REMEMBERED)
+  },
   'look-state-signed-out': {
     ...LOOK,
     requests: { ...LOOK.requests, ...allAnswer(NOT_CONNECTED) },
@@ -414,17 +567,7 @@ export default defineCheck({
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {
     ...LOOK,
-    requests: {
-      ...LOOK.requests,
-      'temper.home.resume': () => ({ state: 'ok' as const, resume: null }),
-      'temper.home.handoff': () => ({ state: 'ok' as const, sessionCount: 0, handoff: null }),
-      'temper.home.way-in': (input: { id: string; bound: number }) => {
-        const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
-        return { state: 'ok' as const, id: input.id, ...way, rows: [], total: 0, bound: input.bound }
-      },
-      'temper.home.places': () => ({ state: 'ok' as const, rows: [], total: 0 }),
-      'temper.home.recent': () => ({ state: 'ok' as const, rows: [], total: 0 })
-    },
+    requests: { ...LOOK.requests, ...EMPTY_HOME },
     persisted: { plugin: { 'detail-stack': [] } }
   },
   // Reads still out: the house words over a skeleton. A check settles every request before

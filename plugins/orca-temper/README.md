@@ -97,6 +97,17 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   absolute path from `workspace.list`, and the prompt names the file by that path, so the
   agent's proposal lands in the view's difference. Witnesses: `orca_only_a_save_reaches_temper` and
   `orca_stale_save_writes_nothing` in `editor/save.test.ts`.
+- **Agent skill** on Home (`src/skill-readiness/`): one line per agent `orca agent installed`
+  names — ready, missing, out of date or unknown, in words. The worker runs `temper skill check
+  --target <t> --format json` once per install target those agents need (`agents` for codex,
+  gemini, cursor, copilot, opencode and kimi; `claude` for Claude Code) and reads each agent from
+  its own target's check. An agent no target reaches is unknown with why, and so is one whose
+  check did not look in its target's directory (the CLI's check reads its `skill.output`
+  setting whatever `--target` says) — never ready by guess. A target not ready gets an
+  **Install** press with the paths `temper skill install --target <t>` writes stated beside it;
+  only that press installs, and its answer names the directory the CLI wrote. The launcher
+  sheet names a skill that is not ready for the agent picked without blocking the confirm. No
+  capability from Orca is needed.
 - The settings are the API origin override and the "Temper web address" (`webUrl`); the
   context-scoped settings and reads were retired when Home became person-scoped (the design
   record's Rulings, Q1).
