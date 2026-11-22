@@ -83,7 +83,7 @@ async function focusedWorkspace(orca: OrcaWorkerApi): Promise<Workspace> {
  * linked one. A folder without git refuses: a view written there could not be kept out of a
  * repository the folder may later become.
  */
-async function commonGitDir(workspace: Workspace): Promise<string> {
+export async function commonGitDir(workspace: Pick<Workspace, 'name' | 'path'>): Promise<string> {
   const answer = await roomDeps.git(['rev-parse', '--git-common-dir'], workspace.path)
   const dir = answer.stdout.trim()
   if (answer.code !== 0 || dir === '') {
@@ -92,7 +92,7 @@ async function commonGitDir(workspace: Workspace): Promise<string> {
   return isAbsolute(dir) ? dir : resolve(workspace.path, dir)
 }
 
-async function refuseTrackedViews(workspace: Workspace): Promise<void> {
+export async function refuseTrackedViews(workspace: Pick<Workspace, 'name' | 'path'>): Promise<void> {
   const answer = await roomDeps.git(['ls-files', '--', VIEW_DIR], workspace.path)
   if (answer.code !== 0) {
     throw new Error(`git could not list ${VIEW_DIR}/ in ${workspace.name}: ${answer.stderr.trim()}`)

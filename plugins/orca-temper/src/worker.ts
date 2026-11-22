@@ -32,6 +32,7 @@ import type {
   LatestHandoffOutput,
   LaunchAgentsOutput,
   LaunchInput,
+  LaunchLink,
   LaunchOutput,
   LaunchProjectsOutput,
   LinkedTasksInput,
@@ -55,9 +56,11 @@ import {
   dropRemovedWorkspace,
   learnSessionFromEvent,
   linkedWorkspaces,
+  listedRowFor,
   readLinks,
   storeLink
 } from './links'
+import { pathOfWorktreeId, placeMarker } from './serves-marker'
 
 /** The agent kinds `agent.resume` takes; a link stores the kind the launch started. */
 type ResumableAgent = HostParams<'agent.resume'>['agent']
@@ -212,8 +215,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   // launcher's (decision ruling 23) and the editor room's "Hand to an agent" (ruling 25), in the
   // view workspace's project: Orca's agent.launch drops its prompt today (stablyai/orca#41107).
   // The new workspace is named as Orca then lists it. On success the workspace ↔ item link lands in the plugin's own storage
-  // with the agent and its terminal, so its session can be learned for Reopen agent; a link
-  // that cannot be stored rides along as `linkError` and never takes the launch back.
+  // with the agent and its terminal, so its session can be learned for Reopen agent, and a
+  // task's launch writes the serves marker in the workspace folder; a link that cannot be
+  // stored rides along as `linkError`, a marker that cannot be written as `markerError`, and
+  // neither ever takes the launch back.
   orca.panels.handle('temper.launch.go', async (input: LaunchInput): Promise<LaunchOutput> => {
     if (input.destination !== 'new-workspace') {
       return { state: 'failed', message: `unknown launch destination: ${String(input.destination)}` }
@@ -269,27 +274,52 @@ export default function activate(orca: OrcaWorkerApi): void {
       }
 
       // The name the person knows the workspace by, and the project and path its worktree id
-      // is made of (the launch hook's match); a list that fails or lacks it names none.
-      let listedRow: { name: string; projectId?: string | null; path: string } | undefined
+      // is made of (the launch hook's match). The create may answer Orca's worktree id
+      // (`<project>::<path>`) rather than the listed one, so the row is found by either, and the
+      // link keeps the listed id; a list that fails or lacks it names none, and a worktree id
+      // still gives the project and path.
+      let listedRow: { id: string; name: string; projectId?: string | null; path: string; hostId: string | null } | undefined
       try {
         const listed = await orca.host.call('workspace.list')
-        listedRow = listed.workspaces.find((entry) => entry.id === workspaceId)
+        listedRow = listedRowFor(listed.workspaces, { workspaceId })
       } catch {
         listedRow = undefined
       }
       const workspaceName = listedRow?.name ?? null
+      const rawPath = pathOfWorktreeId(workspaceId)
       const place =
         listedRow !== undefined && typeof listedRow.projectId === 'string' && listedRow.projectId !== ''
           ? { projectId: listedRow.projectId, path: listedRow.path }
-          : {}
+          : rawPath !== null && workspaceId.startsWith(`${input.projectId}::`)
+            ? { projectId: input.projectId, path: rawPath }
+            : {}
+      const link: LaunchLink = {
+        ...pending.link,
+        workspaceId: listedRow?.id ?? workspaceId,
+        terminalId,
+        ...place
+      }
+
+      // The serves marker beside the link (decision ruling 27): any agent in the workspace can
+      // read which task it serves. Written only on this machine; a failure is said, never fatal.
+      let markerError: string | null = null
+      const folder = listedRow?.path ?? rawPath
+      if (folder === null || (listedRow !== undefined && listedRow.hostId !== null && listedRow.hostId !== 'local')) {
+        markerError =
+          link.docType === 'task'
+            ? 'the serves marker was not written: Orca named no folder on this machine for the new workspace'
+            : null
+      } else {
+        markerError = await placeMarker({ name: workspaceName ?? folder, path: folder }, link)
+      }
 
       let linkError: string | null = null
       try {
-        await storeLink(orca, { ...pending.link, workspaceId, terminalId, ...place })
+        await storeLink(orca, link)
       } catch (error) {
         linkError = error instanceof Error ? error.message : String(error)
       }
-      return { state: 'launched', workspaceId, workspaceName, terminalId, linkError }
+      return { state: 'launched', workspaceId, workspaceName, terminalId, linkError, markerError }
     } finally {
       pendingLaunches.delete(pending)
     }
