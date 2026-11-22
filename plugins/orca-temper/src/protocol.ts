@@ -28,6 +28,9 @@
 //                           each with the agent session the link carries (or none)
 //   temper.reopen.go      — Reopen agent: `agent.resume` with the session a stored link
 //                           carries, back in its workspace; no temper prompt, no temper write
+//   temper.serves         — what the focused workspace serves: the stored link joining it
+//                           to an item, and that item's record read on the grant (Home's
+//                           "this workspace" strip)
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -222,6 +225,12 @@ export interface LaunchItem {
   ref: string
   title: string
   contextRef: string | null
+  /**
+   * The record's doc-type word, when the press knows it (a detail's launch, or the handoff
+   * card's session). The launch hook gives an agent `TEMPER_TASK` only for a link whose item is
+   * a task, so a link that names no doc type gives none.
+   */
+  docType?: string
 }
 
 /**
@@ -260,7 +269,7 @@ export type LaunchOutput =
 
 /**
  * The workspace ↔ item link, stored in the plugin's own storage on a successful launch
- * (Rulings Q3 — the write-back stays local, never temper); item 7's launch hook reads it.
+ * (Rulings Q3 — the write-back stays local, never temper); the launch hook (./serves.ts) reads it.
  * One entry per workspace × item; a relaunch of the same pair replaces its entry. A link
  * whose workspace is removed is dropped.
  */
@@ -281,6 +290,17 @@ export interface LaunchLink {
    * Absent until Orca names it; a link without one offers no Reopen.
    */
   sessionId?: string | null
+  /** The item's title as the press named it, so the strip names a task temper cannot answer for. */
+  title?: string
+  /** The item's doc-type word (`LaunchItem.docType`), or learned from its record read later. */
+  docType?: string
+  /**
+   * The workspace's project and path as `workspace.list` gives them. The launch hook hears a
+   * workspace by Orca's own worktree id — not the id `workspace.list` gives — so the link keeps
+   * what that id is made of (see ./serves.ts).
+   */
+  projectId?: string
+  path?: string
 }
 
 /** The plugin-storage key under which the launch links sit, as a JSON array. */
@@ -351,6 +371,35 @@ export const LAUNCH_PRESS_NEEDS = ['workspace:read', 'workspace:create', 'agent:
  */
 export const REOPEN_NEEDS = ['workspace:read', 'agent:launch', 'storage:own'] as const
 
+/** `temper.serves`: the focused workspace, by the id `workspace.readContext` gives it. */
+export interface ServesInput {
+  workspaceId: string
+}
+
+/** The item a workspace's stored link names, as the link holds it. */
+export interface ServedItem {
+  itemId: string
+  ref: string
+  /** The title the press named; null on a link stored before titles were kept. */
+  title: string | null
+  /** The doc-type word; null when neither the press nor a record read has named it. */
+  docType: string | null
+  contextRef: string | null
+}
+
+export type ServesOutput =
+  /** No stored link joins this workspace to a temper item. */
+  | { state: 'unlinked' }
+  /** A stored link names the item; `record` is its read on the grant, in its own region state. */
+  | { state: 'linked'; item: ServedItem; record: RecordDetailOutput }
+  /** The stored links could not be read. */
+  | { state: 'failed'; message: string }
+
+/** What Home's "this workspace" strip needs: the focused workspace and its stored link. */
+export const SERVES_NEEDS = ['workspace:read', 'storage:own'] as const
+/** What the strip's agents line needs: `agents.list` and the status events. */
+export const SERVES_AGENTS_NEEDS = ['agent:read'] as const
+
 declare module 'orca' {
   interface PluginRequests {
     /** The one resource the person last changed, or a signed-out refusal. */
@@ -381,5 +430,7 @@ declare module 'orca' {
     'temper.reopen.go': { input: ReopenInput; output: ReopenOutput }
     /** The task's own newest linked session and its Next section — never the person's latest. */
     'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
+    /** What the focused workspace serves: its stored link, and the item's record read. */
+    'temper.serves': { input: ServesInput; output: ServesOutput }
   }
 }

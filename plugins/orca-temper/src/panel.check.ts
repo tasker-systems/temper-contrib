@@ -14,7 +14,9 @@
 // task's linked workspace named before the confirm; `look-task-reopen` draws a task's detail
 // whose stored link carries a session, so Reopen agent stands beside Resume task; the
 // `look-home-tasks-backlog` and `look-home-goals-completed` draw Home's ways in by another status
-// than the default (ruling 24); the `look-state-*` scenarios
+// than the default (ruling 24); the `look-serves-*` scenarios draw Home's "this workspace"
+// strip — linked to a task with its agents, unlinked, linked to a goal, no workspace in focus,
+// and its consents withheld; the `look-state-*` scenarios
 // draw every region state: signed out, failed, loading, empty, and a withheld consent. The
 // `look-skill*` scenarios draw agent skill readiness on Home (ready, missing, out of date,
 // unknown, installed, install failed, read failed), and `look-sheet-skill-*` the sheet's line
@@ -206,8 +208,30 @@ const SKILL_READY: SkillReadinessOutput = {
   targets: SKILL_MIXED.targets.map((target) => ({ ...target, state: 'ready' as const, detail: target.writes[0] }))
 }
 
+/** The focused workspace, as Orca names it to the panel. */
+const FOCUSED = {
+  workspaceId: 'identity:wt2:local:placeholder',
+  branch: 'pt/the-rails-look',
+  displayName: 'the-rails-look',
+  terminals: []
+}
+
+const AGENTS = {
+  agents: [
+    { terminalId: 't-1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: Date.now() - 12 * 60_000, sessionId: null, task: null },
+    { terminalId: 't-2', title: 'Codex', agent: 'codex', state: 'done', stateStartedAt: Date.now() - 60 * 60_000, sessionId: null, task: null }
+  ]
+}
+
+const SERVES_TASK = {
+  state: 'linked' as const,
+  item: { itemId: TASK_ID, ref: `the-rails-look-on-orcas-controls-home-and-detail-${TASK_ID}`, title: "The rail's look on Orca's controls: Home and detail", docType: 'task', contextRef: CONTEXT },
+  record: { state: 'ok' as const, detail: null as unknown }
+}
+
 const LOOK = {
   capabilities: GRANTED,
+  results: { 'workspace.readContext': FOCUSED, 'agents.list': AGENTS },
   settings: { webUrl: 'https://temper.example' },
   requests: {
     'temper.capabilities': () => ({ granted: GRANTED }),
@@ -276,6 +300,7 @@ const LOOK = {
     }),
     'temper.launch.links': () => ({ state: 'ok' as const, links: [] as typeof LINKED[] }),
     'temper.skill.readiness': () => SKILL_MIXED,
+    'temper.serves': () => ({ ...SERVES_TASK, record: { state: 'ok' as const, detail: TASK_DETAIL } }),
     'temper.launch.task-handoff': () => ({
       state: 'ok' as const,
       handoff: {
@@ -376,6 +401,51 @@ export default defineCheck({
   'look-home-goals-completed': {
     ...LOOK,
     persisted: { plugin: { 'detail-stack': [], 'way-in-status': { goals: 'completed' } } }
+  },
+  // Home's "this workspace" strip: linked to a task, its agents with their status words.
+  'look-serves-linked': { ...LOOK, persisted: { plugin: { 'detail-stack': [] } } },
+  'look-serves-unlinked': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.serves': () => ({ state: 'unlinked' as const }) },
+    results: { ...LOOK.results, 'agents.list': { agents: [AGENTS.agents[0]] } },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-goal': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.serves': () => ({
+        state: 'linked' as const,
+        item: { itemId: GOAL_ID, ref: GOAL_DETAIL.ref, title: GOAL_DETAIL.title, docType: 'goal', contextRef: CONTEXT },
+        record: { state: 'ok' as const, detail: GOAL_DETAIL }
+      })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-record-failed': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.serves': () => ({
+        ...SERVES_TASK,
+        record: { state: 'failed' as const, message: 'temper answered 503 on the record read' }
+      })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-no-focus': {
+    ...LOOK,
+    results: { ...LOOK.results, 'workspace.readContext': null },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-consent': {
+    ...LOOK,
+    capabilities: GRANTED.filter((kind) => kind !== 'agent:read'),
+    requests: {
+      ...LOOK.requests,
+      'temper.capabilities': () => ({ granted: GRANTED.filter((kind) => kind !== 'agent:read') })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
   },
   'look-task': { ...LOOK, persisted: seeded({ id: TASK_ID, docType: 'task' }) },
   'look-goal': { ...LOOK, persisted: seeded({ id: GOAL_ID, docType: 'goal' }) },

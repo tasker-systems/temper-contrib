@@ -26,6 +26,7 @@ import { TemperOriginRefusedError } from './origin'
 import { registerEditorRoom } from './editor-room/open-body'
 import { readLaunchableAgents } from './agents'
 import { registerSkillReadiness } from './skill-readiness/worker'
+import { createPendingLaunches, registerServes, type PendingLaunch } from './serves'
 import type {
   CapabilitiesOutput,
   LatestHandoffOutput,
@@ -162,6 +163,11 @@ export default function activate(orca: OrcaWorkerApi): void {
   // Agent skill readiness: the CLI's skill check per install target, and the Install press.
   registerSkillReadiness(orca)
 
+  // What a workspace serves: the launch hook that gives an agent its task, and Home's strip.
+  // The launches still out to workspace.create are held here for the hook (./serves.ts).
+  const pendingLaunches = createPendingLaunches()
+  registerServes(orca, answer, pendingLaunches)
+
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
   orca.panels.handle('temper.capabilities', async (): Promise<CapabilitiesOutput> => ({
@@ -225,47 +231,68 @@ export default function activate(orca: OrcaWorkerApi): void {
       return { state: 'failed', message: 'a new workspace needs the picked project, and none was sent' }
     }
 
-    let workspaceId: string
-    let terminalId: string | null = null
-    try {
-      const created = await orca.host.call('workspace.create', {
-        projectId: input.projectId,
-        agent: input.agent,
-        prompt: input.prompt
-      })
-      workspaceId = created.workspaceId
-      terminalId = created.terminalId ?? null
-    } catch (error) {
-      return {
-        state: 'refused',
-        code: refusalCode(error),
-        message: error instanceof Error ? error.message : String(error)
-      }
-    }
-
-    let linkError: string | null = null
-    try {
-      await storeLink(orca, {
-        workspaceId,
+    // Orca starts the agent before workspace.create returns, so its launch hook may run before
+    // the link below is stored: the launch is held as pending until then (./serves.ts).
+    const docType =
+      typeof input.item.docType === 'string' && input.item.docType !== '' ? input.item.docType : undefined
+    const pending: PendingLaunch = {
+      projectId: input.projectId,
+      agent: input.agent,
+      link: {
         itemId: input.item.id,
         ref: input.item.ref,
         contextRef: input.item.contextRef ?? null,
         startedAt: new Date().toISOString(),
         agent: input.agent,
-        terminalId
-      })
-    } catch (error) {
-      linkError = error instanceof Error ? error.message : String(error)
+        ...(typeof input.item.title === 'string' ? { title: input.item.title } : {}),
+        ...(docType === undefined ? {} : { docType })
+      }
     }
-    // The name the person knows the workspace by; a list that fails or lacks it names none.
-    let workspaceName: string | null = null
+    pendingLaunches.add(pending)
     try {
-      const listed = await orca.host.call('workspace.list')
-      workspaceName = listed.workspaces.find((entry) => entry.id === workspaceId)?.name ?? null
-    } catch {
-      workspaceName = null
+      let workspaceId: string
+      let terminalId: string | null = null
+      try {
+        const created = await orca.host.call('workspace.create', {
+          projectId: input.projectId,
+          agent: input.agent,
+          prompt: input.prompt
+        })
+        workspaceId = created.workspaceId
+        terminalId = created.terminalId ?? null
+      } catch (error) {
+        return {
+          state: 'refused',
+          code: refusalCode(error),
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+
+      // The name the person knows the workspace by, and the project and path its worktree id
+      // is made of (the launch hook's match); a list that fails or lacks it names none.
+      let listedRow: { name: string; projectId?: string | null; path: string } | undefined
+      try {
+        const listed = await orca.host.call('workspace.list')
+        listedRow = listed.workspaces.find((entry) => entry.id === workspaceId)
+      } catch {
+        listedRow = undefined
+      }
+      const workspaceName = listedRow?.name ?? null
+      const place =
+        listedRow !== undefined && typeof listedRow.projectId === 'string' && listedRow.projectId !== ''
+          ? { projectId: listedRow.projectId, path: listedRow.path }
+          : {}
+
+      let linkError: string | null = null
+      try {
+        await storeLink(orca, { ...pending.link, workspaceId, terminalId, ...place })
+      } catch (error) {
+        linkError = error instanceof Error ? error.message : String(error)
+      }
+      return { state: 'launched', workspaceId, workspaceName, terminalId, linkError }
+    } finally {
+      pendingLaunches.delete(pending)
     }
-    return { state: 'launched', workspaceId, workspaceName, terminalId, linkError }
   })
 
   // The workspaces an item is linked to, named as Orca lists them — the sheet names them

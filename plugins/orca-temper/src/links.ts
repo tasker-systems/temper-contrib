@@ -36,7 +36,11 @@ export async function readLinks(orca: OrcaWorkerApi): Promise<LaunchLink[]> {
       startedAt: typeof row['startedAt'] === 'string' ? row['startedAt'] : '',
       ...(typeof row['agent'] === 'string' ? { agent: row['agent'] } : {}),
       ...(typeof row['terminalId'] === 'string' ? { terminalId: row['terminalId'] } : {}),
-      ...(typeof row['sessionId'] === 'string' ? { sessionId: row['sessionId'] } : {})
+      ...(typeof row['sessionId'] === 'string' ? { sessionId: row['sessionId'] } : {}),
+      ...(typeof row['title'] === 'string' ? { title: row['title'] } : {}),
+      ...(typeof row['docType'] === 'string' && row['docType'] !== '' ? { docType: row['docType'] } : {}),
+      ...(typeof row['projectId'] === 'string' && row['projectId'] !== '' ? { projectId: row['projectId'] } : {}),
+      ...(typeof row['path'] === 'string' && row['path'] !== '' ? { path: row['path'] } : {})
     })
   }
   return links
