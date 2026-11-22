@@ -301,6 +301,77 @@ test('each way in names its own workflow state', async () => {
   await worker.deactivate()
 })
 
+test('each status toggle sends its own stage or status, always on the person', async () => {
+  const queries: Record<string, string>[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    const url = new URL(input.url)
+    queries.push(Object.fromEntries(url.searchParams.entries()))
+    return new Response(JSON.stringify(listResponse([], 3)), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const asks = [
+    { id: 'tasks', status: 'backlog', key: 'stage', scope: 'backlog tasks of yours' },
+    { id: 'tasks', status: 'in-progress', key: 'stage', scope: 'tasks in progress of yours' },
+    { id: 'tasks', status: 'done', key: 'stage', scope: 'done tasks of yours' },
+    { id: 'goals', status: 'active', key: 'status', scope: 'active goals of yours' },
+    { id: 'goals', status: 'done', key: 'status', scope: 'done goals of yours' }
+  ]
+  for (const [index, ask] of asks.entries()) {
+    const answer = await worker.request('temper.home.way-in', { id: ask.id, bound: 8, status: ask.status })
+    assert.equal(answer.state, 'ok')
+    if (answer.state !== 'ok') return
+    assert.equal(answer.status, ask.status, 'the answer names the status it was read by')
+    assert.equal(answer.scope, ask.scope, 'the omission words follow the status')
+    assert.equal(answer.total, 3)
+    const query = queries[index]
+    assert.equal(query?.owner, '@me', `${ask.id} by ${ask.status} keeps the person's scope`)
+    assert.equal(query?.[ask.key], ask.status, `${ask.id} by ${ask.status} narrows on its ${ask.key}`)
+    const other = ask.key === 'stage' ? 'status' : 'stage'
+    assert.equal(query?.[other], undefined, `${ask.id} never narrows on its ${other}`)
+    assert.equal(query?.doc_type_name, ask.id === 'tasks' ? 'task' : 'goal')
+    assert.equal(query?.limit, '8')
+  }
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a way read with no status reads its WAYS_IN default and names it', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(listResponse([]), [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const tasks = await worker.request('temper.home.way-in', { id: 'tasks', bound: 8 })
+  const goals = await worker.request('temper.home.way-in', { id: 'goals', bound: 8 })
+  const sessions = await worker.request('temper.home.way-in', { id: 'sessions', bound: 8 })
+  assert.equal(tasks.state === 'ok' && tasks.status, 'in-progress')
+  assert.equal(goals.state === 'ok' && goals.status, 'active')
+  assert.equal(sessions.state === 'ok' && sessions.status, null, 'sessions take no toggle')
+  await worker.deactivate()
+})
+
+test('a status a way does not offer is the caller\'s error, not a read', async () => {
+  deps.run = async () => mintedToken()
+  const requests: Request[] = []
+  deps.fetch = answering(listResponse([]), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  for (const ask of [
+    { id: 'goals', status: 'backlog' },
+    { id: 'tasks', status: 'active' },
+    { id: 'sessions', status: 'done' }
+  ]) {
+    const answer = await worker.request('temper.home.way-in', { ...ask, bound: 8 })
+    assert.equal(answer.state, 'failed', `${ask.id} by ${ask.status}`)
+    if (answer.state !== 'failed') return
+    assert.match(answer.message, /offers no/)
+  }
+  assert.equal(requests.length, 0)
+  await worker.deactivate()
+})
+
 test('a way-in id WAYS_IN does not name is the caller\'s error, not a read', async () => {
   deps.run = async () => mintedToken()
   const requests: Request[] = []

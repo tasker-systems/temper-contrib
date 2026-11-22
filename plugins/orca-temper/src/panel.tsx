@@ -10,7 +10,11 @@
 // itself — the worker does, on the borrowed grant — and Home mirrors temper-ui's home for the
 // same person, list by list: resume, the latest handoff with its Next section quoted (plain
 // text, as the surfaces render it — never temper-design's `sanitize`, which needs a DOM), the
-// standing ways in with Show more, the places the person works in, and recently updated.
+// standing ways in with Show more, the places the person works in, and recently updated. Goals
+// and Tasks each take a status toggle (ruling 24: active · done; backlog · in progress · done),
+// defaulting to the status temper-ui's home reads, so Home opens as temper-ui's does; the pick
+// is device-local view state, and every status keeps the count, the omission sentence, Show
+// more and the region states. A goal's linked tasks grow by the same Show more.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -91,6 +95,7 @@ import type {
   WayInOutput
 } from './protocol'
 import { LINKED_TASKS_BOUND } from './protocol'
+import { WAY_TOGGLES, type WayToggle } from './way-status'
 
 // Interim, ruled by Pete 2026-11-20: temper-design does not yet export the Show-more cap
 // (WAY_IN_MAX lives only in temper-ui's first-view), so Home ships this local constant until
@@ -111,6 +116,11 @@ const recentResult = atom<RecentOutput | null>(null)
 const wayInResults = atom('way-in-results', {} as Record<string, WayInOutput | null>)
 /** How far each way in has grown, device-local view state: a step of WAY_IN_BOUND at a press. */
 const wayInShown = atom('way-in-shown', {} as Record<string, number>)
+/**
+ * The status each toggled way in is read by, device-local view state held across the panel's
+ * runs as the detail stack is: absent, a way reads its WAYS_IN default.
+ */
+const wayInStatus = atom('way-in-status', {} as Record<string, string>, { persist: 'plugin' })
 /** True while the first refresh is out. */
 const loading = atom('loading', false)
 
@@ -134,6 +144,8 @@ const detailStack = atom('detail-stack', [] as DetailEntry[], { persist: 'plugin
 const detailResults = atom('detail-results', {} as Record<string, RecordDetailOutput | null>)
 /** A goal's linked-tasks answer per goal id, null while its request is out. */
 const linkedTaskResults = atom('linked-task-results', {} as Record<string, LinkedTasksOutput | null>)
+/** How far each goal's linked tasks have grown: a step of WAY_IN_BOUND at a Show-more press. */
+const linkedTasksShown = atom('linked-tasks-shown', {} as Record<string, number>)
 /** The person's "Temper web address" setting, as the plugin holds it now; null until read. */
 const webUrlSetting = atom('web-url-setting', null as string | null)
 
@@ -180,7 +192,7 @@ async function loadLinkedTasks(entry: DetailEntry): Promise<void> {
   try {
     const answer = await plugin.request('temper.goal.tasks', {
       id: entry.id,
-      bound: LINKED_TASKS_BOUND
+      bound: linkedTasksBound(entry.id)
     })
     set(linkedTaskResults, { ...read(linkedTaskResults), [entry.id]: answer })
   } catch (error) {
@@ -192,6 +204,27 @@ async function loadLinkedTasks(entry: DetailEntry): Promise<void> {
       }
     })
   }
+}
+
+/** The bound a goal's linked tasks are asked at: the default, or where Show more carried it. */
+function linkedTasksBound(goalId: string): number {
+  return read(linkedTasksShown)[goalId] ?? LINKED_TASKS_BOUND
+}
+
+/** Show more on a goal's linked tasks: the ways-in step and cap, grown in place. */
+async function showMoreLinked(goalId: string): Promise<void> {
+  const bound = Math.min(linkedTasksBound(goalId) + WAY_IN_BOUND, WAY_IN_MAX)
+  set(linkedTasksShown, { ...read(linkedTasksShown), [goalId]: bound })
+  let answer: LinkedTasksOutput
+  try {
+    answer = await plugin.request('temper.goal.tasks', { id: goalId, bound })
+  } catch (error) {
+    answer = {
+      state: 'failed',
+      message: `the linked-tasks read never answered: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  set(linkedTaskResults, { ...read(linkedTaskResults), [goalId]: answer })
 }
 
 /**
@@ -225,6 +258,34 @@ function wayInBound(id: string): number {
   return read(wayInShown)[id] ?? WAY_IN_BOUND
 }
 
+/** The status a toggled way in is read by: the person's pick, else its default. */
+function wayInStatusOf(id: string): string | undefined {
+  const toggle = WAY_TOGGLES[id]
+  if (toggle === undefined) {
+    return undefined
+  }
+  const picked = read(wayInStatus)[id]
+  return toggle.statuses.some((status) => status.value === picked) ? picked : toggle.defaultStatus
+}
+
+/**
+ * Each way's newest ask: an answer to an older one (a status picked, then another before the
+ * first answered) is dropped, so a list never shows rows of a status the toggle no longer holds.
+ */
+const wayInAsks: Record<string, number> = {}
+
+/** One way in, asked at its current bound and status; null when a newer ask superseded it. */
+async function askWayIn(id: string): Promise<WayInOutput | null> {
+  const ask = (wayInAsks[id] ?? 0) + 1
+  wayInAsks[id] = ask
+  const status = wayInStatusOf(id)
+  const answer = await plugin.request(
+    'temper.home.way-in',
+    status === undefined ? { id, bound: wayInBound(id) } : { id, bound: wayInBound(id), status }
+  )
+  return wayInAsks[id] === ask ? answer : null
+}
+
 async function refresh(): Promise<void> {
   set(loading, true)
   try {
@@ -233,17 +294,18 @@ async function refresh(): Promise<void> {
       plugin.request('temper.home.handoff'),
       plugin.request('temper.home.places'),
       plugin.request('temper.home.recent'),
-      ...WAYS_IN.map((way) =>
-        plugin.request('temper.home.way-in', { id: way.id, bound: wayInBound(way.id) })
-      )
+      ...WAYS_IN.map((way) => askWayIn(way.id))
     ])
     set(resumeResult, resume)
     set(handoffResult, handoff)
     set(placesResult, places)
     set(recentResult, recent)
-    const results: Record<string, WayInOutput | null> = {}
+    const results: Record<string, WayInOutput | null> = { ...read(wayInResults) }
     WAYS_IN.forEach((way, index) => {
-      results[way.id] = ways[index] ?? null
+      const answer = ways[index]
+      if (answer !== null && answer !== undefined) {
+        results[way.id] = answer
+      }
     })
     set(wayInResults, results)
     // The consents ride along so actions draw lit or named from the start.
@@ -257,8 +319,29 @@ async function refresh(): Promise<void> {
 async function showMore(id: string): Promise<void> {
   const bound = Math.min(wayInBound(id) + WAY_IN_BOUND, WAY_IN_MAX)
   set(wayInShown, { ...read(wayInShown), [id]: bound })
-  const answer = await plugin.request('temper.home.way-in', { id, bound })
-  set(wayInResults, { ...read(wayInResults), [id]: answer })
+  const answer = await askWayIn(id)
+  if (answer !== null) {
+    set(wayInResults, { ...read(wayInResults), [id]: answer })
+  }
+}
+
+/**
+ * A status picked on a toggled way: the list starts over at the default bound under the new
+ * status, its region still out until the read answers.
+ */
+async function pickStatus(id: string, status: string): Promise<void> {
+  if (wayInStatusOf(id) === status) {
+    return
+  }
+  set(wayInStatus, { ...read(wayInStatus), [id]: status })
+  const shown = { ...read(wayInShown) }
+  delete shown[id]
+  set(wayInShown, shown)
+  set(wayInResults, { ...read(wayInResults), [id]: null })
+  const answer = await askWayIn(id)
+  if (answer !== null) {
+    set(wayInResults, { ...read(wayInResults), [id]: answer })
+  }
 }
 
 /** Runs once before the first render. */
@@ -546,47 +629,105 @@ function HandoffRegion() {
   )
 }
 
-/** One way in: its label and scope from WAYS_IN, its order stated, Show more in place. */
-function WayInRegion(props: { id: string }) {
-  const label = WAYS_IN.find((way) => way.id === props.id)?.label ?? props.id
-  const answer = read(wayInResults)[props.id] ?? null
+/** An answered way in's body: its order, its rows, what it omits, and Show more in place. */
+function WayInBody(props: { id: string; name: string; answer: WayInOutput & { state: 'ok' } }) {
+  const answer = props.answer
   return (
-    <Region answer={answer} label={label}>
-      {answer !== null && answer.state === 'ok' ? (
-        <Stack gap="sm">
-          <CountHeading label={answer.label} count={answer.total} />
-          <Text muted size="xs">
-            {WAY_IN_ORDER}
-          </Text>
-          {answer.rows.length === 0 ? (
-            <Text muted size="xs">{`— No ${answer.scope}.`}</Text>
-          ) : (
-            <List label={answer.label}>
-              {answer.rows.map((item) => (
-                <ResourceRow key={item.id} item={item} stateless />
-              ))}
-            </List>
-          )}
-          {answer.rows.length === 0 ? undefined : (
-            <Text muted size="xs">
-              {omissionSentence(answer.total, answer.rows.length, answer.scope)}
-            </Text>
-          )}
-          {answer.rows.length < answer.total && answer.bound < WAY_IN_MAX ? (
-            <Row>
-              <Button
-                variant="ghost"
-                size="sm"
-                icon={ACT_ICON.showMore}
-                onPress={() => void showMore(props.id)}
-              >
-                Show more
-              </Button>
-            </Row>
-          ) : undefined}
-        </Stack>
+    <Stack gap="sm">
+      <Text muted size="xs">
+        {WAY_IN_ORDER}
+      </Text>
+      {answer.rows.length === 0 ? (
+        <Text muted size="xs">{`— No ${answer.scope}.`}</Text>
+      ) : (
+        <List label={props.name}>
+          {answer.rows.map((item) => (
+            <ResourceRow key={item.id} item={item} stateless />
+          ))}
+        </List>
+      )}
+      {answer.rows.length === 0 ? undefined : (
+        <Text muted size="xs">
+          {omissionSentence(answer.total, answer.rows.length, answer.scope)}
+        </Text>
+      )}
+      {answer.rows.length < answer.total && answer.bound < WAY_IN_MAX ? (
+        <Row>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={ACT_ICON.showMore}
+            onPress={() => void showMore(props.id)}
+          >
+            Show more
+          </Button>
+        </Row>
       ) : undefined}
-    </Region>
+    </Stack>
+  )
+}
+
+/**
+ * A toggled way's status control: Orca's own `Tabs`, one tab per status, the selected one
+ * holding the region's body — the list, or its loading or failed state.
+ */
+function StatusToggle(props: { id: string; toggle: WayToggle; children?: OrcaNode }) {
+  const selected = wayInStatusOf(props.id) ?? props.toggle.defaultStatus
+  return (
+    <Tabs
+      label={`${props.toggle.name} by ${props.toggle.key}`}
+      value={selected}
+      onChange={(value) => void pickStatus(props.id, value)}
+    >
+      {props.toggle.statuses.map((status) => (
+        <Tab key={status.value} value={status.value} label={status.label}>
+          {status.value === selected ? props.children : undefined}
+        </Tab>
+      ))}
+    </Tabs>
+  )
+}
+
+/**
+ * One way in: its name, its count a badge for the status it shows, its order stated, Show more
+ * in place. Goals and Tasks carry their status toggle under the heading in every region state.
+ */
+function WayInRegion(props: { id: string }) {
+  const toggle = WAY_TOGGLES[props.id]
+  const label = toggle?.name ?? WAYS_IN.find((way) => way.id === props.id)?.label ?? props.id
+  const answer = read(wayInResults)[props.id] ?? null
+  if (toggle === undefined) {
+    return (
+      <Region answer={answer} label={label}>
+        {answer !== null && answer.state === 'ok' ? (
+          <Stack gap="sm">
+            <CountHeading label={answer.label} count={answer.total} />
+            <WayInBody id={props.id} name={label} answer={answer} />
+          </Stack>
+        ) : undefined}
+      </Region>
+    )
+  }
+  if (answer !== null && answer.state === 'not-connected') {
+    return undefined
+  }
+  return (
+    <Stack gap="sm">
+      {answer !== null && answer.state === 'ok' ? (
+        <CountHeading label={label} count={answer.total} />
+      ) : (
+        <Heading level={3}>{label}</Heading>
+      )}
+      <StatusToggle id={props.id} toggle={toggle}>
+        {answer === null ? (
+          <Loading words={`◌ Loading ${label}…`} />
+        ) : answer.state === 'failed' ? (
+          <Unavailable title={`${label} unavailable — nothing here was read.`} message={answer.message} />
+        ) : answer.state === 'ok' ? (
+          <WayInBody id={props.id} name={label} answer={answer} />
+        ) : undefined}
+      </StatusToggle>
+    </Stack>
   )
 }
 
@@ -832,6 +973,18 @@ function LinkedTasksRegion(props: { goal: DetailEntry }) {
           <Text muted size="xs">
             {omissionSentence(answer.total, answer.rows.length, LINKED_TASKS_SCOPE)}
           </Text>
+          {answer.rows.length < answer.total && answer.bound < WAY_IN_MAX ? (
+            <Row>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={ACT_ICON.showMore}
+                onPress={() => void showMoreLinked(props.goal.id)}
+              >
+                Show more
+              </Button>
+            </Row>
+          ) : undefined}
         </Stack>
       )}
     </Stack>

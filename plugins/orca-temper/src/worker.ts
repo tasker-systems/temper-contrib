@@ -122,7 +122,7 @@ export default function activate(orca: OrcaWorkerApi): void {
   orca.panels.handle(
     'temper.home.way-in',
     async (input: WayInInput): Promise<WayInOutput> =>
-      answer(async (read) => ({ state: 'ok' as const, ...(await wayIn(read, input.id, input.bound)) }))
+      answer(async (read) => ({ state: 'ok' as const, ...(await wayIn(read, input.id, input.bound, input.status)) }))
   )
 
   orca.panels.handle(

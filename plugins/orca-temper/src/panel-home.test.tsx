@@ -129,7 +129,7 @@ test('orca_home_shows_the_persons_in_force_state', async () => {
   assert.ok(mounted.find({ type: 'Heading', text: 'goals 2' }), 'the goals way-in is counted')
   assert.ok(mounted.find({ label: 'Goal one' }), 'Goal one is on the panel')
   assert.ok(mounted.find({ text: 'All 2 active goals of yours.' }), 'the goals omission sentence is on the panel')
-  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 1' }), 'the in-progress way-in is counted')
+  assert.ok(mounted.find({ type: 'Heading', text: 'tasks 1' }), 'the tasks way-in is counted, in progress by default')
   assert.ok(mounted.find({ label: 'Task in progress one' }), 'the task is on the panel')
   assert.ok(mounted.find({ text: 'All 1 tasks in progress of yours.' }), 'the tasks omission sentence is on the panel')
   assert.ok(mounted.find({ type: 'Heading', text: 'sessions 1' }), 'the sessions way-in is counted')
@@ -186,7 +186,7 @@ test('Show more grows a way in in place, and stops at the cap', async () => {
   assert.equal(seenBounds[seenBounds.length - 1], 16, 'the press asked for one step more')
   assert.ok(mounted.find({ label: 'Goal 16' }), 'the grown list shows the new rows')
   assert.ok(mounted.find({ text: '16 of 250 active goals of yours; 234 not shown.' }), 'the omission sentence grew with it')
-  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'the other way in was left as it was')
+  assert.ok(mounted.find({ type: 'Heading', text: 'tasks 0' }), 'the other way in was left as it was')
 
   // Grown to the cap, Show more stops being offered — past it is never this panel's read.
   seenBounds.length = 0
@@ -227,7 +227,7 @@ test('a way in that fails while Show more presses keeps its failure, not its row
     mounted.find({ type: 'Callout', label: 'goals unavailable — nothing here was read.' }),
     'the failing growth names what failed'
   )
-  assert.ok(mounted.find({ type: 'Heading', text: 'in progress 0' }), 'the other way in is untouched')
+  assert.ok(mounted.find({ type: 'Heading', text: 'tasks 0' }), 'the other way in is untouched')
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])
 })

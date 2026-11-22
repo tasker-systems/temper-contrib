@@ -13,7 +13,8 @@
 // across runs, as the detail stack is), each outcome with it — `look-sheet-linked` with the
 // task's linked workspace named before the confirm; `look-task-reopen` draws a task's detail
 // whose stored link carries a session, so Reopen agent stands beside Resume task; the
-// `look-state-*` scenarios
+// `look-home-tasks-backlog` and `look-home-goals-done` draw Home's ways in by another status
+// than the default (ruling 24); the `look-state-*` scenarios
 // draw every region state: signed out, failed, loading, empty, and a withheld consent.
 import { defineCheck } from 'orca/testing'
 
@@ -62,6 +63,46 @@ const WAYS: Record<string, { label: string; scope: string; rows: ReturnType<type
     scope: 'sessions of yours',
     rows: [row(5, 'Session: the body view saves through its held base', 'session')],
     total: 42
+  }
+}
+
+/** The other statuses the Goals and Tasks toggles read (ruling 24), by `<way>/<status>`. */
+const BY_STATUS: Record<string, { scope: string; rows: ReturnType<typeof row>[]; total: number }> = {
+  'tasks/backlog': {
+    scope: 'backlog tasks of yours',
+    rows: [
+      row(8, 'The launcher sheet on Orca controls', 'task', 'backlog'),
+      row(10, 'Explore: teams, then their contexts', 'task', 'backlog'),
+      row(11, 'orca-temper imports the Show-more cap from temper-design', 'task', 'backlog')
+    ],
+    total: 23
+  },
+  'tasks/done': {
+    scope: 'done tasks of yours',
+    rows: [row(9, 'orca-temper Start and Resume', 'task', 'done')],
+    total: 41
+  },
+  'goals/done': {
+    scope: 'done goals of yours',
+    rows: [
+      row(12, 'The rail reads temper on a borrowed grant', 'goal', 'done'),
+      row(13, 'Every way in names its scope', 'goal', 'done')
+    ],
+    total: 12
+  }
+}
+
+/** A way-in answer for the asked way and status: the default reads WAYS, the others BY_STATUS. */
+function wayAnswer(input: { id: string; bound: number; status?: string }) {
+  const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
+  const other = input.status === undefined ? undefined : BY_STATUS[`${input.id}/${input.status}`]
+  return {
+    state: 'ok' as const,
+    id: input.id,
+    ...way,
+    ...(other ?? {}),
+    status: input.status ?? null,
+    bound: input.bound
   }
 }
 
@@ -133,10 +174,7 @@ const LOOK = {
         }
       }
     }),
-    'temper.home.way-in': (input: { id: string; bound: number }) => {
-      const way = WAYS[input.id] ?? { label: input.id, scope: input.id, rows: [], total: 0 }
-      return { state: 'ok' as const, id: input.id, ...way, bound: input.bound }
-    },
+    'temper.home.way-in': wayAnswer,
     'temper.home.places': () => ({
       state: 'ok' as const,
       rows: [{ ref: CONTEXT, name: 'workflows', lastChangedAt: ago(4) }],
@@ -261,6 +299,15 @@ export default defineCheck({
       }
     : {}),
   'look-home': { ...LOOK, persisted: { plugin: { 'detail-stack': [] } } },
+  // Home's ways in by status (ruling 24): Tasks by backlog, then Goals by done.
+  'look-home-tasks-backlog': {
+    ...LOOK,
+    persisted: { plugin: { 'detail-stack': [], 'way-in-status': { tasks: 'backlog' } } }
+  },
+  'look-home-goals-done': {
+    ...LOOK,
+    persisted: { plugin: { 'detail-stack': [], 'way-in-status': { goals: 'done' } } }
+  },
   'look-task': { ...LOOK, persisted: seeded({ id: TASK_ID, docType: 'task' }) },
   'look-goal': { ...LOOK, persisted: seeded({ id: GOAL_ID, docType: 'goal' }) },
   // The sheet, still owed a project: the confirm dark, its reason under the confirm row.

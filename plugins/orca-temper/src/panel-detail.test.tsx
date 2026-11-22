@@ -325,3 +325,60 @@ test('a goal\'s linked tasks wear the task icon and say their stage in words', a
   assert.equal(mounted.find({ type: 'Button', text: 'Work this goal' })?.props.icon, 'rocket')
   assert.deepEqual(mounted.errors, [])
 })
+
+test('a goal\'s linked tasks page past the first bound through Show more, up to the cap', async () => {
+  const bounds: number[] = []
+  const linked = (bound: number) => ({
+    state: 'ok' as const,
+    rows: Array.from({ length: Math.min(bound, 23) }, (_, index) => {
+      const id = `00000000-0000-7000-8000-0000000003${String(index).padStart(2, '0')}`
+      return {
+        id,
+        ref: `row-${id}`,
+        title: `Linked task ${index + 1}`,
+        docType: 'task',
+        contextRef: '+temper-dev/contrib',
+        updated: '2026-11-20T00:00:00Z',
+        stage: 'backlog'
+      }
+    }),
+    total: 23,
+    bound
+  })
+  const host = mockHost({
+    requests: {
+      'temper.capabilities': () => ({ granted: ['settings:own'] }),
+      'temper.home.resume': () => ({ state: 'ok', resume: null }),
+      'temper.home.handoff': () => ({ state: 'ok', sessionCount: 0, handoff: null }),
+      'temper.home.way-in': () => ({ state: 'ok', id: 'goals', label: 'goals', scope: 'goals of yours', rows: [], total: 0, bound: 8 }),
+      'temper.home.places': () => ({ state: 'ok', rows: [], total: 0 }),
+      'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 }),
+      'temper.resource.detail': () => GOAL_DETAIL,
+      'temper.goal.tasks': (input: { id: string; bound: number }) => {
+        bounds.push(input.bound)
+        return linked(input.bound)
+      }
+    }
+  })
+  mounted = await mount(panel, { host, ...seededStack({ id: GOAL_ID, ref: '', title: '', docType: 'goal' }) })
+
+  assert.deepEqual(bounds, [8], 'the first read asks the ways-in bound')
+  assert.ok(mounted.find({ text: '8 of 23 linked tasks; 15 not shown.' }))
+  assert.equal(mounted.find({ label: 'Linked task 9' }), null)
+  const more = mounted.find({ type: 'Button', text: 'Show more' })
+  assert.equal(more?.props.variant, 'ghost')
+  assert.equal(more?.props.icon, 'expand')
+
+  await mounted.press({ text: 'Show more' })
+  assert.equal(bounds[bounds.length - 1], 16, 'one press asks one step more')
+  assert.ok(mounted.find({ label: 'Linked task 16' }))
+  assert.ok(mounted.find({ text: '16 of 23 linked tasks; 7 not shown.' }))
+
+  await mounted.press({ text: 'Show more' })
+  assert.equal(bounds[bounds.length - 1], 24)
+  assert.ok(mounted.find({ label: 'Linked task 23' }))
+  assert.ok(mounted.find({ text: 'All 23 linked tasks.' }), 'the omission sentence stays, all shown')
+  assert.equal(mounted.find({ text: 'Show more' }), null, 'nothing is left to show')
+  assert.deepEqual(mounted.errors, [])
+  assert.deepEqual(mounted.refusals, [])
+})
