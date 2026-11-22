@@ -319,7 +319,7 @@ test('each status toggle sends its own stage or status, always on the person', a
     { id: 'tasks', status: 'in-progress', key: 'stage', scope: 'tasks in progress of yours' },
     { id: 'tasks', status: 'done', key: 'stage', scope: 'done tasks of yours' },
     { id: 'goals', status: 'active', key: 'status', scope: 'active goals of yours' },
-    { id: 'goals', status: 'done', key: 'status', scope: 'done goals of yours' }
+    { id: 'goals', status: 'completed', key: 'status', scope: 'completed goals of yours' }
   ]
   for (const [index, ask] of asks.entries()) {
     const answer = await worker.request('temper.home.way-in', { id: ask.id, bound: 8, status: ask.status })

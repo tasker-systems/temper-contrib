@@ -11,7 +11,7 @@
 // same person, list by list: resume, the latest handoff with its Next section quoted (plain
 // text, as the surfaces render it — never temper-design's `sanitize`, which needs a DOM), the
 // standing ways in with Show more, the places the person works in, and recently updated. Goals
-// and Tasks each take a status toggle (ruling 24: active · done; backlog · in progress · done),
+// and Tasks each take a status toggle (ruling 24: active · completed; backlog · in progress · done),
 // defaulting to the status temper-ui's home reads, so Home opens as temper-ui's does; the pick
 // is device-local view state, and every status keeps the count, the omission sentence, Show
 // more and the region states. A goal's linked tasks grow by the same Show more.

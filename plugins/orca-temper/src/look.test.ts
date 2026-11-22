@@ -22,6 +22,7 @@ test('a state badge is accent while worked, success when done, neutral otherwise
   assert.equal(stateTone('in-progress'), 'accent')
   assert.equal(stateTone('active'), 'accent')
   assert.equal(stateTone('done'), 'success')
+  assert.equal(stateTone('completed'), 'success')
   assert.equal(stateTone('backlog'), 'neutral')
   assert.equal(stateTone('cancelled'), 'neutral')
   assert.equal(stateTone('something-new'), 'neutral')
