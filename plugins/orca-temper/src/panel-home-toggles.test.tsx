@@ -15,7 +15,7 @@ const SCOPES: Record<string, Record<string, string>> = {
     'in-progress': 'tasks in progress of yours',
     done: 'done tasks of yours'
   },
-  goals: { active: 'active goals of yours', done: 'done goals of yours' }
+  goals: { active: 'active goals of yours', completed: 'completed goals of yours' }
 }
 const DEFAULTS: Record<string, string> = { tasks: 'in-progress', goals: 'active' }
 const TOTALS: Record<string, number> = {
@@ -23,7 +23,7 @@ const TOTALS: Record<string, number> = {
   'tasks/in-progress': 2,
   'tasks/done': 41,
   'goals/active': 3,
-  'goals/done': 12
+  'goals/completed': 12
 }
 
 interface WayAsk {
@@ -77,7 +77,7 @@ function served(asks: WayAsk[], counts: Record<string, number> = {}) {
         const docType = input.id === 'tasks' ? 'task' : input.id === 'goals' ? 'goal' : 'session'
         const rows = Array.from({ length: Math.min(total, input.bound) }, (_, index) => {
           const n = String(index).padStart(2, '0')
-          const id = `00000000-0000-7000-8000-00000000${input.id.slice(0, 1) === 't' ? '1' : '2'}${status === 'done' ? '9' : '0'}${n}`
+          const id = `00000000-0000-7000-8000-00000000${input.id.slice(0, 1) === 't' ? '1' : '2'}${status === 'done' || status === 'completed' ? '9' : '0'}${n}`
           return {
             id,
             ref: `row-${id}`,
@@ -139,10 +139,10 @@ test('each toggle asks under its status; the count and omission sentence follow 
   assert.ok(mounted.find({ type: 'Heading', text: 'tasks 41' }))
   assert.ok(mounted.find({ text: '8 of 41 done tasks of yours; 33 not shown.' }))
 
-  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'done')
-  assert.deepEqual(lastAsk(asks, 'goals'), { id: 'goals', bound: 8, status: 'done' })
+  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'completed')
+  assert.deepEqual(lastAsk(asks, 'goals'), { id: 'goals', bound: 8, status: 'completed' })
   assert.ok(mounted.find({ type: 'Heading', text: 'goals 12' }))
-  assert.ok(mounted.find({ text: '8 of 12 done goals of yours; 4 not shown.' }))
+  assert.ok(mounted.find({ text: '8 of 12 completed goals of yours; 4 not shown.' }))
   assert.ok(mounted.find({ type: 'Heading', text: 'tasks 41' }), 'the goals toggle leaves tasks as they were')
   assert.deepEqual(mounted.errors, [])
 })
@@ -166,17 +166,17 @@ test('the pick is held across the panel\'s runs and read back on the next', asyn
   const asks: WayAsk[] = []
   mounted = await mount(panel, { host: served(asks) })
   await mounted.select({ type: 'Tabs', label: 'tasks by stage' }, 'backlog')
-  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'done')
+  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'completed')
   const held = mounted.persisted.plugin['way-in-status']
-  assert.deepEqual(held, { tasks: 'backlog', goals: 'done' })
+  assert.deepEqual(held, { tasks: 'backlog', goals: 'completed' })
   mounted.unmount()
 
   const again: WayAsk[] = []
   mounted = await mount(panel, { host: served(again), persisted: { plugin: { 'way-in-status': held } } })
   assert.equal(mounted.valueOf({ type: 'Tabs', label: 'tasks by stage' }), 'backlog')
-  assert.equal(mounted.valueOf({ type: 'Tabs', label: 'goals by status' }), 'done')
+  assert.equal(mounted.valueOf({ type: 'Tabs', label: 'goals by status' }), 'completed')
   assert.equal(lastAsk(again, 'tasks')?.status, 'backlog', 'the next run asks the held status first')
-  assert.equal(lastAsk(again, 'goals')?.status, 'done')
+  assert.equal(lastAsk(again, 'goals')?.status, 'completed')
   assert.ok(mounted.find({ type: 'Heading', text: 'tasks 23' }))
   assert.deepEqual(mounted.errors, [])
 })
@@ -192,6 +192,18 @@ test('a held status the way no longer offers falls back to its default', async (
   assert.deepEqual(mounted.errors, [])
 })
 
+test('a goals toggle held as done from before the fix falls back to active, never asking temper for done', async () => {
+  const asks: WayAsk[] = []
+  mounted = await mount(panel, {
+    host: served(asks),
+    persisted: { plugin: { 'way-in-status': { goals: 'done' } } }
+  })
+  assert.equal(lastAsk(asks, 'goals')?.status, 'active')
+  assert.equal(mounted.valueOf({ type: 'Tabs', label: 'goals by status' }), 'active')
+  assert.ok(!asks.some((ask) => ask.id === 'goals' && ask.status === 'done'))
+  assert.deepEqual(mounted.errors, [])
+})
+
 test('a toggle asks again for its own way only; the other regions are untouched', async () => {
   const asks: WayAsk[] = []
   const counts: Record<string, number> = {}
@@ -200,7 +212,7 @@ test('a toggle asks again for its own way only; the other regions are untouched'
   const sessionAsks = asks.filter((ask) => ask.id === 'sessions').length
 
   await mounted.select({ type: 'Tabs', label: 'tasks by stage' }, 'done')
-  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'done')
+  await mounted.select({ type: 'Tabs', label: 'goals by status' }, 'completed')
 
   assert.deepEqual(counts, before, 'resume, handoff, places and recently updated are not asked again')
   assert.equal(asks.filter((ask) => ask.id === 'sessions').length, sessionAsks, 'sessions are not asked again')

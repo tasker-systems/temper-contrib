@@ -40,13 +40,13 @@ export function stateWord(state: string): string {
 
 /**
  * A detail's stage or status badge tone: accent (the inverted pill) for the state being worked,
- * success for done, neutral for anything else — the word in the badge says which.
+ * success for done (a task) or completed (a goal), neutral for anything else — the word in the badge says which.
  */
 export function stateTone(state: string): Tone {
   if (state === 'in-progress' || state === 'active') {
     return 'accent'
   }
-  if (state === 'done') {
+  if (state === 'done' || state === 'completed') {
     return 'success'
   }
   return 'neutral'

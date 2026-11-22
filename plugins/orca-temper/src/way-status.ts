@@ -1,5 +1,6 @@
 // Home's ways in, each by a status the person picks (ruling 24): Tasks by backlog, in progress
-// or done, Goals by active or done. Sessions take no toggle. The default status is the one
+// or done, Goals by active or completed (a goal's statuses are active, completed, paused and
+// cancelled; it has no done). Sessions take no toggle. The default status is the one
 // temper-design's WAYS_IN filters on, under WAYS_IN's own scope words, so Home opens as
 // temper-ui's home does. Every toggle keeps the way's `owner: '@me'` scope (R2) and changes only
 // the stage or status the read narrows on.
@@ -40,7 +41,7 @@ export const WAY_TOGGLES: Readonly<Record<string, WayToggle>> = {
     defaultStatus: 'active',
     statuses: [
       { value: 'active', label: 'active', scope: defaultScope('goals') },
-      { value: 'done', label: 'done', scope: 'done goals of yours' }
+      { value: 'completed', label: 'completed', scope: 'completed goals of yours' }
     ]
   },
   tasks: {

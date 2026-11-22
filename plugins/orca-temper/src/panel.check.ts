@@ -13,7 +13,7 @@
 // across runs, as the detail stack is), each outcome with it — `look-sheet-linked` with the
 // task's linked workspace named before the confirm; `look-task-reopen` draws a task's detail
 // whose stored link carries a session, so Reopen agent stands beside Resume task; the
-// `look-home-tasks-backlog` and `look-home-goals-done` draw Home's ways in by another status
+// `look-home-tasks-backlog` and `look-home-goals-completed` draw Home's ways in by another status
 // than the default (ruling 24); the `look-state-*` scenarios
 // draw every region state: signed out, failed, loading, empty, and a withheld consent.
 import { defineCheck } from 'orca/testing'
@@ -82,11 +82,11 @@ const BY_STATUS: Record<string, { scope: string; rows: ReturnType<typeof row>[];
     rows: [row(9, 'orca-temper Start and Resume', 'task', 'done')],
     total: 41
   },
-  'goals/done': {
-    scope: 'done goals of yours',
+  'goals/completed': {
+    scope: 'completed goals of yours',
     rows: [
-      row(12, 'The rail reads temper on a borrowed grant', 'goal', 'done'),
-      row(13, 'Every way in names its scope', 'goal', 'done')
+      row(12, 'The rail reads temper on a borrowed grant', 'goal', 'completed'),
+      row(13, 'Every way in names its scope', 'goal', 'completed')
     ],
     total: 12
   }
@@ -299,14 +299,14 @@ export default defineCheck({
       }
     : {}),
   'look-home': { ...LOOK, persisted: { plugin: { 'detail-stack': [] } } },
-  // Home's ways in by status (ruling 24): Tasks by backlog, then Goals by done.
+  // Home's ways in by status (ruling 24): Tasks by backlog, then Goals by completed.
   'look-home-tasks-backlog': {
     ...LOOK,
     persisted: { plugin: { 'detail-stack': [], 'way-in-status': { tasks: 'backlog' } } }
   },
-  'look-home-goals-done': {
+  'look-home-goals-completed': {
     ...LOOK,
-    persisted: { plugin: { 'detail-stack': [], 'way-in-status': { goals: 'done' } } }
+    persisted: { plugin: { 'detail-stack': [], 'way-in-status': { goals: 'completed' } } }
   },
   'look-task': { ...LOOK, persisted: seeded({ id: TASK_ID, docType: 'task' }) },
   'look-goal': { ...LOOK, persisted: seeded({ id: GOAL_ID, docType: 'goal' }) },
