@@ -150,3 +150,25 @@ test('a focus change reads what the new workspace serves; a status change reads 
   assert.deepEqual(asked, [LINKED, 'identity:wt2:local:other'])
   assert.ok(mounted.find({ type: 'Text', text: '— This workspace serves no temper task.' }))
 })
+
+test("the task's stage is temper's alone: done elsewhere reads done, and an unread record shows no stage", async () => {
+  // Orca's agent here is still working; the task was finished elsewhere. Only temper's read says so.
+  const doneElsewhere = linkedAnswer()
+  doneElsewhere.record.detail.stage = 'done'
+  mounted = await mount(panel, { host: host({ serves: () => doneElsewhere }) })
+  assert.equal(mounted.find({ type: 'ListItem', label: 'The served task' })?.props['description'], 'task · done')
+  assert.equal(mounted.find({ type: 'ListItem', label: 'Claude' })?.props['description'], 'claude · working', "Orca's words stay the agent's")
+  await mounted.unmount()
+
+  const unread: ServesOutput = {
+    ...linkedAnswer(),
+    record: { state: 'failed', message: 'temper answered 503 on the record read' }
+  }
+  mounted = await mount(panel, { host: host({ serves: () => unread }) })
+  assert.equal(
+    mounted.find({ type: 'ListItem', label: 'The served task' })?.props['description'],
+    'task',
+    'no stage is shown that temper did not answer — none from the link, none from the agents'
+  )
+  assert.ok(mounted.find({ type: 'Text', text: /^Its record is unavailable/ }))
+})

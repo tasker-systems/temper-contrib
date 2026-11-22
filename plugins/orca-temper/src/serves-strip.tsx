@@ -5,6 +5,10 @@
 // the stored link, and the item's record read on the grant — so the panel never talks to temper.
 // A workspace no link joins to a task says it serves no temper task; a link to something else
 // (a goal, a handoff's session) says the same and names what the workspace was started from.
+// The task's stage comes only from temper's read of the record — other agents, elsewhere, may
+// be working the same task. The stored link says only which task this workspace was started
+// for, and Orca's status words describe Orca's agents, never the task; a record that does not
+// answer shows no stage at all.
 // Each part keeps the house region states: still out, unavailable, empty, a withheld consent.
 import {
   atom,
