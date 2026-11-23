@@ -46,7 +46,17 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   detail from fixtures, for `orca plugin shot . --scenario <name> --theme light|dark`.
 - The launcher (`src/launcher.tsx`, prompts in `src/prompts.ts`): a backlog task's detail gets
   **Start agent**, an in-progress one **Resume task**, an active goal **Work this goal**, and
-  the latest-handoff card on Home **Resume task**. Each opens a sheet where the press happened
+  the latest-handoff card on Home **Resume task** or **Continue from handoff**. The card names
+  the tasks its session advanced (the session's outgoing `advances` edges), each with its title
+  and `task · <stage>`, the stage read from temper (`temper.handoff.tasks`,
+  `src/handoff-card.tsx`), never from the plugin's links or records. The card's press reads the
+  stages again, and its prompt branches on that read: one task in progress is that task's
+  resume, with this session as its handoff, and the new workspace is linked to the task; one
+  task done or cancelled says so and quotes the Next section as follow-ups to check against
+  temper, reopening and claiming nothing; several tasks are each named with their stage, and
+  the agent asks the person which to continue; no task is the session start. A stage read that
+  fails is said in the sheet, and the session-start prompt then tells the agent to check the
+  task's state first. Only one in-progress task is labelled Resume task. Each opens a sheet where the press happened
   with the project (picked from `project.list` — the last pick remembered per context in local
   view state), the agent (what `orca agent installed` says the host can launch), and the first
   prompt in full before it is sent: harness-agnostic text naming the temper skill and CLI, the

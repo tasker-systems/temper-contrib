@@ -374,6 +374,19 @@ export type TaskHandoffOutput =
   | RegionFailure
 
 /**
+ * `temper.handoff.tasks`: the tasks a session advanced (its outgoing `advances` edges), each
+ * with its stage as temper holds it at the read. Home's handoff card asks it to name them, and
+ * the card's press asks it again, so the prompt branches on the stage read then — never on what
+ * the card showed earlier, nor on anything the plugin stores (ruling 26).
+ */
+export interface HandoffTasksInput {
+  /** The session's id, a bare UUID. */
+  sessionId: string
+}
+
+export type HandoffTasksOutput = { state: 'ok'; tasks: ResourceSummary[] } | RegionFailure
+
+/**
  * What the launcher's press needs (Rulings Q9's "Start, new workspace" row): every launch goes
  * into a new workspace through `workspace.create`.
  */
@@ -463,6 +476,8 @@ declare module 'orca' {
     'temper.reopen.go': { input: ReopenInput; output: ReopenOutput }
     /** The task's own newest linked session and its Next section — never the person's latest. */
     'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
+    /** The tasks a session advanced, each with its stage as temper holds it now. */
+    'temper.handoff.tasks': { input: HandoffTasksInput; output: HandoffTasksOutput }
     /** What the focused workspace serves: its stored link, and the item's record read. */
     'temper.serves': { input: ServesInput; output: ServesOutput }
     /** Takes the person to an agent: its terminal focused, or its workspace opened. */

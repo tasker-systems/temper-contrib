@@ -299,6 +299,54 @@ export async function taskHandoff(
   return { handoff: { id, ref, title, next: nextSection(body.data.content ?? '') } }
 }
 
+/** How many tasks one session's advances read names at most — far past any real session. */
+export const SESSION_TASKS_LIMIT = 50
+
+/**
+ * The tasks a session advanced: its outgoing `advances` edges (the session→task edge
+ * `temper resource create --task` asserts), each task read on the list door for its title and
+ * its stage as temper holds it now. Never from the plugin's links or `orca-work` records
+ * (ruling 26): the stage is temper's. A session that advanced no task answers an empty list;
+ * an edge to anything but a task (a goal) is not a task, and is left out by the doc-type scope.
+ */
+export async function sessionTasks(
+  read: TemperRead,
+  sessionId: string
+): Promise<{ tasks: ResourceSummary[] }> {
+  assertBareId(sessionId, 'a session')
+  const client = clientOf(read)
+  const connections = await client.GET('/api/resources/{id}/connections', {
+    params: { path: { id: sessionId }, query: { limit: 200 } }
+  })
+  if (connections.error || !connections.data) {
+    if (connections.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(
+      `temper refused the session's connections read: ${JSON.stringify(connections.error)}`
+    )
+  }
+  const advanced = connections.data.rows
+    .filter(
+      (row) =>
+        row.direction === 'outgoing' &&
+        row.label === 'advances' &&
+        row.peer_table === 'kb_resources'
+    )
+    .map((row) => row.peer_id)
+  if (advanced.length === 0) {
+    return { tasks: [] }
+  }
+  const page = await listResources(read, 'advanced tasks', {
+    doc_type_name: 'task',
+    ids: [...new Set(advanced)].join(','),
+    sort: 'updated',
+    order: 'desc',
+    limit: SESSION_TASKS_LIMIT
+  })
+  return { tasks: page.rows.map(summaryOf) }
+}
+
 /**
  * One of the standing ways in — goals, tasks, sessions — at the bound the panel asks for: the
  * filter is the way's own from WAYS_IN (`owner: '@me'`, the workflow state where one applies),

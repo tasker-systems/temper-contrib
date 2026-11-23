@@ -22,7 +22,11 @@
 // draw every region state: signed out, failed, loading, empty, and a withheld consent. The
 // `look-skill*` scenarios draw agent skill readiness on Home (ready, missing, out of date,
 // unknown, installed, install failed, read failed), and `look-sheet-skill-*` the sheet's line
-// for a picked agent whose skill is missing or unknown.
+// for a picked agent whose skill is missing or unknown. The `look-handoff-*` scenarios draw the
+// latest-handoff card naming the tasks its session advanced, with its sheet open under it, for
+// each branch of its prompt (decision ruling 28): one task in progress (Resume task), one done,
+// one cancelled, several, none, a stage read that failed at the press, and a card read that
+// failed.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -264,6 +268,7 @@ const LOOK = {
         }
       }
     }),
+    'temper.handoff.tasks': () => ({ state: 'ok' as const, tasks: [row(4, TASK_DETAIL.title, 'task', 'in-progress')] }),
     'temper.home.way-in': wayAnswer,
     'temper.home.places': () => ({
       state: 'ok' as const,
@@ -382,6 +387,42 @@ const EMPTY_HOME = {
   'temper.home.places': () => ({ state: 'ok' as const, rows: [], total: 0 }),
   'temper.home.recent': () => ({ state: 'ok' as const, rows: [], total: 0 })
 }
+
+/** Home with the handoff card's sheet open, its stage reads answered in ask order — the carried
+ *  sheet's read first, then the card's; the last answer stands for any later ask. */
+function handoffScenario(...answers: unknown[]) {
+  let asks = 0
+  return {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.handoff.tasks': () => answers[Math.min(asks++, answers.length - 1)] as never
+    },
+    persisted: {
+      plugin: {
+        'detail-stack': [],
+        'launch-compose': {
+          kind: 'handoff-resume',
+          from: 'home',
+          item: {
+            id: SESSION_ID,
+            ref: `session-the-body-view-saves-${SESSION_ID}`,
+            title: 'Session: the body view saves through its held base',
+            contextRef: CONTEXT
+          },
+          handoffNext: {
+            heading: 'Next steps',
+            text: "Land the rail's look pass: Home and detail first, then the launcher sheet.",
+            truncated: false
+          }
+        },
+        ...REMEMBERED
+      }
+    }
+  }
+}
+
+const tasksAnswer = (...tasks: ReturnType<typeof row>[]) => ({ state: 'ok' as const, tasks })
 
 function seeded(entry: { id: string; docType: string }) {
   const title = entry.id === GOAL_ID ? GOAL_DETAIL.title : TASK_DETAIL.title
@@ -631,6 +672,25 @@ export default defineCheck({
     },
     persisted: sheet(REMEMBERED)
   },
+  // The handoff card's branches, each with its sheet open under the card.
+  'look-handoff-resume': handoffScenario(tasksAnswer(row(4, TASK_DETAIL.title, 'task', 'in-progress'))),
+  'look-handoff-done': handoffScenario(tasksAnswer(row(9, 'orca-temper Start and Resume', 'task', 'done'))),
+  'look-handoff-cancelled': handoffScenario(tasksAnswer(row(9, 'orca-temper Start and Resume', 'task', 'cancelled'))),
+  'look-handoff-several': handoffScenario(
+    tasksAnswer(
+      row(4, TASK_DETAIL.title, 'task', 'in-progress'),
+      row(9, 'orca-temper Start and Resume', 'task', 'done')
+    )
+  ),
+  'look-handoff-none': handoffScenario(tasksAnswer()),
+  // The card read named an in-progress task; the press's read failed: the sheet says so. A
+  // carried sheet asks its read as the panel sets up, before Home's refresh asks the card's.
+  'look-handoff-unread': handoffScenario(
+    FAILED('advanced tasks'),
+    tasksAnswer(row(4, TASK_DETAIL.title, 'task', 'in-progress'))
+  ),
+  // The card's own read failed: the card stands, its tasks region saying so.
+  'look-handoff-card-failed': { ...handoffScenario(FAILED('advanced tasks')), persisted: { plugin: { 'detail-stack': [] } } },
   'look-state-signed-out': {
     ...LOOK,
     requests: { ...LOOK.requests, ...allAnswer(NOT_CONNECTED) },

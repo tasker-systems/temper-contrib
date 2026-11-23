@@ -18,6 +18,7 @@ import {
   recentlyUpdated,
   resourceDetail,
   resumeItem,
+  sessionTasks,
   taskHandoff,
   wayIn,
   type TemperRead
@@ -31,6 +32,8 @@ import type {
   CapabilitiesOutput,
   FocusAgentInput,
   FocusAgentOutput,
+  HandoffTasksInput,
+  HandoffTasksOutput,
   LatestHandoffOutput,
   LaunchAgentsOutput,
   LaunchInput,
@@ -162,6 +165,13 @@ export default function activate(orca: OrcaWorkerApi): void {
     'temper.launch.task-handoff',
     async (input: TaskHandoffInput): Promise<TaskHandoffOutput> =>
       answer(async (read) => ({ state: 'ok' as const, ...(await taskHandoff(read, input.id)) }))
+  )
+  // The tasks a session advanced, with their stages as temper holds them now: the handoff
+  // card names them, and its press reads them again to branch its prompt (ruling 28).
+  orca.panels.handle(
+    'temper.handoff.tasks',
+    async (input: HandoffTasksInput): Promise<HandoffTasksOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await sessionTasks(read, input.sessionId)) }))
   )
   // The editor room (Open body): its own module, gated on the same grant.
   registerEditorRoom(orca, answer)
