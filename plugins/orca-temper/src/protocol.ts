@@ -227,6 +227,12 @@ export interface LaunchItem {
   id: string
   ref: string
   title: string
+  /**
+   * The home-context address, as the press composed it. A press whose item names none — a
+   * carried sheet, a compose from before the context was known — still launches: the worker
+   * reads the record's `context_ref` itself to hold it in the pending link the launch hook
+   * answers from, and a failed read blocks nothing (the launch runs with none).
+   */
   contextRef: string | null
   /**
    * The record's doc-type word, when the press knows it (a detail's launch, or the handoff

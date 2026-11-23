@@ -57,10 +57,13 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   Start's act with the resume prompt. Every launch goes into a new workspace: confirm sends
   `temper.launch.go` to the worker, `workspace.create { projectId, agent, prompt }`, then the
   workspace ↔ item link in the plugin's own storage (`launch-links`) with the agent and the
-  terminal it started in. When the item is already linked to a workspace, the sheet names it
-  before the confirm. No press writes to temper (Rulings Q3). Consents gate per Q9's table — a
-  lit action needs every consent it uses, a missing one is named and never attempted — and a
-  refused launch shows what Orca said.
+  terminal it started in. The launch holds itself as a pending link first — the launch hook's
+  answer while the create is out — and when the press's item names no context, the worker reads
+  the record's `context_ref` itself before it is held, so the pending link carries the context
+  the item could not; a read that fails or is refused blocks nothing. When the item is already
+  linked to a workspace, the sheet names it before the confirm. No press writes to temper (Rulings
+  Q3). Consents gate per Q9's table — a lit action needs every consent it uses, a missing one is
+  named and never attempted — and a refused launch shows what Orca said.
 - **Reopen agent** (`src/links.ts`) is Orca's resume: the same agent session, back in its
   workspace, through `agent.resume { workspaceId, agent, sessionId }`, with no temper prompt.
   A link learns its session only from Orca naming the launch's own terminal — an
