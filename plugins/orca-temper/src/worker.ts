@@ -237,7 +237,26 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
 
     // Orca starts the agent before workspace.create returns, so its launch hook may run before
-    // the link below is stored: the launch is held as pending until then (./serves.ts).
+    // the link below is stored: the launch is held as pending until then (./serves.ts). The
+    // pending link is the hook's only source then, so it must carry the item's context — and a
+    // press whose item names none would hold a link to a task with a ref but no context
+    // (TEMPER_TASK without TEMPER_CONTEXT). So when the item arrives without its context, the
+    // worker reads the record's `context_ref` itself before the launch is held: a temper read
+    // on the person's grant, inside the press, for what it would launch into. A read that
+    // fails or is refused — signed out among them — blocks nothing: the launch runs with the
+    // context the item arrived with, and the strip's record read still teaches the link
+    // (./serves.ts `learnLink`).
+    let contextRef = typeof input.item.contextRef === 'string' && input.item.contextRef.trim() !== ''
+      ? input.item.contextRef
+      : null
+    if (contextRef === null) {
+      try {
+        const detail = await resourceDetail(await temperRead(), input.item.id)
+        contextRef = detail.contextRef
+      } catch {
+        // Nothing is invented: the launch runs with what the press knew.
+      }
+    }
     const docType =
       typeof input.item.docType === 'string' && input.item.docType !== '' ? input.item.docType : undefined
     const pending: PendingLaunch = {
@@ -246,7 +265,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       link: {
         itemId: input.item.id,
         ref: input.item.ref,
-        contextRef: input.item.contextRef ?? null,
+        contextRef,
         startedAt: new Date().toISOString(),
         agent: input.agent,
         ...(typeof input.item.title === 'string' ? { title: input.item.title } : {}),
