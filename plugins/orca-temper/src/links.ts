@@ -22,6 +22,18 @@
 // for a list not naming it — `workspace.removed` still drops it at once.
 import type { OrcaWorkerApi } from 'orca/worker'
 import type { LaunchLink, LinkedWorkspace } from './protocol'
+
+/** A linked workspace with its run as Orca reported it — what Record this work reads. */
+export interface LinkedRun extends LinkedWorkspace {
+  /** When the launch started the run. */
+  startedAt: string
+  /** When Orca reported the run done, and its outcome word; null while it runs or unknown. */
+  finishedAt: string | null
+  outcome: string | null
+  /** The workspace's branch and Orca host id, as `workspace.list` gives them. */
+  branch: string | null
+  hostId: string | null
+}
 import { LAUNCH_LINKS_KEY } from './protocol'
 
 /** The stored links, every malformed entry left out. */
@@ -51,7 +63,9 @@ export async function readLinks(orca: OrcaWorkerApi): Promise<LaunchLink[]> {
       ...(typeof row['title'] === 'string' ? { title: row['title'] } : {}),
       ...(typeof row['docType'] === 'string' && row['docType'] !== '' ? { docType: row['docType'] } : {}),
       ...(typeof row['projectId'] === 'string' && row['projectId'] !== '' ? { projectId: row['projectId'] } : {}),
-      ...(typeof row['path'] === 'string' && row['path'] !== '' ? { path: row['path'] } : {})
+      ...(typeof row['path'] === 'string' && row['path'] !== '' ? { path: row['path'] } : {}),
+      ...(typeof row['finishedAt'] === 'string' && row['finishedAt'] !== '' ? { finishedAt: row['finishedAt'] } : {}),
+      ...(typeof row['outcome'] === 'string' && row['outcome'] !== '' ? { outcome: row['outcome'] } : {})
     })
   }
   return links
@@ -152,10 +166,25 @@ export async function dropRemovedWorkspace(
   })
 }
 
+/** Orca's outcome words a run record carries; anything else Orca says reads `unreported`. */
+const OUTCOME_WORDS = new Set(['success', 'failure', 'cancellation', 'superseded', 'interruption', 'unconfirmed'])
+
+/** Orca's word for how a run ended, or `unreported` when it named none this rail knows. */
+export function outcomeWord(outcome: unknown): string {
+  return typeof outcome === 'string' && OUTCOME_WORDS.has(outcome) ? outcome : 'unreported'
+}
+
+/** An epoch-milliseconds time as RFC 3339, or null when it is not a time. */
+function isoOf(ms: unknown): string | null {
+  return typeof ms === 'number' && Number.isFinite(ms) ? new Date(ms).toISOString() : null
+}
+
 /**
  * `agent.status.changed`: when Orca names the session in a linked launch's own terminal, the
- * link carries it from then on. Any other terminal's session — even in the same workspace —
- * is not this launch's agent, and is not taken.
+ * link carries it from then on; when Orca reports that terminal's agent done, the link carries
+ * when and Orca's word for how — and loses both when the agent works again. Any other
+ * terminal's session — even in the same workspace — is not this launch's agent, and is not
+ * taken. A run's end is the run's, never the task's: nothing here reads or writes task state.
  */
 export async function learnSessionFromEvent(
   orca: OrcaWorkerApi,
@@ -164,26 +193,45 @@ export async function learnSessionFromEvent(
     workspaceListId?: string
     terminalId?: string
     sessionId?: string
+    state?: string
+    receivedAt?: number
+    mainAgent?: { state?: string; outcome?: string; stateStartedAt?: number }
   }
 ): Promise<void> {
-  const sessionId = payload.sessionId
   const terminalId = payload.terminalId
-  if (typeof sessionId !== 'string' || sessionId === '' || typeof terminalId !== 'string') {
+  if (typeof terminalId !== 'string') {
+    return
+  }
+  const sessionId = typeof payload.sessionId === 'string' && payload.sessionId !== '' ? payload.sessionId : null
+  const state = payload.mainAgent?.state ?? payload.state
+  const finishedAt = state === 'done' ? (isoOf(payload.mainAgent?.stateStartedAt) ?? isoOf(payload.receivedAt)) : null
+  if (sessionId === null && typeof state !== 'string') {
     return
   }
   const workspaces = eventWorkspaceIds(payload)
   await updateLinks(orca, (links) => {
     let changed = false
     const next = links.map((link) => {
-      if (
-        link.terminalId === terminalId &&
-        workspaces.includes(link.workspaceId) &&
-        link.sessionId !== sessionId
-      ) {
-        changed = true
-        return { ...link, sessionId }
+      if (link.terminalId !== terminalId || !workspaces.includes(link.workspaceId)) {
+        return link
       }
-      return link
+      let entry = link
+      if (sessionId !== null && entry.sessionId !== sessionId) {
+        entry = { ...entry, sessionId }
+      }
+      if (finishedAt !== null) {
+        const outcome = outcomeWord(payload.mainAgent?.outcome)
+        if (entry.finishedAt !== finishedAt || entry.outcome !== outcome) {
+          entry = { ...entry, finishedAt, outcome }
+        }
+      } else if (typeof state === 'string' && state !== 'done' && (entry.finishedAt !== undefined || entry.outcome !== undefined)) {
+        const { finishedAt: _finished, outcome: _outcome, ...running } = entry
+        entry = running
+      }
+      if (entry !== link) {
+        changed = true
+      }
+      return entry
     })
     return changed ? next : null
   })
@@ -194,6 +242,8 @@ interface ListedWorkspace {
   id: string
   projectId?: string | null
   path: string
+  branch?: string | null
+  hostId?: string | null
 }
 
 /** The listed workspace a link is to: by the listed id, or by Orca's worktree id either way. */
@@ -228,17 +278,24 @@ function pastGrace(link: LaunchLink, now: number): boolean {
  * (it cannot be named). The lessons are written through the queue against the links as stored
  * then, so a link stored meanwhile is never lost.
  */
-export async function linkedWorkspaces(
-  orca: OrcaWorkerApi,
-  itemId: string
-): Promise<LinkedWorkspace[]> {
+export async function linkedWorkspaces(orca: OrcaWorkerApi, itemId: string): Promise<LinkedWorkspace[]> {
+  return (await linkedRuns(orca, itemId)).map(({ workspaceId, name, agent, sessionId }) => ({
+    workspaceId,
+    name,
+    agent,
+    sessionId
+  }))
+}
+
+/** `linkedWorkspaces`, each with its run's start, finish, outcome, branch and host. */
+export async function linkedRuns(orca: OrcaWorkerApi, itemId: string): Promise<LinkedRun[]> {
   const links = await readLinks(orca)
   const listed = await orca.host.call('workspace.list')
   const now = Date.now()
 
   const gone: LaunchLink[] = []
   const lessons: { pair: LaunchLink; patch: Partial<LaunchLink> }[] = []
-  const answer: LinkedWorkspace[] = []
+  const answer: LinkedRun[] = []
   for (const link of links) {
     const workspace = listedRowFor(listed.workspaces, link)
     if (workspace === undefined) {
@@ -257,19 +314,38 @@ export async function linkedWorkspaces(
     }
     if (link.itemId === itemId) {
       let sessionId = link.sessionId ?? null
+      let finishedAt = link.finishedAt ?? null
+      let outcome = link.outcome ?? null
       const named = { ...link, workspaceId: workspace.id }
-      if (sessionId === null && typeof link.terminalId === 'string' && orca.host.has('agents.list')) {
-        const learned = await sessionFromAgentsList(orca, named)
-        if (learned !== null) {
-          sessionId = learned
-          patch.sessionId = learned
+      if (
+        (sessionId === null || finishedAt === null) &&
+        typeof link.terminalId === 'string' &&
+        orca.host.has('agents.list')
+      ) {
+        const own = await ownAgentRow(orca, named)
+        if (sessionId === null && own !== null && typeof own.sessionId === 'string' && own.sessionId !== '') {
+          sessionId = own.sessionId
+          patch.sessionId = own.sessionId
+        }
+        if (finishedAt === null && own !== null && own.state === 'done') {
+          finishedAt = isoOf(own.stateStartedAt)
+          if (finishedAt !== null) {
+            outcome = 'unreported'
+            patch.finishedAt = finishedAt
+            patch.outcome = outcome
+          }
         }
       }
       answer.push({
         workspaceId: workspace.id,
         name: workspace.name,
         agent: link.agent ?? null,
-        sessionId
+        sessionId,
+        startedAt: link.startedAt,
+        finishedAt,
+        outcome,
+        branch: workspace.branch ?? null,
+        hostId: workspace.hostId ?? null
       })
     }
     if (Object.keys(patch).length > 0) {
@@ -293,9 +369,13 @@ export async function linkedWorkspaces(
         }
         changed = true
         const patch = { ...lesson.patch }
-        // A session the store learned meanwhile stands over this read's lesson.
+        // A session or a finish the store learned meanwhile stands over this read's lesson.
         if (typeof entry.sessionId === 'string' && entry.sessionId !== '') {
           delete patch.sessionId
+        }
+        if (typeof entry.finishedAt === 'string') {
+          delete patch.finishedAt
+          delete patch.outcome
         }
         next.push({ ...entry, ...patch })
       }
@@ -305,14 +385,16 @@ export async function linkedWorkspaces(
   return answer
 }
 
-/** The session `agents.list` names in the launch's own terminal, or null — never another's. */
-async function sessionFromAgentsList(orca: OrcaWorkerApi, link: LaunchLink): Promise<string | null> {
+/** The `agents.list` row for the launch's own terminal, or null — never another terminal's. */
+async function ownAgentRow(
+  orca: OrcaWorkerApi,
+  link: LaunchLink
+): Promise<{ sessionId?: string | null; state: string; stateStartedAt: number } | null> {
   try {
     const listed = await orca.host.call('agents.list', { workspaceId: link.workspaceId })
-    const own = listed.agents.find((agent) => agent.terminalId === link.terminalId)
-    return typeof own?.sessionId === 'string' && own.sessionId !== '' ? own.sessionId : null
+    return listed.agents.find((agent) => agent.terminalId === link.terminalId) ?? null
   } catch {
-    // No agent:read, or the workspace answered nothing: the session stays unknown.
+    // No agent:read, or the workspace answered nothing: the session and finish stay unknown.
     return null
   }
 }

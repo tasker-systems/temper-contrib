@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "temper-contrib:orca-temper/orca-work/v1",
+  "title": "orca-work",
+  "description": "One Orca agent run on the task that owns it, recorded by the person's press of Record this work in the Temper rail. An append-only log: a task may carry many, from several machines. It says where and when a run happened and how Orca says it ended — never the task's stage, claim or work in flight, which only temper holds. No transcript, terminal output or filesystem path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "agent",
+    "workspace_name",
+    "orca_session_id",
+    "orca_host",
+    "started_at",
+    "finished_at",
+    "orca_outcome"
+  ],
+  "properties": {
+    "agent": {
+      "description": "Orca's agent kind for the run, as Orca names it (claude, codex, opencode, …).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "workspace_name": {
+      "description": "The workspace's name as Orca lists it.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "branch": {
+      "description": "The workspace's git branch, when Orca lists one (a folder workspace has none).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "orca_session_id": {
+      "description": "The agent session Orca names in the launch's terminal: what Orca's agent.resume takes. It belongs to one Orca host.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "orca_host": {
+      "description": "The Orca host the run happened on: an opaque digest of the machine, followed by Orca's own host id when the workspace is not local. Reopen is offered only on the host that matches.",
+      "type": "string",
+      "pattern": "^orca-host:[0-9a-f]{16}(/[A-Za-z0-9:._-]+)?$"
+    },
+    "started_at": {
+      "description": "When the launch started the run (RFC 3339, UTC).",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "finished_at": {
+      "description": "When Orca reported the run done (RFC 3339, UTC).",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$"
+    },
+    "orca_outcome": {
+      "description": "Orca's word for how the run ended. `unreported` when Orca named no outcome. It describes the Orca run, never the task.",
+      "type": "string",
+      "enum": ["success", "failure", "cancellation", "superseded", "interruption", "unconfirmed", "unreported"]
+    },
+    "session_note": {
+      "description": "The agent's own temper session note for this run, by its bare UUID, when one is known.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    }
+  }
+}

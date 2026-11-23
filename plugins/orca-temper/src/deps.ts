@@ -6,7 +6,7 @@
 // machine. Nothing here reads files — the plugin never touches temper's own config or auth
 // store; the temper CLI's `skill check` and `skill install` are its own.
 import { spawn } from 'node:child_process'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 
 export interface CommandResult {
   code: number
@@ -32,6 +32,8 @@ export interface PluginDeps {
   fetch: FetchLike
   /** The home directory a skill install target writes under (`~/.agents`, `~/.claude`). */
   home: () => string
+  /** This machine's name — only ever digested into a record's `orca_host`, never sent as is. */
+  machine: () => string
 }
 
 /** Spawns one CLI by program name, collecting stdout and stderr until close. */
@@ -58,5 +60,6 @@ export const deps: PluginDeps = {
   run: spawnCli('temper'),
   runOrca: spawnCli('orca'),
   fetch: (input) => fetch(input),
-  home: () => homedir()
+  home: () => homedir(),
+  machine: () => hostname()
 }

@@ -80,6 +80,7 @@ import type {
 import { LAUNCH_PRESS_NEEDS, REOPEN_NEEDS } from './protocol'
 import { ensureSkillReadiness, SheetSkillNote } from './skill-readiness/region'
 import { FocusOutcome, GoToAgent } from './focus-agent'
+import { ClaimLine, loadTaskClaim } from './claim-line'
 
 /** The act a sheet launches: the ruled buttons (Resume task stands on a task and on the
  *  handoff card, each with its own prompt). */
@@ -276,6 +277,10 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
   set(pressTasks, null)
   // The picked agent's skill line reads Home's readiness answer, asked here if Home never did.
   ensureSkillReadiness()
+  // temper's claim on the task, read before the confirm (ruling 26): named, never a gate.
+  if (kind === 'task-start' || kind === 'task-resume') {
+    void loadTaskClaim(item.id)
+  }
 
   const [projects, agents, , taskRead] = await Promise.all([
     plugin.request('temper.launch.projects').catch(
@@ -658,6 +663,7 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
           The agent works in a new workspace: a new branch and worktree in the picked project.
         </Text>
         {linked.length === 0 ? undefined : <LinkedWorkspaceNote links={linked} />}
+        {compose.kind === 'task-start' || compose.kind === 'task-resume' ? <ClaimLine itemId={compose.item.id} /> : undefined}
         {projects === null ? (
           <Text muted size="xs">◌ Reading Orca's projects…</Text>
         ) : projects.state === 'failed' ? (

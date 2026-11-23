@@ -75,6 +75,7 @@ import {
   setupLauncher
 } from './launcher'
 import { cardLaunchLabel, HandoffTasks, loadHandoffTasks } from './handoff-card'
+import { loadWorkRecords, WorkRegion } from './work-region'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
 import { loadSkillReadiness, SkillReadinessRegion } from './skill-readiness/region'
 import { refreshServes, ServesRegion, setupServes } from './serves-strip'
@@ -159,6 +160,9 @@ function pushDetail(entry: DetailEntry): void {
   loadDetail(entry)
   loadLinkedTasks(entry)
   void loadItemLinks(entry.id)
+  if (entry.docType === 'task') {
+    void loadWorkRecords(entry.id)
+  }
 }
 
 function popDetail(): void {
@@ -378,6 +382,9 @@ export function setup(ctx: PanelContext): void {
     void loadDetail(carried)
     void loadLinkedTasks(carried)
     void loadItemLinks(carried.id)
+    if (carried.docType === 'task') {
+      void loadWorkRecords(carried.id)
+    }
   }
   setupLauncher()
   setupServes(ctx)
@@ -931,6 +938,7 @@ function DetailView(props: { entry: DetailEntry }) {
         <WayOutNote id={props.entry.id} />
       </Stack>
       {detail === null ? undefined : <LauncherSheet from="detail" itemId={props.entry.id} />}
+      {detail === null ? undefined : <WorkRegion detail={detail} />}
       <RecordDetailRegion answer={answer} />
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />

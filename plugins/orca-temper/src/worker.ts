@@ -28,6 +28,7 @@ import { registerEditorRoom } from './editor-room/open-body'
 import { readLaunchableAgents } from './agents'
 import { registerSkillReadiness } from './skill-readiness/worker'
 import { createPendingLaunches, registerServes, type PendingLaunch } from './serves'
+import { registerWork } from './work'
 import type {
   CapabilitiesOutput,
   FocusAgentInput,
@@ -182,6 +183,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   // The launches still out to workspace.create are held here for the hook (./serves.ts).
   const pendingLaunches = createPendingLaunches()
   registerServes(orca, answer, pendingLaunches)
+  // The work records (decision ruling 26): Record this work, the records read back, Reopen from
+  // a record, and temper's claim for the launch sheet — every temper act behind the same gate.
+  registerWork(orca, answer)
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
