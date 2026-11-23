@@ -70,6 +70,7 @@ import type {
 } from './protocol'
 import { LAUNCH_PRESS_NEEDS, REOPEN_NEEDS } from './protocol'
 import { ensureSkillReadiness, SheetSkillNote } from './skill-readiness/region'
+import { FocusOutcome, GoToAgent } from './focus-agent'
 
 /** The act a sheet launches: the ruled buttons (Resume task stands on a task and on the
  *  handoff card, each with its own prompt). */
@@ -464,6 +465,8 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
       <Card title={title}>
         <Stack gap="sm">
           <Callout tone="success" title="The agent was launched." />
+          <GoToAgent place={{ workspaceId: outcome.workspaceId, terminalId: outcome.terminalId }} />
+          <FocusOutcome place={{ workspaceId: outcome.workspaceId, terminalId: outcome.terminalId }} />
           {outcome.linkError === null ? undefined : (
             <Callout tone="warning" title="The workspace's link to the item was not stored">
               <Text muted size="xs">
@@ -712,15 +715,20 @@ export function ReopenOutcome(props: { itemId: string }): OrcaNode {
     )
   }
   if (output.state === 'reopened') {
+    const place = { workspaceId: answer.workspaceId, terminalId: output.terminalId }
     return (
-      <Callout
-        tone="success"
-        title={
-          output.started
-            ? `The agent session was reopened in ${answer.name}.`
-            : `The agent session is already running in ${answer.name}.`
-        }
-      />
+      <Stack gap="xs">
+        <Callout
+          tone="success"
+          title={
+            output.started
+              ? `The agent session was reopened in ${answer.name}.`
+              : `The agent session is already running in ${answer.name}.`
+          }
+        />
+        <GoToAgent place={place} />
+        <FocusOutcome place={place} />
+      </Stack>
     )
   }
   return output.state === 'refused' ? (

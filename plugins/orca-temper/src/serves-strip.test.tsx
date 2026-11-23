@@ -6,7 +6,7 @@
 // change reads what the new workspace serves; and an agent's status change reads its agents.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
-import type { ServesOutput } from './protocol'
+import type { FocusAgentInput, FocusAgentOutput, ServesOutput } from './protocol'
 
 let mounted: TestPanel | undefined
 afterEach(() => mounted?.unmount())
@@ -46,12 +46,21 @@ const linkedAnswer = (docType = 'task') => ({
 
 const context = (workspaceId: string) => ({ workspaceId, branch: 'pt/the-served-task', displayName: 'the-served-task', terminals: [] })
 
-function host(options: { granted?: string[]; serves?: (input: { workspaceId: string }) => ServesOutput; context?: unknown; agents?: unknown }) {
+function host(options: {
+  granted?: string[]
+  serves?: (input: { workspaceId: string }) => ServesOutput
+  context?: unknown
+  agents?: unknown
+  focus?: (input: FocusAgentInput) => FocusAgentOutput
+}) {
   const granted = options.granted ?? ALL
   return mockHost({
     capabilities: granted,
     requests: {
       ...HOME,
+      'temper.agent.focus':
+        options.focus ??
+        ((input: FocusAgentInput) => ({ state: 'shown' as const, via: input.terminalId === null ? ('workspace' as const) : ('terminal' as const), focused: true })),
       'temper.capabilities': () => ({ granted }),
       'temper.serves': options.serves ?? (() => linkedAnswer()),
       'temper.resource.detail': () => ({ state: 'ok' as const, detail: DETAIL })
@@ -171,4 +180,59 @@ test("the task's stage is temper's alone: done elsewhere reads done, and an unre
     'no stage is shown that temper did not answer — none from the link, none from the agents'
   )
   assert.ok(mounted.find({ type: 'Text', text: /^Its record is unavailable/ }))
+})
+
+// An agent's row is a press that takes the person to it (./focus-agent.tsx).
+test("a terminal agent's row focuses its terminal; a chat's row opens its workspace and says so", async () => {
+  const asked: FocusAgentInput[] = []
+  const agents = {
+    agents: [
+      { terminalId: 't-1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: Date.now() - 120_000 },
+      { terminalId: null, title: 'Chat', agent: 'claude', state: 'waiting', stateStartedAt: Date.now() - 60_000 }
+    ]
+  }
+  mounted = await mount(panel, {
+    host: host({ agents, focus: (input) => { asked.push(input); return { state: 'shown', via: input.terminalId === null ? 'workspace' : 'terminal', focused: true } } })
+  })
+  const terminalRow = mounted.find({ type: 'ListItem', label: 'Claude' })
+  assert.ok(terminalRow)
+  assert.notEqual(terminalRow.props['disabled'], true)
+  const chatRow = mounted.find({ type: 'ListItem', label: 'Chat' })
+  assert.ok(chatRow)
+  assert.ok(
+    mounted.findAll({ type: 'Text', text: 'opens its workspace — Orca cannot focus a chat tab' }).some((t) => t.path.startsWith(chatRow.path)),
+    "the chat's row says it opens the workspace"
+  )
+  assert.ok(
+    !mounted.findAll({ type: 'Text', text: /opens its workspace/ }).some((t) => t.path.startsWith(terminalRow.path)),
+    "a terminal's row does not"
+  )
+
+  await mounted.press({ type: 'ListItem', label: 'Claude' })
+  await mounted.press({ type: 'ListItem', label: 'Chat' })
+  assert.deepEqual(asked, [
+    { workspaceId: LINKED, terminalId: 't-1' },
+    { workspaceId: LINKED, terminalId: null }
+  ])
+  assert.deepEqual(mounted.refusals, [])
+})
+
+test("focused false is said quietly under the row, never as an error", async () => {
+  mounted = await mount(panel, { host: host({ focus: () => ({ state: 'shown', via: 'terminal', focused: false }) }) })
+  await mounted.press({ type: 'ListItem', label: 'Claude' })
+  const row = mounted.find({ type: 'ListItem', label: 'Claude' })!
+  const quiet = mounted.find({ type: 'Text', text: 'Orca did not move to it.' })
+  assert.ok(quiet && quiet.path.startsWith(row.path), 'said under the row pressed')
+  assert.equal(quiet.props['muted'], true)
+  assert.equal(mounted.find({ type: 'Callout', label: 'Orca refused' }), null)
+})
+
+test('without workspace:write the agent rows are dark and the consent is named', async () => {
+  const asked: FocusAgentInput[] = []
+  mounted = await mount(panel, {
+    host: host({ granted: ALL.filter((kind) => kind !== 'workspace:write'), focus: (input) => { asked.push(input); return { state: 'shown', via: 'terminal', focused: true } } })
+  })
+  assert.equal(mounted.find({ type: 'ListItem', label: 'Claude' })?.props['disabled'], true, 'dark')
+  assert.ok(mounted.find({ type: 'Text', text: /^Going to an agent needs the 'Open and rename your workspaces/ }))
+  assert.deepEqual(asked, [])
 })

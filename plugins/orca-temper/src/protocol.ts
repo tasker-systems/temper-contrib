@@ -31,6 +31,9 @@
 //   temper.serves         — what the focused workspace serves: the stored link joining it
 //                           to an item, and that item's record read on the grant (Home's
 //                           "this workspace" strip)
+//   temper.agent.focus    — takes the person to an agent: `terminal.focus` on its terminal,
+//                           or `workspace.open` on its workspace when no terminal is known
+//                           (a chat). It moves Orca's view only: never task state, no temper write
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -412,6 +415,24 @@ export const SERVES_NEEDS = ['workspace:read', 'storage:own'] as const
 /** What the strip's agents line needs: `agents.list` and the status events. */
 export const SERVES_AGENTS_NEEDS = ['agent:read'] as const
 
+/**
+ * `temper.agent.focus`: where an agent is. A terminal is focused when one is known; otherwise
+ * its workspace is opened — Orca has no plugin call that focuses a chat tab (stablyai/orca#42069).
+ */
+export interface FocusAgentInput {
+  workspaceId: string
+  terminalId: string | null
+}
+
+export type FocusAgentOutput =
+  /** Orca answered. `focused` is false when Orca did not move to it (a newer focus won). */
+  | { state: 'shown'; via: 'terminal' | 'workspace'; focused: boolean }
+  | { state: 'failed'; message: string }
+  | { state: 'refused'; code: string | null; message: string }
+
+/** What a press that takes the person to an agent needs: `terminal.focus` and `workspace.open`. */
+export const FOCUS_AGENT_NEEDS = ['workspace:write'] as const
+
 declare module 'orca' {
   interface PluginRequests {
     /** The one resource the person last changed, or a signed-out refusal. */
@@ -444,5 +465,7 @@ declare module 'orca' {
     'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
     /** What the focused workspace serves: its stored link, and the item's record read. */
     'temper.serves': { input: ServesInput; output: ServesOutput }
+    /** Takes the person to an agent: its terminal focused, or its workspace opened. */
+    'temper.agent.focus': { input: FocusAgentInput; output: FocusAgentOutput }
   }
 }
