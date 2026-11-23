@@ -87,6 +87,14 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   to `workspace.create` answers from memory, since Orca starts its agent before the create
   returns. With no stored link, the hook and the strip fall back to the workspace's serves
   marker. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
+- **Going to an agent** (`src/focus-agent.tsx`). Each agent row in the strip is a press, and
+  Reopen agent's and the launch sheet's outcomes offer the same press. The worker's
+  `temper.agent.focus` focuses the agent's terminal (`terminal.focus`) when one is known, and
+  otherwise opens its workspace (`workspace.open`): Orca has no plugin call that focuses a chat
+  tab (stablyai/orca#42069), so a chat's row says it opens the workspace. When Orca answers
+  `focused: false` the rail says "Orca did not move to it.", muted, not as an error. Without
+  `workspace:write` the press is dark and the consent is named. The press only moves Orca's view:
+  it writes nothing and is never read as task state.
 - **The serves marker** (`src/serves-marker.ts`). Orca runs `agent.launch.before` only for agent
   CLIs it starts in a terminal, so a chat agent, another harness, or an agent started outside
   Orca gets no env. Each launch for a task therefore also writes

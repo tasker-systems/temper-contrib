@@ -14,6 +14,8 @@
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
 import type {
+  FocusAgentInput,
+  FocusAgentOutput,
   LatestHandoffOutput,
   LaunchInput,
   LaunchOutput,
@@ -131,6 +133,7 @@ const ALL_GRANTED = [
 interface Served {
   launches: LaunchInput[]
   reopens: ReopenInput[]
+  focuses: FocusAgentInput[]
 }
 
 function servedHost(options: {
@@ -141,8 +144,9 @@ function servedHost(options: {
   taskHandoff?: unknown
   launch?: LaunchOutput
   reopen?: ReopenOutput
+  focus?: FocusAgentOutput
 }): { host: ReturnType<typeof mockHost>; served: Served } {
-  const served: Served = { launches: [], reopens: [] }
+  const served: Served = { launches: [], reopens: [], focuses: [] }
   const host = mockHost({
     capabilities: [...(options.granted ?? ALL_GRANTED)],
     results: { 'workspace.readContext': FOCUSED },
@@ -171,6 +175,10 @@ function servedHost(options: {
       'temper.reopen.go': (input: ReopenInput): ReopenOutput => {
         served.reopens.push(input)
         return options.reopen ?? { state: 'reopened', terminalId: 't-back', started: true }
+      },
+      'temper.agent.focus': (input: FocusAgentInput): FocusAgentOutput => {
+        served.focuses.push(input)
+        return options.focus ?? { state: 'shown', via: input.terminalId === null ? 'workspace' : 'terminal', focused: true }
       }
     }
   })
@@ -730,4 +738,66 @@ test('a sheet carried from the last run draws again with its reads asked, on its
   await mounted.settled()
   assert.equal(mounted.find({ type: 'Card' }), null, 'a sheet opened on one record never stands on another')
   assert.deepEqual(mounted.errors, [])
+})
+
+// Taking the person to the agent from an outcome (./focus-agent.tsx): the press moves Orca's
+// view only, and is dark without `workspace:write`.
+const WITH_WRITE = [...ALL_GRANTED, 'workspace:write']
+
+test("Reopen's outcome offers Go to the agent, focusing the terminal the reopen answered", async () => {
+  const { host, served } = servedHost({ granted: WITH_WRITE, detail: taskDetail('in-progress'), links: [LINKED] })
+  mounted = await mount(panel, { host, ...seededStack({ id: TASK_ID, ref: '', title: '', docType: 'task' }) })
+  await mounted.settled()
+  await mounted.press(mounted.find({ type: 'Button', text: /^Reopen agent/ })!)
+  await mounted.settled()
+
+  const go = mounted.find({ type: 'Button', text: 'Go to the agent' })
+  assert.ok(go, 'the reopened outcome offers the press')
+  assert.equal(go.props.variant, 'outline')
+  await mounted.press(go)
+  await mounted.settled()
+  assert.deepEqual(served.focuses, [{ workspaceId: LINKED.workspaceId, terminalId: 't-back' }])
+  assert.equal(mounted.find({ text: 'Orca did not move to it.' }), null, 'a focus that landed says nothing more')
+  assert.deepEqual(mounted.errors, [])
+  assert.deepEqual(mounted.refusals, [])
+})
+
+test("the sheet's launched outcome offers Go to the agent; focused false is said quietly", async () => {
+  const served = await openStartSheet({ granted: WITH_WRITE, focus: { state: 'shown', via: 'terminal', focused: false } })
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  await mounted!.press(mounted!.find({ type: 'Button', text: 'Go to the agent' })!)
+  await mounted!.settled()
+  assert.deepEqual(served.focuses, [{ workspaceId: 'ws-new', terminalId: 't-new' }])
+  const quiet = mounted!.find({ type: 'Text', text: 'Orca did not move to it.' })
+  assert.ok(quiet, 'focused false is said')
+  assert.equal(quiet.props.muted, true, 'quietly')
+  assert.equal(quiet.props.tone, undefined, 'never as an error')
+  assert.equal(mounted!.find({ type: 'Callout', label: 'Orca refused' }), null)
+  assert.deepEqual(mounted!.errors, [])
+})
+
+test('a launch with no terminal offers Open its workspace', async () => {
+  const served = await openStartSheet({
+    granted: WITH_WRITE,
+    launch: { state: 'launched', workspaceId: 'ws-new', terminalId: null, linkError: null }
+  })
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  await mounted!.press(mounted!.find({ type: 'Button', text: 'Open its workspace' })!)
+  await mounted!.settled()
+  assert.deepEqual(served.focuses, [{ workspaceId: 'ws-new', terminalId: null }])
+})
+
+test("without workspace:write the outcome's press is dark and names the consent", async () => {
+  const served = await openStartSheet()
+  await mounted!.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Start agent')
+
+  const go = mounted!.find({ type: 'Button', text: 'Go to the agent' })
+  assert.equal(go?.disabled, true, 'dark')
+  assert.ok(mounted!.find({ type: 'Text', text: /^Needs the 'Open and rename your workspaces/ }), 'the consent is named')
+  assert.deepEqual(served.focuses, [])
 })

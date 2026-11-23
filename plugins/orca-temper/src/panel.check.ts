@@ -16,7 +16,9 @@
 // `look-home-tasks-backlog` and `look-home-goals-completed` draw Home's ways in by another status
 // than the default (ruling 24); the `look-serves-*` scenarios draw Home's "this workspace"
 // strip — linked to a task with its agents, unlinked, linked to a goal, no workspace in focus,
-// and its consents withheld; the `look-state-*` scenarios
+// and its consents withheld; `look-serves-agents` draws its agent rows as presses — a terminal
+// agent's and a chat's, which says it opens the workspace — and `look-serves-focus-consent`
+// those rows dark without `workspace:write`, the consent named; the `look-state-*` scenarios
 // draw every region state: signed out, failed, loading, empty, and a withheld consent. The
 // `look-skill*` scenarios draw agent skill readiness on Home (ready, missing, out of date,
 // unknown, installed, install failed, read failed), and `look-sheet-skill-*` the sheet's line
@@ -220,6 +222,14 @@ const AGENTS = {
   agents: [
     { terminalId: 't-1', title: 'Claude', agent: 'claude', state: 'working', stateStartedAt: Date.now() - 12 * 60_000, sessionId: null, task: null },
     { terminalId: 't-2', title: 'Codex', agent: 'codex', state: 'done', stateStartedAt: Date.now() - 60 * 60_000, sessionId: null, task: null }
+  ]
+}
+
+/** A terminal agent and a chat — the chat has no terminal, so its press opens the workspace. */
+const CHAT_AGENTS = {
+  agents: [
+    AGENTS.agents[0],
+    { terminalId: null, title: 'Claude chat', agent: 'claude', state: 'waiting', stateStartedAt: Date.now() - 3 * 60_000, sessionId: null, task: null }
   ]
 }
 
@@ -444,6 +454,21 @@ export default defineCheck({
     requests: {
       ...LOOK.requests,
       'temper.capabilities': () => ({ granted: GRANTED.filter((kind) => kind !== 'agent:read') })
+    },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-agents': {
+    ...LOOK,
+    results: { ...LOOK.results, 'agents.list': CHAT_AGENTS },
+    persisted: { plugin: { 'detail-stack': [] } }
+  },
+  'look-serves-focus-consent': {
+    ...LOOK,
+    capabilities: GRANTED.filter((kind) => kind !== 'workspace:write'),
+    results: { ...LOOK.results, 'agents.list': CHAT_AGENTS },
+    requests: {
+      ...LOOK.requests,
+      'temper.capabilities': () => ({ granted: GRANTED.filter((kind) => kind !== 'workspace:write') })
     },
     persisted: { plugin: { 'detail-stack': [] } }
   },

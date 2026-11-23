@@ -29,6 +29,8 @@ import { registerSkillReadiness } from './skill-readiness/worker'
 import { createPendingLaunches, registerServes, type PendingLaunch } from './serves'
 import type {
   CapabilitiesOutput,
+  FocusAgentInput,
+  FocusAgentOutput,
   LatestHandoffOutput,
   LaunchAgentsOutput,
   LaunchInput,
@@ -373,6 +375,29 @@ export default function activate(orca: OrcaWorkerApi): void {
         sessionId: link.sessionId
       })
       return { state: 'reopened', terminalId: resumed.terminalId, started: resumed.started }
+    } catch (error) {
+      return {
+        state: 'refused',
+        code: refusalCode(error),
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  // Takes the person to an agent (./focus-agent.tsx): its terminal when one is known, else its
+  // workspace — a chat tab cannot be focused (stablyai/orca#42069). Only Orca's view moves.
+  orca.panels.handle('temper.agent.focus', async (input: FocusAgentInput): Promise<FocusAgentOutput> => {
+    const terminalId = typeof input?.terminalId === 'string' && input.terminalId !== '' ? input.terminalId : null
+    if (terminalId === null && (typeof input?.workspaceId !== 'string' || input.workspaceId === '')) {
+      return { state: 'failed', message: 'neither a terminal nor a workspace was named' }
+    }
+    try {
+      if (terminalId !== null) {
+        const answer = await orca.host.call('terminal.focus', { terminalId })
+        return { state: 'shown', via: 'terminal', focused: answer.focused }
+      }
+      await orca.host.call('workspace.open', { workspaceId: input.workspaceId })
+      return { state: 'shown', via: 'workspace', focused: true }
     } catch (error) {
       return {
         state: 'refused',

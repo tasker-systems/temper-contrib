@@ -10,6 +10,8 @@
 // for, and Orca's status words describe Orca's agents, never the task; a record that does not
 // answer shows no stage at all.
 // Each part keeps the house region states: still out, unavailable, empty, a withheld consent.
+// An agent's row is a press that takes the person to it (./focus-agent.tsx): its terminal
+// focused, or — for a chat, which has no terminal — its workspace opened, as the row says.
 import {
   atom,
   Badge,
@@ -32,9 +34,10 @@ import {
   type PanelContext
 } from 'orca'
 import { ConsentNote, grantedCapabilities, missingConsents } from './capabilities'
+import { focusAgent, focusGranted, FocusOutcome, OPENS_WORKSPACE } from './focus-agent'
 import { docTypeIcon, recordState, rowDescription, stateWord } from './look'
 import type { ServesOutput } from './protocol'
-import { SERVES_AGENTS_NEEDS, SERVES_NEEDS } from './protocol'
+import { FOCUS_AGENT_NEEDS, SERVES_AGENTS_NEEDS, SERVES_NEEDS } from './protocol'
 
 /** The focused workspace as Orca names it; undefined until first read, null when none is focused. */
 export interface FocusedWorkspace {
@@ -267,23 +270,38 @@ function Agents(props: { workspaceId: string }): OrcaNode {
           — No agents in this workspace.
         </Text>
       ) : (
-        <List label="agents">
-          {answer.agents.map((agent, index) => (
-            <ListItem
-              key={agent.terminalId ?? `agent-${index}`}
-              title={agent.title ?? agent.agent ?? 'agent'}
-              icon="agent"
-              description={`${agent.agent ?? 'agent'} · ${stateWord(agent.state)}`}
-            >
-              <Row gap="xs" align="center">
-                <Text muted size="xs">
-                  {`${stateWord(agent.state)} since`}
-                </Text>
-                <RelativeTime at={agent.stateStartedAt} muted />
-              </Row>
-            </ListItem>
-          ))}
-        </List>
+        <Stack gap="xs">
+          <List label="agents">
+            {answer.agents.map((agent, index) => {
+              const place = { workspaceId: props.workspaceId, terminalId: agent.terminalId }
+              const lit = focusGranted()
+              return (
+                <ListItem
+                  key={agent.terminalId ?? `agent-${index}`}
+                  title={agent.title ?? agent.agent ?? 'agent'}
+                  icon="agent"
+                  description={`${agent.agent ?? 'agent'} · ${stateWord(agent.state)}`}
+                  disabled={!lit}
+                  onPress={lit ? () => void focusAgent(place) : undefined}
+                >
+                  <Row gap="xs" align="center">
+                    <Text muted size="xs">
+                      {`${stateWord(agent.state)} since`}
+                    </Text>
+                    <RelativeTime at={agent.stateStartedAt} muted />
+                  </Row>
+                  {agent.terminalId === null ? (
+                    <Text muted size="xs">
+                      {OPENS_WORKSPACE}
+                    </Text>
+                  ) : undefined}
+                  <FocusOutcome place={place} />
+                </ListItem>
+              )
+            })}
+          </List>
+          <ConsentNote act="Going to an agent" needs={FOCUS_AGENT_NEEDS} granted={read(grantedCapabilities)} />
+        </Stack>
       )}
     </Stack>
   )
