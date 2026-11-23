@@ -112,9 +112,19 @@ function outcomeWords(outcome: string): string {
   return outcome === 'unreported' ? 'Orca named no outcome' : `Orca: ${outcome}`
 }
 
-/** A run's date as its Reopen is labelled. */
+/** A run's date as its Reopen is labelled: the day it finished, in UTC. */
 export function runLabel(finishedAt: string): string {
-  return `run of ${formatTime(finishedAt)}`
+  return `run of ${formatTime(finishedAt).replace(/, \d{2}:\d{2} UTC$/, '')}`
+}
+
+/** When a run ran: one day's span reads "22 Nov 2026, 20:30–22:30 UTC". */
+export function runSpan(startedAt: string, finishedAt: string): string {
+  const start = formatTime(startedAt)
+  const end = formatTime(finishedAt)
+  const day = /^(.*), (\d{2}:\d{2}) UTC$/
+  const a = start.match(day)
+  const b = end.match(day)
+  return a !== null && b !== null && a[1] === b[1] ? `${a[1]}, ${a[2]}–${b[2]} UTC` : `${start} → ${end}`
 }
 
 function RecordPress(props: { itemId: string; run: RecordableRun }): OrcaNode {
@@ -204,7 +214,7 @@ function RecordRow(props: { itemId: string; record: WorkRecord }): OrcaNode {
       description={`${record.agent} · ${outcomeWords(record.outcome)}`}
     >
       <Text muted size="xs">
-        {`${formatTime(record.startedAt)} → ${formatTime(record.finishedAt)}${record.branch === null ? '' : ` · ${record.branch}`}`}
+        {runSpan(record.startedAt, record.finishedAt)}
       </Text>
       {record.here ? (
         <GatedAction

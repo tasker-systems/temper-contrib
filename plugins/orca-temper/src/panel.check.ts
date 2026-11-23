@@ -26,7 +26,10 @@
 // latest-handoff card naming the tasks its session advanced, with its sheet open under it, for
 // each branch of its prompt (decision ruling 28): one task in progress (Resume task), one done,
 // one cancelled, several, none, a stage read that failed at the press, and a card read that
-// failed.
+// failed. The `look-work-*` scenarios draw a
+// task's work in Orca (ruling 26): a finished run offered to record beside recorded runs, one on
+// this host with its dated Reopen and one elsewhere; a done task whose records leave its stage
+// alone; and `look-sheet-claimed` the sheet naming temper's claim held elsewhere.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -243,6 +246,44 @@ const SERVES_TASK = {
   record: { state: 'ok' as const, detail: null as unknown }
 }
 
+/** A task's recorded Orca runs: one on this host, one on another (ruling 26). */
+const WORK_RECORDS = [
+  {
+    artifactId: '00000000-0000-7000-8000-0000000000c2',
+    agent: 'claude',
+    workspaceName: 'temper-contrib · pt/the-rails-look',
+    branch: 'pt/the-rails-look',
+    sessionId: 'session-here',
+    startedAt: ago(26 * 60),
+    finishedAt: ago(24 * 60),
+    outcome: 'success' as const,
+    sessionNote: null,
+    here: true
+  },
+  {
+    artifactId: '00000000-0000-7000-8000-0000000000c1',
+    agent: 'codex',
+    workspaceName: 'temper-contrib · pt/rails-look-spike',
+    branch: 'pt/rails-look-spike',
+    sessionId: 'session-away',
+    startedAt: ago(3 * 24 * 60),
+    finishedAt: ago(3 * 24 * 60 - 45),
+    outcome: 'interruption' as const,
+    sessionNote: null,
+    here: false
+  }
+]
+/** A linked run that finished here and is not recorded yet. */
+const RECORDABLE = {
+  workspaceId: 'ws-recordable',
+  workspaceName: 'temper-contrib · pt/the-rails-look-2',
+  agent: 'claude',
+  finishedAt: ago(12),
+  outcome: 'success' as const
+}
+/** temper's claim, held by an agent elsewhere. */
+const HELD_CLAIM = { claimId: 'c0ffee00-0000-4000-8000-000000000001', claimedAt: ago(95), heartbeatAt: ago(7) }
+
 const LOOK = {
   capabilities: GRANTED,
   results: { 'workspace.readContext': FOCUSED, 'agents.list': AGENTS },
@@ -314,6 +355,8 @@ const LOOK = {
       ]
     }),
     'temper.launch.links': () => ({ state: 'ok' as const, links: [] as typeof LINKED[] }),
+    'temper.work.records': () => ({ state: 'ok' as const, records: [] as typeof WORK_RECORDS, recordable: [] as typeof RECORDABLE[] }),
+    'temper.task.claim': () => ({ state: 'ok' as const, claim: null as null | typeof HELD_CLAIM }),
     'temper.skill.readiness': () => SKILL_MIXED,
     'temper.serves': () => ({ ...SERVES_TASK, record: { state: 'ok' as const, detail: TASK_DETAIL } }),
     'temper.launch.task-handoff': () => ({
@@ -530,6 +573,46 @@ export default defineCheck({
     ...LOOK,
     requests: { ...LOOK.requests, 'temper.launch.links': () => ({ state: 'ok' as const, links: [LINKED] }) },
     persisted: seeded({ id: TASK_ID, docType: 'task' })
+  },
+  // A task's work in Orca: a finished run to record, a recorded run here, one elsewhere.
+  'look-work-record': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.work.records': () => ({ state: 'ok' as const, records: WORK_RECORDS, recordable: [RECORDABLE] })
+    },
+    persisted: seeded({ id: TASK_ID, docType: 'task' })
+  },
+  // A task done elsewhere: temper's done stage stands; Reopen is still offered from its record.
+  'look-work-done': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.resource.detail': () => ({
+        state: 'ok' as const,
+        detail: {
+          ...TASK_DETAIL,
+          stage: 'done',
+          properties: TASK_DETAIL.properties.map((entry) =>
+            entry.label === 'temper-stage' ? { ...entry, value: 'done' } : entry
+          )
+        }
+      }),
+      'temper.work.records': () => ({ state: 'ok' as const, records: WORK_RECORDS, recordable: [] as typeof RECORDABLE[] })
+    },
+    persisted: seeded({ id: TASK_ID, docType: 'task' })
+  },
+  // The recorded runs could not be read: the region says so, and the detail stands.
+  'look-work-failed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.work.records': () => FAILED('work records') },
+    persisted: seeded({ id: TASK_ID, docType: 'task' })
+  },
+  // The sheet names temper's claim held elsewhere, with its heartbeat; the confirm stays lit.
+  'look-sheet-claimed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.task.claim': () => ({ state: 'ok' as const, claim: HELD_CLAIM }) },
+    persisted: sheet(REMEMBERED)
   },
   // The handoff card's Resume task, its sheet under the card.
   'look-sheet-home': {
