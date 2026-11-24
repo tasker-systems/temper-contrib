@@ -84,16 +84,153 @@ export function taskResumePrompt(item: PromptItem, handoff: TaskHandoffInfo | nu
     .join('\n')
 }
 
-/** Session start from the latest handoff card on Home. */
-export function handoffResumePrompt(item: PromptItem, next: NextSummary | null): string {
+/**
+ * Session start from the latest handoff card on Home — the prompt for a session that advanced
+ * no task. `check`, when given, is one more line the agent reads before the Next section: a
+ * stage read that failed, or a task in a stage no branch names, is said there, never guessed.
+ */
+export function handoffResumePrompt(
+  item: PromptItem,
+  next: NextSummary | null,
+  check: string | null = null
+): string {
   return [
     "You are starting a session from the person's latest temper handoff. Use the temper skill with the `temper` CLI if you have it.",
     `The handoff: session ref \`${item.ref}\`, in ${homeClause(item)}. Read it with \`temper resource show ${item.id} --format json\` and start from its Next section, through the skill's session-start flow if one is named.`,
+    FALLBACK,
+    check,
+    handoffClause(next)
+  ]
+    .filter((part) => part !== null)
+    .join('\n')
+}
+
+/** A task the handoff's session advanced (its `advances` edge), with its stage as temper read it. */
+export interface AdvancedTask extends PromptItem {
+  /** temper's stage word at the read (`in-progress`, `done`, …); null when the task carries none. */
+  stage: string | null
+}
+
+/** A stage in words, for a prompt: `in-progress` reads "in progress"; none is said as none. */
+function stageWords(stage: string | null): string {
+  return stage === null ? 'no stage' : stage.replace(/-/g, ' ')
+}
+
+/** "ref `…` ("title"), in context `…`" — how a prompt names an advanced task. */
+function taskNaming(task: AdvancedTask): string {
+  return `ref \`${task.ref}\` ("${task.title}"), in ${homeClause(task)}`
+}
+
+/**
+ * The handoff's session advanced one task, and temper holds it done or cancelled: the agent is
+ * told so, and reads the Next section as follow-ups to check against temper — it reopens
+ * nothing and claims nothing unless a follow-up is its own task (decision ruling 28).
+ */
+export function handoffFollowUpPrompt(
+  session: PromptItem,
+  task: AdvancedTask,
+  next: NextSummary | null
+): string {
+  const closed = task.stage === 'cancelled' ? 'cancelled' : 'done'
+  return [
+    "You are following up the person's latest temper handoff. Use the temper skill with the `temper` CLI if you have it.",
+    `The handoff: session ref \`${session.ref}\`, in ${homeClause(session)}. Read it with \`temper resource show ${session.id} --format json\`.`,
+    `The task this session advanced is ${closed}: ${taskNaming(task)}; temper holds its stage as ${closed}. Do not reopen it, and claim nothing — unless a follow-up is its own task, which you hold through that task's own "How to hold this item".`,
+    "Read the session's Next section as follow-ups to check against temper, not as work to resume: some may already be done, or filed as tasks of their own.",
+    FALLBACK,
+    next === null ? 'The session carries no Next section.' : `Its Next section, as written:\n${next.text}`
+  ].join('\n')
+}
+
+/**
+ * The handoff's session advanced several tasks: each is named with its stage, and the agent asks
+ * the person which to continue, acting on none until told (decision ruling 28).
+ */
+export function handoffChoicePrompt(
+  session: PromptItem,
+  tasks: readonly AdvancedTask[],
+  next: NextSummary | null
+): string {
+  return [
+    "You are picking up the person's latest temper handoff. Use the temper skill with the `temper` CLI if you have it.",
+    `The handoff: session ref \`${session.ref}\`, in ${homeClause(session)}. Read it with \`temper resource show ${session.id} --format json\`.`,
+    `This session advanced ${tasks.length} tasks; their stages as temper held them when this prompt was made:`,
+    ...tasks.map((task) => `- ${taskNaming(task)} — ${stageWords(task.stage)}`),
+    'Ask the person which task to continue before you act on any of them: start, resume, reopen and claim nothing until they say.',
     FALLBACK,
     handoffClause(next)
   ]
     .filter((part) => part !== null)
     .join('\n')
+}
+
+/** What the press read of the tasks the session advanced: their list, or a failure's words. */
+export type AdvancedTasksRead = { state: 'ok'; tasks: readonly AdvancedTask[] } | { state: 'failed'; message: string }
+
+/** Which prompt the handoff card's press sends, decided on the stages as temper read them. */
+export type HandoffBranch =
+  | { kind: 'resume-task'; task: AdvancedTask }
+  | { kind: 'follow-up'; task: AdvancedTask }
+  | { kind: 'no-task' }
+  | { kind: 'several'; tasks: readonly AdvancedTask[] }
+  /** One task in a stage no branch names (backlog, or none): the session start, with a check. */
+  | { kind: 'unnamed-stage'; task: AdvancedTask }
+  /** The stage read failed: the session start, with a line telling the agent to check first. */
+  | { kind: 'unread'; message: string }
+
+export function handoffBranch(advanced: AdvancedTasksRead): HandoffBranch {
+  if (advanced.state === 'failed') {
+    return { kind: 'unread', message: advanced.message }
+  }
+  const [only, ...rest] = advanced.tasks
+  if (only === undefined) {
+    return { kind: 'no-task' }
+  }
+  if (rest.length > 0) {
+    return { kind: 'several', tasks: advanced.tasks }
+  }
+  if (only.stage === 'in-progress') {
+    return { kind: 'resume-task', task: only }
+  }
+  if (only.stage === 'done' || only.stage === 'cancelled') {
+    return { kind: 'follow-up', task: only }
+  }
+  return { kind: 'unnamed-stage', task: only }
+}
+
+/** The label the branch's press and sheet carry: Resume task only for one in-progress task. */
+export function handoffLabel(branch: HandoffBranch): 'Resume task' | 'Continue from handoff' {
+  return branch.kind === 'resume-task' ? 'Resume task' : 'Continue from handoff'
+}
+
+/** The check line a failed stage read adds to the session-start prompt. */
+export const UNREAD_CHECK =
+  "The tasks this session advanced could not be read from temper, so their state is not known here. Before acting on its Next section, check the state of each task it advanced (the session's `advances` edges) in temper, and reopen or claim nothing that is done or cancelled."
+
+/** The handoff card's prompt, for the branch the press read. */
+export function handoffPrompt(session: PromptItem, next: NextSummary | null, branch: HandoffBranch): string {
+  switch (branch.kind) {
+    case 'resume-task':
+      return taskResumePrompt(branch.task, {
+        hasSession: true,
+        session: { id: session.id, ref: session.ref, title: session.title },
+        next
+      })
+    case 'follow-up':
+      return handoffFollowUpPrompt(session, branch.task, next)
+    case 'several':
+      return handoffChoicePrompt(session, branch.tasks, next)
+    case 'no-task':
+      return handoffResumePrompt(session, next)
+    case 'unnamed-stage':
+      return handoffResumePrompt(
+        session,
+        next,
+        `This session advanced one task: ${taskNaming(branch.task)}; temper holds its stage as ${stageWords(branch.task.stage)}. Check its state before acting on its Next section, and claim it only through its own "How to hold this item".`
+      )
+    case 'unread':
+      return handoffResumePrompt(session, next, UNREAD_CHECK)
+  }
 }
 
 /** Q4a's ruled wording for an active goal, verbatim but with the refs filled. */

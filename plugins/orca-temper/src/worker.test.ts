@@ -129,7 +129,8 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
     ['temper.home.places', undefined],
     ['temper.home.recent', undefined],
     ['temper.resource.detail', { id: '00000000-0000-7000-8000-0000000000a1' }],
-    ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }]
+    ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
+    ['temper.handoff.tasks', { sessionId: '00000000-0000-7000-8000-0000000000a1' }]
   ] as const
   for (const [name, input] of reads) {
     const answer = await worker.request(name, input as never)
@@ -1087,5 +1088,107 @@ test('a task with no advancing session has no handoff — and no list or body re
   assert.equal(answer.handoff, null, 'nothing is quoted or invented')
   assert.equal(requests.length, 1, 'only the connections read ran')
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+// Decision ruling 28: the handoff card names the tasks its session advanced — the session's
+// OUTGOING `advances` edges — each with its stage as temper holds it, read on the list door.
+const HANDOFF_SESSION = '77777777-7777-7777-8777-777777777777'
+const ADVANCED_TASK = row('d1', 'The advanced task', 'task', { managed_meta: { 'temper-stage': 'done' } })
+
+/** The session's connections: its task (outgoing), its goal (outgoing), and an incoming edge. */
+function sessionConnections() {
+  const edge = (peerId: string, direction: string, label = 'advances') => ({
+    edge_id: `eeeeeeee-0000-7000-8000-0000000000${peerId.slice(-2)}`,
+    edge_kind: 'leads_to',
+    label,
+    direction,
+    polarity: 'forward',
+    peer_table: 'kb_resources',
+    peer_id: peerId,
+    peer_slug: `peer-${peerId}`,
+    peer_title: 'a peer',
+    weight: 1,
+    created: '2026-11-20T01:00:00Z'
+  })
+  const rows = [
+    edge(ADVANCED_TASK.id, 'outgoing'),
+    edge(GOAL_DETAIL_ID, 'outgoing'),
+    edge('00000000-0000-7000-8000-0000000000e9', 'incoming'),
+    edge('00000000-0000-7000-8000-0000000000e8', 'outgoing', 'cites')
+  ]
+  return { limit: 200, returned: rows.length, truncated: false, total: rows.length, rows }
+}
+
+test('the tasks a session advanced: its outgoing advances edges, each with its stage from temper', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    const url = new URL(input.url)
+    if (url.pathname === `/api/resources/${HANDOFF_SESSION}/connections`) {
+      return new Response(JSON.stringify(sessionConnections()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    assert.equal(url.pathname, '/api/resources')
+    // Only the outgoing advances peers, scoped to tasks — the goal edge is not a task.
+    assert.equal(url.searchParams.get('ids'), `${ADVANCED_TASK.id},${GOAL_DETAIL_ID}`)
+    assert.equal(url.searchParams.get('doc_type_name'), 'task')
+    assert.ok(url.searchParams.get('limit'), 'an explicit limit rides the list call')
+    return new Response(JSON.stringify(listResponse([ADVANCED_TASK])), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.tasks.map((task) => [task.id, task.title, task.stage]),
+    [[ADVANCED_TASK.id, 'The advanced task', 'done']],
+    'the stage is the one temper answered'
+  )
+  assert.equal(requests.length, 2, 'the connections, then the scoped task read')
+  assert.ok(requests.every((request) => request.method === 'GET'), 'nothing is written')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a session that advanced no task answers none — and no list read follows', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    return new Response(JSON.stringify({ limit: 200, returned: 0, truncated: false, total: 0, rows: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(answer.tasks, [])
+  assert.equal(requests.length, 1)
+  await worker.deactivate()
+})
+
+test('a failed connections read is the read\'s failure, never an empty list', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: 'unavailable' }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /session's connections/)
   await worker.deactivate()
 })

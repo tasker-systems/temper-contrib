@@ -74,6 +74,7 @@ import {
   ReopenOutcome,
   setupLauncher
 } from './launcher'
+import { cardLaunchLabel, HandoffTasks, loadHandoffTasks } from './handoff-card'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
 import { loadSkillReadiness, SkillReadinessRegion } from './skill-readiness/region'
 import { refreshServes, ServesRegion, setupServes } from './serves-strip'
@@ -305,6 +306,10 @@ async function refresh(): Promise<void> {
     ])
     set(resumeResult, resume)
     set(handoffResult, handoff)
+    // The tasks the latest session advanced, with their stages from temper — read beside the card.
+    if (handoff.state === 'ok' && handoff.handoff !== null) {
+      void loadHandoffTasks(handoff.handoff.id)
+    }
     set(placesResult, places)
     set(recentResult, recent)
     const results: Record<string, WayInOutput | null> = { ...read(wayInResults) }
@@ -609,6 +614,7 @@ function HandoffRegion() {
                     }
                   />
                 </List>
+                <HandoffTasks sessionId={handoff.id} onOpen={pushDetail} />
                 {handoff.next === null ? undefined : (
                   <Box background="muted" radius="sm" padding="sm" gap="xs">
                     <Text muted size="xs">{`excerpt · ${handoff.next.heading}`}</Text>
@@ -621,7 +627,7 @@ function HandoffRegion() {
                   </Box>
                 )}
                 <Row>
-                  <HandoffLaunchButton handoff={handoff} />
+                  <HandoffLaunchButton handoff={handoff} label={cardLaunchLabel(handoff.id)} />
                 </Row>
                 <Text muted size="xs">
                   {omissionSentence(answer.sessionCount, 1, sessionScope)}

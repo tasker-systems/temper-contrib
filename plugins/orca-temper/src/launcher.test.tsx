@@ -9,13 +9,15 @@
 // workspace, naming a linked workspace before the confirm (decision ruling 23; never into an
 // existing workspace); Reopen agent appears only where a stored link carries a
 // session, labelled with the workspace's name, and asks for exactly that link; Work this goal
-// sends the ruled goal prompt; the handoff card's Resume task names the session and its Next;
+// sends the ruled goal prompt; the handoff card's press names the session and its Next, its
+// prompt and label branching on the stages of the tasks the session advanced, read at the press;
 // and a withheld consent draws the action disabled with the consent named — never attempted.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
 import type {
   FocusAgentInput,
   FocusAgentOutput,
+  HandoffTasksOutput,
   LatestHandoffOutput,
   LaunchInput,
   LaunchOutput,
@@ -131,6 +133,8 @@ const ALL_GRANTED = [
 ]
 
 interface Served {
+  /** Every request the panel sent, by name, in order. */
+  asked: string[]
   launches: LaunchInput[]
   reopens: ReopenInput[]
   focuses: FocusAgentInput[]
@@ -142,15 +146,15 @@ function servedHost(options: {
   links?: readonly LinkedWorkspace[]
   handoff?: unknown
   taskHandoff?: unknown
+  /** The tasks the handoff's session advanced, per ask — the card's read first, then the press's. */
+  handoffTasks?: readonly HandoffTasksOutput[]
   launch?: LaunchOutput
   reopen?: ReopenOutput
   focus?: FocusAgentOutput
 }): { host: ReturnType<typeof mockHost>; served: Served } {
-  const served: Served = { launches: [], reopens: [], focuses: [] }
-  const host = mockHost({
-    capabilities: [...(options.granted ?? ALL_GRANTED)],
-    results: { 'workspace.readContext': FOCUSED },
-    requests: {
+  const served: Served = { asked: [], launches: [], reopens: [], focuses: [] }
+  let tasksAsks = 0
+  const requests = {
       'temper.capabilities': () => ({ granted: [...(options.granted ?? ALL_GRANTED)] }),
       'temper.home.resume': () => ({ state: 'ok', resume: null }),
       'temper.home.handoff': () => (options.handoff ?? HANDOFF) as LatestHandoffOutput,
@@ -179,8 +183,27 @@ function servedHost(options: {
       'temper.agent.focus': (input: FocusAgentInput): FocusAgentOutput => {
         served.focuses.push(input)
         return options.focus ?? { state: 'shown', via: input.terminalId === null ? 'workspace' : 'terminal', focused: true }
+      },
+      'temper.handoff.tasks': (): HandoffTasksOutput => {
+        const answers = options.handoffTasks ?? [{ state: 'ok', tasks: [] }]
+        const answer = answers[Math.min(tasksAsks, answers.length - 1)]!
+        tasksAsks += 1
+        return answer
       }
-    }
+  } as Record<string, (input: never) => unknown>
+  const recorded = Object.fromEntries(
+    Object.entries(requests).map(([name, handler]) => [
+      name,
+      (input: never) => {
+        served.asked.push(name)
+        return handler(input)
+      }
+    ])
+  )
+  const host = mockHost({
+    capabilities: [...(options.granted ?? ALL_GRANTED)],
+    results: { 'workspace.readContext': FOCUSED },
+    requests: recorded as never
   })
   return { host, served }
 }
@@ -472,13 +495,13 @@ test('the remembered project picks the project for the same context', async () =
   assert.deepEqual(mounted.errors, [])
 })
 
-test('the handoff card\'s Resume task names the session and its Next', async () => {
+test('the handoff card\'s press names the session and its Next', async () => {
   const { host, served } = servedHost({})
   mounted = await mount(panel, { host })
   await mounted.settled()
 
-  const resume = mounted.find({ type: 'Button', text: 'Resume task' })
-  assert.notEqual(resume, null, 'Resume task is on the latest-handoff card')
+  const resume = mounted.find({ type: 'Button', text: 'Continue from handoff' })
+  assert.notEqual(resume, null, 'Continue from handoff is on the latest-handoff card')
   await mounted.press(resume!)
   await mounted.settled()
 
@@ -489,7 +512,7 @@ test('the handoff card\'s Resume task names the session and its Next', async () 
   assert.ok(mounted.find({ text: /Run the live check/ }), 'the Next section is quoted before send')
 
   await mounted.select({ label: 'Project' }, 'proj-one')
-  await pressConfirm('Resume task')
+  await pressConfirm('Continue from handoff')
 
   assert.equal(served.launches.length, 1)
   assert.equal(served.launches[0].item.id, HANDOFF.handoff.id)
@@ -556,8 +579,8 @@ test('the handoff card\'s sheet opens below the card\'s omission sentence, outsi
   mounted = await mount(panel, { host })
   await mounted.settled()
 
-  const resume = mounted.find({ type: 'Button', text: 'Resume task' })
-  assert.equal(resume?.props.variant, 'solid', 'Resume task is the card\'s one primary act')
+  const resume = mounted.find({ type: 'Button', text: 'Continue from handoff' })
+  assert.equal(resume?.props.variant, 'solid', 'the press is the card\'s one primary act')
   assert.equal(resume?.props.tone, 'accent')
   assert.equal(resume?.props.icon, 'play')
   await mounted.press(resume!)
@@ -565,7 +588,7 @@ test('the handoff card\'s sheet opens below the card\'s omission sentence, outsi
 
   const card = mounted.find({ type: 'Card', label: 'latest handoff' })
   const omission = mounted.find({ text: '1 of 4 sessions of yours; 3 not shown.' })
-  const sheet = mounted.find({ type: 'Card', label: 'Resume task' })
+  const sheet = mounted.find({ type: 'Card', label: 'Continue from handoff' })
   assert.ok(card && omission && sheet, 'the card, its omission sentence and the sheet are drawn')
   assert.ok(omission.path.startsWith(card.path), 'the omission sentence is the card\'s own')
   assert.ok(!sheet.path.startsWith(card.path), 'the sheet stands outside the card')
@@ -800,4 +823,216 @@ test("without workspace:write the outcome's press is dark and names the consent"
   assert.equal(go?.disabled, true, 'dark')
   assert.ok(mounted!.find({ type: 'Text', text: /^Needs the 'Open and rename your workspaces/ }), 'the consent is named')
   assert.deepEqual(served.focuses, [])
+})
+
+// The handoff card names the tasks its session advanced and branches its press on their stages,
+// read from temper at the press (decision ruling 28).
+const CARD_CONTEXT = '+temper-dev/contrib-workflows'
+
+function advancedTask(n: number, stage: string | null) {
+  const id = `00000000-0000-7000-8000-0000000000c${n}`
+  return {
+    id,
+    ref: `advanced-task-${id}`,
+    title: `Advanced task ${n}`,
+    docType: 'task',
+    contextRef: CARD_CONTEXT,
+    updated: '2026-11-23T01:00:00Z',
+    stage
+  }
+}
+
+const tasksOk = (...tasks: ReturnType<typeof advancedTask>[]): HandoffTasksOutput => ({ state: 'ok', tasks })
+
+/** The requests a handoff press may send: reads, and the launch itself (Orca's, not temper's). */
+const READS_AND_LAUNCH = new Set([
+  'temper.capabilities',
+  'temper.home.resume',
+  'temper.home.handoff',
+  'temper.home.way-in',
+  'temper.home.places',
+  'temper.home.recent',
+  'temper.handoff.tasks',
+  'temper.launch.projects',
+  'temper.launch.agents',
+  'temper.launch.links',
+  'temper.launch.go'
+])
+
+/** The card, pressed: its own press, then the sheet's read lands. */
+async function pressCard(label: string): Promise<void> {
+  const press = mounted!.find({ type: 'Button', text: label })
+  assert.notEqual(press, null, `the card's press reads ${label}`)
+  await mounted!.press(press!)
+  await mounted!.settled()
+}
+
+function sentPrompt(): string {
+  return String(mounted!.find({ type: 'CodeView' })?.props.code ?? '')
+}
+
+test('the card names the task the session advanced, with its stage from temper', async () => {
+  const { host } = servedHost({ handoffTasks: [tasksOk(advancedTask(1, 'in-progress'))] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+
+  const card = mounted.find({ type: 'Card', label: 'latest handoff' })!
+  const row = mounted.find({ type: 'ListItem', label: 'Advanced task 1' })
+  assert.ok(row && row.path.startsWith(card.path), 'the advanced task is named on the card')
+  assert.equal(row.props.description, 'task · in progress')
+  assert.equal(row.props.icon, 'hammer')
+  assert.ok(mounted.find({ type: 'Button', text: 'Resume task' }), 'one in-progress task: Resume task')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('one in-progress task: Resume task sends the task-resume prompt and launches for the task', async () => {
+  const task = advancedTask(1, 'in-progress')
+  const { host, served } = servedHost({ handoffTasks: [tasksOk(task)] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+  await pressCard('Resume task')
+
+  assert.ok(mounted.find({ type: 'Card', label: 'Resume task' }), 'the sheet carries the label')
+  const prompt = sentPrompt()
+  assert.ok(prompt.includes(`Resume the task: ref \`${task.ref}\`, in context \`${CARD_CONTEXT}\``))
+  assert.ok(prompt.includes('task-resume flow'))
+  assert.ok(prompt.includes('Run the live check'), "the session's Next rides as the task's handoff")
+
+  await mounted.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Resume task')
+  assert.equal(served.launches.length, 1)
+  assert.equal(served.launches[0].prompt, prompt, 'the prompt sent is the prompt shown')
+  assert.equal(served.launches[0].item.id, task.id, 'the workspace is linked to the task it resumes')
+  assert.equal(served.launches[0].item.docType, 'task')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('one done task: Continue from handoff, its Next read as follow-ups', async () => {
+  const task = advancedTask(1, 'done')
+  const { host, served } = servedHost({ handoffTasks: [tasksOk(task)] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+  assert.equal(mounted.find({ type: 'ListItem', label: 'Advanced task 1' })?.props.description, 'task · done')
+  assert.equal(mounted.find({ type: 'Button', text: 'Resume task' }), null, 'a done task is never resumed')
+  await pressCard('Continue from handoff')
+
+  const prompt = sentPrompt()
+  assert.ok(prompt.includes(`The task this session advanced is done: ref \`${task.ref}\``))
+  assert.ok(prompt.includes('Do not reopen it, and claim nothing'))
+  assert.ok(prompt.includes('Run the live check'), 'the Next is quoted as follow-ups')
+
+  await mounted.select({ label: 'Project' }, 'proj-one')
+  await pressConfirm('Continue from handoff')
+  assert.equal(served.launches[0].item.id, HANDOFF.handoff.id, 'the launch is for the session, not the closed task')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('several tasks: every one named on the card and in the prompt, the person asked which', async () => {
+  const tasks = [advancedTask(1, 'in-progress'), advancedTask(2, 'done'), advancedTask(3, 'cancelled')]
+  const { host } = servedHost({ handoffTasks: [tasksOk(...tasks)] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+
+  for (const task of tasks) {
+    assert.ok(mounted.find({ type: 'ListItem', label: task.title }), `${task.title} is named on the card`)
+  }
+  await pressCard('Continue from handoff')
+  const prompt = sentPrompt()
+  assert.ok(prompt.includes('This session advanced 3 tasks'))
+  for (const [task, words] of [[tasks[0]!, 'in progress'], [tasks[1]!, 'done'], [tasks[2]!, 'cancelled']] as const) {
+    assert.ok(prompt.includes(`ref \`${task.ref}\``) && prompt.includes(`— ${words}`), `${task.title} named with its stage`)
+  }
+  assert.ok(prompt.includes('Ask the person which task to continue'))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the stage is read from temper at the press, not taken from what the card showed', async () => {
+  const before = advancedTask(1, 'in-progress')
+  const after = { ...before, stage: 'done' }
+  const { host, served } = servedHost({ handoffTasks: [tasksOk(before), tasksOk(after)] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+  assert.equal(served.asked.filter((name) => name === 'temper.handoff.tasks').length, 1, 'the card read once')
+  await pressCard('Resume task')
+
+  assert.equal(served.asked.filter((name) => name === 'temper.handoff.tasks').length, 2, 'the press read again')
+  assert.ok(mounted.find({ type: 'Card', label: 'Continue from handoff' }), 'the sheet follows the press read')
+  const prompt = sentPrompt()
+  assert.ok(prompt.includes('is done'), 'the prompt branches on the stage as read at the press')
+  assert.equal(prompt.includes('Resume the task'), false)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a failed stage read is said in the sheet and falls back with the check line', async () => {
+  const { host, served } = servedHost({
+    handoffTasks: [tasksOk(advancedTask(1, 'in-progress')), { state: 'failed', message: 'temper answered 503' }]
+  })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+  await pressCard('Resume task')
+
+  const sheet = mounted.find({ type: 'Card', label: 'Continue from handoff' })!
+  assert.ok(sheet, 'the fallback carries Continue from handoff')
+  const failure = mounted.find({ type: 'Callout', label: /^The stages of the tasks it advanced unavailable/ })
+  assert.ok(failure && failure.path.startsWith(sheet.path), 'the failed read is said in the sheet')
+  assert.ok(mounted.find({ text: 'temper answered 503' }))
+  const prompt = sentPrompt()
+  assert.ok(prompt.startsWith("You are starting a session from the person's latest temper handoff."))
+  assert.ok(prompt.includes('could not be read from temper'), 'the agent is told to check the state first')
+
+  await mounted.select({ label: 'Project' }, 'proj-one')
+  // The card still reads Resume task (its own read); the sheet's confirm follows the press read.
+  const confirm = mounted.findAll({ type: 'Button', text: 'Continue from handoff' }).find((b) => b.path.startsWith(sheet.path))!
+  await mounted.press(confirm)
+  await mounted.settled()
+  assert.equal(served.launches.length, 1, 'a failed read blocks nothing')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a failed card read never hides the card', async () => {
+  const { host } = servedHost({ handoffTasks: [{ state: 'failed', message: 'temper answered 503' }, tasksOk()] })
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+
+  const card = mounted.find({ type: 'Card', label: 'latest handoff' })!
+  assert.ok(card, 'the card stands')
+  const failure = mounted.find({ type: 'Callout', label: /^the tasks it advanced unavailable/ })
+  assert.ok(failure && failure.path.startsWith(card.path), 'the failure is the card\'s own region state')
+  assert.ok(mounted.find({ text: /Run the live check/ }), 'the Next still stands')
+  assert.ok(mounted.find({ type: 'Button', text: 'Continue from handoff' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a session that advanced no task says so on the card', async () => {
+  const { host } = servedHost({})
+  mounted = await mount(panel, { host })
+  await mounted.settled()
+  assert.ok(mounted.find({ text: '— No task advanced.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the press writes nothing to temper: every request it sends is a read, or the launch', async () => {
+  for (const handoffTasks of [
+    [tasksOk(advancedTask(1, 'in-progress'))],
+    [tasksOk(advancedTask(1, 'done'))],
+    [tasksOk(advancedTask(1, 'in-progress'), advancedTask(2, 'done'))],
+    [tasksOk()],
+    [{ state: 'failed' as const, message: 'boom' }]
+  ]) {
+    const { host, served } = servedHost({ handoffTasks })
+    mounted = await mount(panel, { host })
+    await mounted.settled()
+    const label = handoffTasks[0]!.state === 'ok' && handoffTasks[0]!.tasks.length === 1 && handoffTasks[0]!.tasks[0]!.stage === 'in-progress'
+      ? 'Resume task'
+      : 'Continue from handoff'
+    await pressCard(label)
+    await mounted.select({ label: 'Project' }, 'proj-one')
+    await pressConfirm(label)
+    assert.equal(served.launches.length, 1)
+    const others = served.asked.filter((name) => !READS_AND_LAUNCH.has(name))
+    assert.deepEqual(others, [], 'no request beyond the reads and the launch')
+    assert.deepEqual(mounted.errors, [])
+    await mounted.unmount()
+    mounted = undefined
+  }
 })
