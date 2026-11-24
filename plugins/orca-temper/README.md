@@ -100,6 +100,38 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   to `workspace.create` answers from memory, since Orca starts its agent before the create
   returns. With no stored link, the hook and the strip fall back to the workspace's serves
   marker. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
+- **Work in Orca** (`src/work.ts`, `src/work-region.tsx`, `src/claim-line.tsx`). A linked run is
+  learned to have finished only from Orca: `agent.status.changed` (or an `agents.list` row) for
+  the launch's own terminal reporting the agent done, with Orca's outcome word. That writes
+  nothing to temper; it lights **Record this work — <workspace>** on the task's detail. One press
+  commits one `orca-work` data artifact on the task through `temper data-artifact commit`, as the
+  person acting through the plugin's UI (the Save persona `orca-temper-ui`, a confidence band,
+  no model). The record holds the agent kind, the workspace's name and branch, the Orca session
+  and host, when the run started and finished, and Orca's outcome word — no transcript, no
+  terminal output, no filesystem path, and no field that reads as task state
+  (`schemas/orca-work.schema.json`). A second press for the same run — its session and finish
+  time — writes nothing: presses still out are joined, and the task's records are read before
+  every commit. The detail reads the task's records back on the grant, newest first, and
+  offers **Reopen agent — run of <date>** for each run whose `orca_host` is this Orca host
+  (an opaque digest of the machine; never its name), even when plugin storage holds no link:
+  the record's workspace is found by name in `workspace.list` and its session resumed through
+  `agent.resume`. It is offered whatever the task's stage. A run on another host says it
+  reopens only there. Before Start agent or Resume task the sheet reads the task's
+  `claim_id`, `claimed_at` and `heartbeat_at` from temper and names a held claim with its
+  heartbeat; the launch stays possible. Nothing the plugin stores or records — the link, the
+  marker, an `orca-work` record — is ever read as a task's stage, claim or work in flight.
+  `orca_work_is_findable_from_its_task` in `src/work-witness.test.ts` is its witness.
+
+  **The shape.** A shape governs one home: temper applies the live shape for the artifact's
+  family (its kind owner and kind) in the home of the resource it is committed on, and the kind
+  owner only namespaces the family — it never reaches another context. A commit defaults its
+  kind owner from the task's home, so a task in a team's context and one in the person's own
+  context hold different families. So no single declaration governs `orca-work` on every task
+  of the person's; each context whose tasks carry records declares it once, with
+  `scripts/declare-orca-work-shape.sh <context-ref>`, which compares the live shape first
+  (declaring is not idempotent) and declares only when its `$id` or enforcement differs. A
+  record committed where no shape is declared is `never_declared`, which temper treats as a
+  first-class state.
 - **Going to an agent** (`src/focus-agent.tsx`). Each agent row in the strip is a press, and
   Reopen agent's and the launch sheet's outcomes offer the same press. The worker's
   `temper.agent.focus` focuses the agent's terminal (`terminal.focus`) when one is known, and

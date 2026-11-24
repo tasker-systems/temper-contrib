@@ -316,6 +316,13 @@ export interface LaunchLink {
    */
   projectId?: string
   path?: string
+  /**
+   * When Orca last reported the run in that terminal done (`agent.status.changed`, or an
+   * `agents.list` row), and Orca's word for how it ended (`unreported` when it named none).
+   * Cleared when the terminal's agent works again. The run's state — never the task's.
+   */
+  finishedAt?: string
+  outcome?: string
 }
 
 /** The plugin-storage key under which the launch links sit, as a JSON array. */
