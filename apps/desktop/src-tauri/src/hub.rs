@@ -134,6 +134,7 @@ fn current_list_params() -> ArtifactListParams {
         intent: Some("current".to_string()),
         include_folded: Some(false),
         counts: Some(false),
+        ..Default::default()
     }
 }
 
