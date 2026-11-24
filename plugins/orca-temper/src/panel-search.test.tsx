@@ -3,7 +3,10 @@
 // meaning — each saying in temper-design's sentences whether more matched; a degraded meaning
 // arm is a warning callout, never an empty list; a pressed result opens its record's detail; a
 // context view's search asks the same read scoped by the context's id; and no request carries
-// `owner` (R2). The request answers are fixture data, typed here, so this file stands alone.
+// `owner` (R2). The filters (0.2.1): a doc type rides the read only when chosen, the Search tab's
+// context picker sends the picked context's bare id, each answer is cached under its filters,
+// and the by-meaning sentence under a type on an unscoped search says the type narrowed the draw.
+// The request answers are fixture data, typed here, so this file stands alone.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
 
@@ -11,6 +14,7 @@ let mounted: TestPanel | undefined
 afterEach(() => mounted?.unmount())
 
 const WORKFLOWS_ID = '11111111-1111-7111-8111-111111111111'
+const RESEARCH_ID = '22222222-2222-7222-8222-222222222222'
 
 function summary(suffix: string, title: string, docType: string, stage: string | null = null) {
   return {
@@ -26,13 +30,14 @@ function summary(suffix: string, title: string, docType: string, stage: string |
 
 const BOTH = summary('b1', 'The side rail design', 'research')
 
-type Asked = { query: string; contextId?: string }
+type Asked = { query: string; contextId?: string; docType?: string }
 
 function okAnswer(input: Asked, extra: { exact?: object; wide?: object } = {}) {
   return {
     state: 'ok' as const,
     query: input.query,
     contextId: input.contextId ?? null,
+    docType: input.docType ?? null,
     exact: {
       rows: [BOTH, summary('b2', 'A side rail task', 'task', 'in-progress')],
       reason: 'ok' as const,
@@ -71,6 +76,20 @@ function servedHost(options: { asked?: Asked[]; answer?: (input: Asked) => unkno
         total: 1
       }),
       'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 }),
+      'temper.explore.contexts': () => ({
+        state: 'ok' as const,
+        contextCount: 2,
+        owners: [
+          {
+            ownerRef: '+alpha',
+            kind: 'team' as const,
+            contexts: [
+              { id: WORKFLOWS_ID, ref: '+alpha/workflows', name: 'workflows', resourceCount: 3 },
+              { id: RESEARCH_ID, ref: '+alpha/research', name: 'research', resourceCount: 9 }
+            ]
+          }
+        ]
+      }),
       'temper.context.recent': (input: { id: string; bound: number }) => ({
         state: 'ok',
         rows: [],
@@ -258,4 +277,151 @@ test('a run that reopens on Search owes the question it held', async () => {
   assert.deepEqual(asked, [{ query: 'side rail' }])
   assert.ok(mounted.find({ type: 'Heading', text: 'exact 2' }))
   assert.deepEqual(mounted.errors, [])
+})
+
+const TYPE = { type: 'Select', label: 'type' }
+const IN = { type: 'Select', label: 'in' }
+
+test('a doc type rides the read only when chosen, and both groups name it', async () => {
+  const asked: Asked[] = []
+  mounted = await mount(panel, { host: servedHost({ asked }) })
+  await openSearch()
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.deepEqual(asked, [{ query: 'side rail' }], 'any type: no doc_type rides the read')
+
+  await mounted.select(TYPE, 'research')
+  assert.deepEqual(asked[1], { query: 'side rail', docType: 'research' }, 'a held question is asked again under the type')
+  assert.equal('owner' in (asked[1] ?? {}), false, 'no "yours" narrowing (R2)')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in research records in everything you can read.' }))
+  assert.ok(mounted.find({ text: '2 research results matching these words; more not shown.' }), 'the exact group names the type')
+  assert.ok(mounted.find({ type: 'List', label: 'exact' }))
+  assert.ok(mounted.find({ type: 'List', label: 'by meaning' }), 'the two groups still stand apart')
+
+  await mounted.select(TYPE, 'any-type')
+  assert.deepEqual(asked[2], { query: 'side rail' }, 'back to any type: doc_type absent again')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in everything you can read.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the type filter lists core doc types from temper-design, after any type', async () => {
+  mounted = await mount(panel, { host: servedHost() })
+  await openSearch()
+  const options = (mounted.find(TYPE)?.props.options ?? []) as { value: string }[]
+  assert.equal(options[0]?.value, 'any-type')
+  assert.deepEqual(
+    options.slice(1).map((option) => option.value),
+    ['task', 'goal', 'commitment', 'session', 'memory', 'research', 'question', 'decision', 'principle', 'concept', 'domain', 'theme', 'fact', 'concern']
+  )
+  assert.deepEqual(mounted.errors, [])
+})
+
+test("by meaning under a type on an unscoped search says the type narrowed the draw", async () => {
+  mounted = await mount(panel, {
+    host: servedHost({ answer: (input) => okAnswer(input, { wide: { rows: [BOTH], truncated: false } }) })
+  })
+  await openSearch()
+  await mounted.select(TYPE, 'research')
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.ok(
+    mounted.find({
+      text:
+        '1 research result similar in meaning from a draw of the 100 nearest passages of any type; past the draw not reported. ' +
+        'The type narrowed that draw — research records outside it were never looked at.'
+    }),
+    'the sentence says the type narrowed the draw, never that every research record was looked at'
+  )
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a type on a scoped search is an exhaustive read, said as all', async () => {
+  const asked: Asked[] = []
+  mounted = await mount(panel, {
+    host: servedHost({
+      asked,
+      answer: (input) => okAnswer(input, { wide: { rows: [BOTH], truncated: false, draw: { kind: 'exhaustive' } } })
+    })
+  })
+  await mounted.press({ type: 'ListItem', label: 'workflows' })
+  assert.equal(mounted.find(IN), null, "a context's own search shows no picker")
+  await mounted.select(TYPE, 'research')
+  await mounted.type({ type: 'Input', label: 'search +alpha/workflows' }, 'side rail', { submit: true })
+  assert.deepEqual(asked, [{ query: 'side rail', contextId: WORKFLOWS_ID, docType: 'research' }])
+  assert.ok(mounted.find({ text: 'Results for “side rail” in research records in +alpha/workflows.' }))
+  assert.ok(mounted.find({ text: 'All 1 research result similar in meaning.' }))
+  assert.equal(mounted.find({ text: /narrowed that draw/ }), null, 'no draw to narrow on a scoped read')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test("the picker lists Explore's contexts and sends the picked one's bare id", async () => {
+  const asked: Asked[] = []
+  mounted = await mount(panel, { host: servedHost({ asked }) })
+  await openSearch()
+  await mounted.settled()
+  const options = (mounted.find(IN)?.props.options ?? []) as { value: string; label: string }[]
+  assert.deepEqual(
+    options.map((option) => option.label),
+    ['Everything readable', '+alpha/workflows', '+alpha/research'],
+    "everything readable, then the contexts Explore's read answered"
+  )
+  await mounted.select(IN, RESEARCH_ID)
+  assert.equal(asked.length, 0, 'picking asks nothing until words are held')
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.deepEqual(asked, [{ query: 'side rail', contextId: RESEARCH_ID }], 'the bare UUID, never the decorated ref')
+  assert.match((asked[0] as Asked | undefined)?.contextId ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+  assert.equal('owner' in (asked[0] ?? {}), false, 'no "yours" narrowing (R2)')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in +alpha/research.' }))
+
+  await mounted.select(TYPE, 'task')
+  assert.deepEqual(asked[1], { query: 'side rail', contextId: RESEARCH_ID, docType: 'task' }, 'both filters ride together')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in task records in +alpha/research.' }))
+
+  await mounted.select(IN, 'everything')
+  assert.deepEqual(asked[2], { query: 'side rail', docType: 'task' }, 'everything readable: no context_ref')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('an answer is never shown under a filter it was not asked with', async () => {
+  const asked: Asked[] = []
+  const TASK_ONLY = summary('t1', 'Only under the task filter', 'task')
+  mounted = await mount(panel, {
+    host: servedHost({
+      asked,
+      answer: (input) =>
+        input.docType === 'task'
+          ? okAnswer(input, { exact: { rows: [TASK_ONLY], truncated: false }, wide: { rows: [TASK_ONLY], truncated: false } })
+          : okAnswer(input)
+    })
+  })
+  await openSearch()
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.ok(mounted.find({ type: 'ListItem', label: 'A panel beside the editor' }))
+  await mounted.select(TYPE, 'task')
+  assert.equal(
+    mounted.find({ type: 'ListItem', label: 'A panel beside the editor' }),
+    null,
+    "the any-type answer's rows do not stand under the task filter"
+  )
+  assert.equal(mounted.findAll({ type: 'ListItem', label: 'Only under the task filter' }).length, 2)
+  assert.ok(mounted.find({ text: 'Results for “side rail” in task records in everything you can read.' }))
+
+  // A new question under the task filter, then back to any type: asked again, never the old answer.
+  await mounted.type(FIELD, ' launcher', { submit: true })
+  await mounted.select(TYPE, 'any-type')
+  assert.deepEqual(asked.at(-1), { query: 'side rail launcher' }, 'the held words are asked again under the filter')
+  assert.ok(mounted.find({ text: 'Results for “side rail launcher” in everything you can read.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the answer key changes with the type and the context', async () => {
+  const { answerKey, EVERYTHING } = await import('./search')
+  const context = { id: RESEARCH_ID, ref: '+alpha/research' }
+  const keys = new Set([
+    answerKey(EVERYTHING, { docType: null, context: null }),
+    answerKey(EVERYTHING, { docType: 'task', context: null }),
+    answerKey(EVERYTHING, { docType: null, context }),
+    answerKey(EVERYTHING, { docType: 'task', context }),
+    answerKey({ kind: 'context', id: WORKFLOWS_ID, ref: '+alpha/workflows' }, { docType: null, context: null }),
+    answerKey({ kind: 'context', id: WORKFLOWS_ID, ref: '+alpha/workflows' }, { docType: 'task', context: null })
+  ])
+  assert.equal(keys.size, 6, 'every question its own key')
 })

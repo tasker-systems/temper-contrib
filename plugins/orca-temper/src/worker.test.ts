@@ -1432,6 +1432,47 @@ test("a context's search is scoped by the context's bare id, and still sends no 
   await worker.deactivate()
 })
 
+test('a doc type rides as doc_type only when chosen, beside a bare context id, and never owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(searchResponse({ exact: [row('c1', 'A typed one', 'task')] }), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const typed = await worker.request('temper.search', { query: 'words', docType: 'task' })
+  assert.equal(typed.state, 'ok')
+  if (typed.state !== 'ok') return
+  assert.equal(typed.docType, 'task', 'the answer says the type it was asked under')
+  const both = await worker.request('temper.search', { query: 'words', docType: 'task', contextId: CONTEXT_ID })
+  assert.equal(both.state === 'ok' ? both.docType : undefined, 'task')
+  const plain = await worker.request('temper.search', { query: 'words' })
+  assert.equal(plain.state === 'ok' ? plain.docType : undefined, null, 'no type asked: null, never a guess')
+
+  const bodies = (await Promise.all(requests.map((request) => request.json()))) as Record<string, unknown>[]
+  assert.deepEqual(bodies, [
+    { query: 'words', limit: 10, doc_type: 'task' },
+    { query: 'words', limit: 10, context_ref: CONTEXT_ID, doc_type: 'task' },
+    { query: 'words', limit: 10 }
+  ])
+  for (const body of bodies) {
+    assert.equal('owner' in body, false, 'no "yours" narrowing (R2)')
+    assert.equal('changed_by' in body, false, 'no changed_by (R2)')
+  }
+  await worker.deactivate()
+})
+
+test('a blank or padded doc type asks nothing', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(searchResponse(), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  for (const docType of ['', '  ', ' task', 'x'.repeat(257)]) {
+    const answer = await worker.request('temper.search', { query: 'words', docType })
+    assert.equal(answer.state, 'failed', `"${docType.slice(0, 8)}" is refused`)
+  }
+  assert.equal(requests.length, 0, 'none asked the API')
+  await worker.deactivate()
+})
+
 test('a degraded meaning arm is said, and the exact arm stands unaffected beside it', async () => {
   deps.run = async () => mintedToken()
   deps.fetch = answering(

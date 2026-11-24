@@ -104,7 +104,60 @@ function uncountedSentence(shown, scope, cursor) {
 function drawnSentence(shown, scope, { more, draw, of }) {
   return `${shown} ${scope} from a draw of the ${draw} ${of}; ${more ? "more not shown" : "past the draw not reported"}.`;
 }
+
+// node_modules/@tasker-systems/temper-design/dist/vocabulary.js
+var SLOTS = [
+  "cat-1",
+  "cat-2",
+  "cat-3",
+  "cat-4",
+  "cat-5",
+  "cat-6",
+  "cat-7",
+  "cat-8"
+];
+var CORE_BINDINGS = [
+  { doctype: "task", tint: "cat-2" },
+  // intended ends
+  { doctype: "goal", tint: "cat-5" },
+  { doctype: "commitment", tint: "cat-5" },
+  // what happened, and what was kept
+  { doctype: "session", tint: "cat-3" },
+  { doctype: "memory", tint: "cat-3" },
+  // inquiry
+  { doctype: "research", tint: "cat-7" },
+  { doctype: "question", tint: "cat-7" },
+  // rulings and standing rules
+  { doctype: "decision", tint: "cat-4" },
+  { doctype: "principle", tint: "cat-4" },
+  // ideas and territories
+  { doctype: "concept", tint: "cat-6" },
+  { doctype: "domain", tint: "cat-6" },
+  { doctype: "theme", tint: "cat-6" },
+  { doctype: "fact", tint: "cat-8" },
+  { doctype: "concern", tint: "cat-1" }
+];
+function isSlot(value) {
+  return SLOTS.includes(value);
+}
+function bindingsFrom(entries) {
+  const out = /* @__PURE__ */ new Map();
+  for (const { doctype, tint } of entries) {
+    if (typeof doctype !== "string" || !doctype.trim()) {
+      throw new Error(`a binding names no doc type: ${JSON.stringify(doctype)}`);
+    }
+    if (!isSlot(tint)) {
+      throw new Error(`${doctype} is bound to ${String(tint)}, which is not a categorical slot`);
+    }
+    if (out.has(doctype))
+      throw new Error(`${doctype} is bound twice`);
+    out.set(doctype, tint);
+  }
+  return out;
+}
+var CORE = bindingsFrom(CORE_BINDINGS);
 export {
+  CORE_BINDINGS,
   HANDOFF_LABEL,
   WAYS_IN,
   WAY_IN_BOUND,

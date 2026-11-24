@@ -9,7 +9,8 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
 Explore lists every context the person can read — teams, each with its contexts, then the people
 whose contexts they can read — with no "yours" narrowing; a pressed context, from Explore or a
 place on Home, shows its recently updated items under a search scoped to it. Search asks one
-question of everything the person can read, or of that context, and answers in two groups that
+question of everything the person can read, or of that context — narrowed, when the person
+chooses, to one doc type, and on the Search tab to one context — and answers in two groups that
 never merge — exact and by meaning — each saying whether more matched.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.home.*`,
@@ -44,14 +45,19 @@ never merge — exact and by meaning — each saying whether more matched.
 - `src/explore.tsx` draws Explore and the context view. Its reads (`temper.explore.contexts`,
   `temper.context.recent`) never send `owner`; the context view's is scoped by the context's id.
 - `src/search.tsx` draws Search, on the Search sub-tab and in the context view's slot. Its read
-  (`temper.search`, `POST /api/search`) carries the words and the page size (10), and in a
-  context the context's id — never `owner`, and nothing else. The two arms stay apart: **exact**
+  (`temper.search`, `POST /api/search`) carries the words and the page size (10), in a context
+  the context's id, and `doc_type` only when a type is chosen — never `owner`, and nothing else.
+  The type filter lists core's doc types from temper-design's `CORE_BINDINGS`; the Search tab's
+  context picker lists the contexts Explore's own read answered and sends the picked one's bare
+  id. Each answer is cached under its filters, and changing a filter asks the held words again. The two arms stay apart: **exact**
   and **by meaning** are each their own list in their own order, a resource both found stands in
   both, and each says in temper-design's sentences whether more matched (`truncated`) — the
-  meaning arm also what it ranked from, an exhaustive read or a draw of the nearest passages. When
+  meaning arm also what it ranked from, an exhaustive read or a draw of the nearest passages — and,
+  under a type on an unscoped search, that the type narrowed that draw (temper applies it after
+  the draw there; a context-scoped read is exhaustive within the type). When
   the meaning arm could not run (`wide.degraded`) it is a warning callout, never an empty list;
   the exact group stands beside it. An empty query asks nothing. A pressed result opens its
-  record's detail. The last question asked in each scope is device-local view state, so a run
+  record's detail. The last question asked in each scope, and its filters, are device-local view state, so a run
   that reopens on it reads it again, and Refresh asks the Search tab's question again.
 - The look is Orca's own controls (`src/look.ts`): a row wears its doc-type icon beside the
   doc-type word and says its state in words ("task · in progress"); a region's count is a badge

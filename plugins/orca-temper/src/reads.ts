@@ -11,7 +11,7 @@ import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import { WAY_TOGGLES, wayStatus } from './way-status'
-import { SEARCH_LIMIT, SEARCH_QUERY_MAX_BYTES, WAY_IN_MAX } from './protocol'
+import { SEARCH_DOC_TYPE_MAX_BYTES, SEARCH_LIMIT, SEARCH_QUERY_MAX_BYTES, WAY_IN_MAX } from './protocol'
 import type {
   ContextRecentInput,
   ExploreContext,
@@ -566,16 +566,17 @@ function drawOf(draw: { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number
 
 /**
  * Search: `POST /api/search` with the person's words, over everything they can read or one
- * context named by its bare UUID — never `owner` (R2), no doc type, no embedding: the server
- * embeds the words itself, and says so in `wide.degraded` when it could not. The two arms come
- * back apart and stay apart: each keeps its own rows in its own order, its reason and its
- * `truncated`, so no view can merge them or rank one against the other. An empty query, or one
- * past the door's 4096 bytes, is refused here and never asked.
+ * context named by its bare UUID, narrowed to one doc type only when one was chosen — never
+ * `owner` (R2), no embedding: the server embeds the words itself, and says so in `wide.degraded`
+ * when it could not. The two arms come back apart and stay apart: each keeps its own rows in its
+ * own order, its reason and its `truncated`, so no view can merge them or rank one against the
+ * other. An empty query, or one past the door's 4096 bytes, is refused here and never asked; so
+ * is a doc type that is blank or past the door's 256 bytes.
  */
 export async function searchResources(
   read: TemperRead,
   input: SearchInput
-): Promise<{ query: string; contextId: string | null; exact: SearchArm; wide: WideSearchArm }> {
+): Promise<{ query: string; contextId: string | null; docType: string | null; exact: SearchArm; wide: WideSearchArm }> {
   const query = typeof input.query === 'string' ? input.query.trim() : ''
   if (query === '') {
     throw new Error('an empty search asks nothing — type the words to search for')
@@ -587,10 +588,22 @@ export async function searchResources(
   if (contextId !== null) {
     assertBareId(contextId, 'a context')
   }
+  const docType = input.docType ?? null
+  if (docType !== null) {
+    if (typeof docType !== 'string' || docType.trim() === '' || docType !== docType.trim()) {
+      throw new Error(`a doc type is one word with no space around it — "${String(docType)}" is not one, so nothing is asked`)
+    }
+    if (new TextEncoder().encode(docType).length > SEARCH_DOC_TYPE_MAX_BYTES) {
+      throw new Error(`a doc type carries at most ${SEARCH_DOC_TYPE_MAX_BYTES} bytes — nothing was asked`)
+    }
+  }
   const client = clientOf(read)
-  const body = contextId === null
-    ? { query, limit: SEARCH_LIMIT }
-    : { query, limit: SEARCH_LIMIT, context_ref: contextId }
+  const body = {
+    query,
+    limit: SEARCH_LIMIT,
+    ...(contextId === null ? {} : { context_ref: contextId }),
+    ...(docType === null ? {} : { doc_type: docType })
+  }
   const { data, error, response } = await client.POST('/api/search', { body })
   if (error || !data) {
     if (response.status === 401) {
@@ -601,6 +614,7 @@ export async function searchResources(
   return {
     query,
     contextId,
+    docType,
     exact: armOf(data.exact),
     wide: { ...armOf(data.wide), degraded: data.wide.degraded === true, draw: drawOf(data.wide.draw) }
   }
