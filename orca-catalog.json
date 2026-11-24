@@ -14,6 +14,46 @@
       "description": "The person's temper in view from Orca: resume, the latest handoff, the ways in (goals, in progress, sessions), places and recently updated — temper-ui's home, list by list, read through the temper API on a credential borrowed from the temper CLI.",
       "releases": [
         {
+          "version": "0.2.2",
+          "commit": "94e11b918edebc62f78503f4a5614d0b7ae41460",
+          "contentHash": "5822bb587c7efc013496b9b75ddfcf1db70e724a1e2d73fb601a17f6dd344c5b",
+          "execution": "trusted-worker",
+          "minimumOrca": "1.4.259",
+          "name": "Temper",
+          "contributes": [
+            {
+              "kind": "panels",
+              "name": "Temper"
+            },
+            {
+              "kind": "events",
+              "name": "workspace.removed"
+            },
+            {
+              "kind": "events",
+              "name": "agent.status.changed"
+            },
+            {
+              "kind": "hooks",
+              "name": "agent.launch.before"
+            },
+            {
+              "kind": "customEditors",
+              "name": "Temper body",
+              "detail": ".temper.md"
+            }
+          ],
+          "capabilities": [
+            "settings:own",
+            "workspace:read",
+            "workspace:create",
+            "agent:launch",
+            "agent:read",
+            "storage:own",
+            "workspace:write"
+          ]
+        },
+        {
           "version": "0.2.1",
           "commit": "ffa2e27f1a24355a87b3db5e65c5a7986973ab8d",
           "contentHash": "66fd85fc4c97765fe364caba5145815367b7508557e3be05ddf2927bd4843e02",
