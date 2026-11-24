@@ -54,7 +54,7 @@ function servedHost(): ReturnType<typeof mockHost> {
   })
 }
 
-test('home holds first; explore lists teams; search says what arrives later', async () => {
+test('home holds first; explore lists teams; search asks nothing until asked', async () => {
   mounted = await mount(panel, { host: servedHost() })
   assert.ok(mounted.find({ type: 'Heading', text: 'goals 1' }), 'home is the tab that holds first')
   assert.equal(mounted.find({ type: 'Heading', text: 'teams 0' }), null, 'explore does not show while home holds')
@@ -66,9 +66,10 @@ test('home holds first; explore lists teams; search says what arrives later', as
   assert.deepEqual(mounted.warnings, [])
 
   await mounted.select({ type: 'Tabs', label: 'temper view' }, 'search')
+  assert.ok(mounted.find({ type: 'Input', label: 'search everything' }), 'search draws its field')
   assert.ok(
-    mounted.find({ text: 'Search arrives with a later iteration — exact and by-meaning matching.' }),
-    'search names its placeholder'
+    mounted.find({ text: /^Type words and press Enter to search everything you can read/ }),
+    'unasked, search says what it would search'
   )
   assert.deepEqual(mounted.errors, [])
   assert.deepEqual(mounted.refusals, [])

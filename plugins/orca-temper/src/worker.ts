@@ -18,6 +18,7 @@ import {
   latestHandoff,
   placesInUse,
   recentlyUpdated,
+  searchResources,
   resourceDetail,
   resumeItem,
   sessionTasks,
@@ -36,6 +37,8 @@ import type {
   ContextRecentInput,
   ContextRecentOutput,
   ExploreOutput,
+  SearchInput,
+  SearchOutput,
   FocusAgentInput,
   FocusAgentOutput,
   HandoffTasksInput,
@@ -175,6 +178,12 @@ export default function activate(orca: OrcaWorkerApi): void {
     'temper.context.recent',
     async (input: ContextRecentInput): Promise<ContextRecentOutput> =>
       answer(async (read) => ({ state: 'ok' as const, ...(await contextRecent(read, input)) }))
+  )
+
+  // Search: the two arms apart, over everything readable or one context by its id — never
+  // `owner` (R2) — behind the same grant gate as every other read.
+  orca.panels.handle('temper.search', async (input: SearchInput): Promise<SearchOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await searchResources(read, input)) }))
   )
 
   // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;

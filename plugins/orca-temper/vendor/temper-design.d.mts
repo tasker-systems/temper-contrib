@@ -6,4 +6,4 @@ export { WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER } from '@tasker-systems/temper-desi
 export type { WayIn, WayInFilter } from '@tasker-systems/temper-design/ways-in'
 export { HANDOFF_LABEL, nextSection } from '@tasker-systems/temper-design/handoff'
 export type { NextSection } from '@tasker-systems/temper-design/handoff'
-export { omissionSentence } from '@tasker-systems/temper-design/omission'
+export { drawnSentence, omissionSentence, uncountedSentence } from '@tasker-systems/temper-design/omission'

@@ -11,7 +11,7 @@ import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import { WAY_TOGGLES, wayStatus } from './way-status'
-import { WAY_IN_MAX } from './protocol'
+import { SEARCH_LIMIT, SEARCH_QUERY_MAX_BYTES, WAY_IN_MAX } from './protocol'
 import type {
   ContextRecentInput,
   ExploreContext,
@@ -20,7 +20,12 @@ import type {
   PlaceInUse,
   PropertyRow,
   RecordDetail,
-  ResourceSummary
+  ResourceSummary,
+  SearchArm,
+  SearchDraw,
+  SearchInput,
+  SearchReason,
+  WideSearchArm
 } from './protocol'
 
 /** What every read shares: the origin temper auth status reports, the vetted grant, the fetch. */
@@ -535,6 +540,70 @@ export async function contextRecent(
     limit: input.bound
   })
   return { rows: page.rows.map(summaryOf), total: page.total, bound: input.bound }
+}
+
+/** One arm of the search door's answer, as the read carries it. */
+interface SearchArmWire {
+  hits: { resource: ListRow }[]
+  reason: SearchReason
+  truncated?: boolean
+}
+
+function armOf(arm: SearchArmWire): SearchArm {
+  return {
+    rows: arm.hits.map((hit) => summaryOf(hit.resource)),
+    reason: arm.reason,
+    truncated: typeof arm.truncated === 'boolean' ? arm.truncated : null
+  }
+}
+
+function drawOf(draw: { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number } | null | undefined): SearchDraw {
+  if (draw === null || draw === undefined) {
+    return null
+  }
+  return draw.kind === 'nearest' ? { kind: 'nearest', chunks: draw.chunks } : { kind: 'exhaustive' }
+}
+
+/**
+ * Search: `POST /api/search` with the person's words, over everything they can read or one
+ * context named by its bare UUID — never `owner` (R2), no doc type, no embedding: the server
+ * embeds the words itself, and says so in `wide.degraded` when it could not. The two arms come
+ * back apart and stay apart: each keeps its own rows in its own order, its reason and its
+ * `truncated`, so no view can merge them or rank one against the other. An empty query, or one
+ * past the door's 4096 bytes, is refused here and never asked.
+ */
+export async function searchResources(
+  read: TemperRead,
+  input: SearchInput
+): Promise<{ query: string; contextId: string | null; exact: SearchArm; wide: WideSearchArm }> {
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+  if (query === '') {
+    throw new Error('an empty search asks nothing — type the words to search for')
+  }
+  if (new TextEncoder().encode(query).length > SEARCH_QUERY_MAX_BYTES) {
+    throw new Error(`a search carries at most ${SEARCH_QUERY_MAX_BYTES} bytes of words — nothing was asked`)
+  }
+  const contextId = input.contextId ?? null
+  if (contextId !== null) {
+    assertBareId(contextId, 'a context')
+  }
+  const client = clientOf(read)
+  const body = contextId === null
+    ? { query, limit: SEARCH_LIMIT }
+    : { query, limit: SEARCH_LIMIT, context_ref: contextId }
+  const { data, error, response } = await client.POST('/api/search', { body })
+  if (error || !data) {
+    if (response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the search: HTTP ${response.status} ${JSON.stringify(error ?? null)}`)
+  }
+  return {
+    query,
+    contextId,
+    exact: armOf(data.exact),
+    wide: { ...armOf(data.wide), degraded: data.wide.degraded === true, draw: drawOf(data.wide.draw) }
+  }
 }
 
 /**

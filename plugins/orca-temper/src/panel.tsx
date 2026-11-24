@@ -18,6 +18,8 @@
 // the "this workspace" strip (./serves-strip.tsx): the focused workspace, the task it serves
 // and its agents. Explore (./explore.tsx) lists teams, each with its contexts; a pressed
 // context — from Explore, or a place on Home — pushes the context view onto the same stack.
+// Search (./search.tsx) asks everything the person can read; the context view asks its own
+// context through the same region. Its two groups — exact and by meaning — never merge.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -85,8 +87,10 @@ import {
   ExploreTab,
   isContextEntry,
   loadContextRecent,
-  loadExplore
+  loadExplore,
+  resumeContextSearch
 } from './explore'
+import { EVERYTHING, everythingWasAsked, resumeSearch, SearchRegion } from './search'
 import { CountHeading, FailedRegion, Loading, NotConnected, Unavailable } from './regions'
 import {
   ACT_ICON,
@@ -173,6 +177,7 @@ function pushDetail(entry: DetailEntry): void {
 function pushContext(entry: ContextEntry): void {
   set(detailStack, [...read(detailStack), entry])
   void loadContextRecent(entry)
+  resumeContextSearch(entry)
 }
 
 /** A row in the context view opens its record's detail, on top of the context. */
@@ -180,11 +185,15 @@ function openSummary(item: ResourceSummary): void {
   pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: item.docType })
 }
 
-/** The sub-tab picked; Explore reads its contexts the first time it is shown. */
+/** The sub-tab picked; Explore reads its contexts the first time it is shown, and Search owes
+ * the question it held on an earlier run. */
 function pickTab(value: string): void {
   set(activeTab, value)
   if (value === 'explore' && !exploreWasAsked() && !allRefused()) {
     void loadExplore()
+  }
+  if (value === 'search' && !allRefused()) {
+    resumeSearch(EVERYTHING)
   }
 }
 
@@ -352,6 +361,11 @@ async function refresh(): Promise<void> {
     if ((exploreWasAsked() || read(activeTab) === 'explore') && !allRefused()) {
       void loadExplore()
     }
+    // Search asks only what the person asked: a Refresh asks the held question again, and a run
+    // that reopens on Search owes its read — never into the refusal over every tab.
+    if (!allRefused() && (read(activeTab) === 'search' || everythingWasAsked())) {
+      resumeSearch(EVERYTHING, { again: true })
+    }
     // The consents ride along so actions draw lit or named from the start.
     await refreshGrantedCapabilities()
   } finally {
@@ -408,6 +422,7 @@ export function setup(ctx: PanelContext): void {
   const carried = read(detailStack)[read(detailStack).length - 1]
   if (carried !== undefined && isContextEntry(carried)) {
     void loadContextRecent(carried)
+    resumeContextSearch(carried)
   } else if (carried !== undefined) {
     void loadDetail(carried)
     void loadLinkedTasks(carried)
@@ -832,18 +847,6 @@ function HomeTab() {
   )
 }
 
-/**
- * Search holds until its build item lands; it says so instead of pretending a region. No tab
- * draws a lens switcher — the sub-tab frame replaced it.
- */
-function TabPlaceholder(props: { text: string }) {
-  return (
-    <Text muted size="sm">
-      {props.text}
-    </Text>
-  )
-}
-
 /** The frame: the sub-tabs, the refusal standing over them, and the read region. */
 function Frame() {
   return (
@@ -867,9 +870,7 @@ function Frame() {
           {allRefused() ? undefined : <ExploreTab onOpenContext={pushContext} />}
         </Tab>
         <Tab value="search" label="Search">
-          {allRefused() ? undefined : (
-            <TabPlaceholder text="Search arrives with a later iteration — exact and by-meaning matching." />
-          )}
+          {allRefused() ? undefined : <SearchRegion scope={EVERYTHING} onOpenItem={openSummary} />}
         </Tab>
       </Tabs>
     </Stack>

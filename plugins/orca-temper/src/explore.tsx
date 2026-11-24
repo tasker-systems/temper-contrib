@@ -8,8 +8,8 @@
 // place on Home opens: the context's recently updated items, each opening its record's detail,
 // with Show more growing the list in place, and the search slot above them. The view is the
 // same for every kind of context and assumes nothing about what one holds (R3). The search
-// slot is a named placeholder (`ContextSearchSlot`) until the Search build (item 9) fills it
-// with search scoped to the context.
+// slot (`ContextSearchSlot`) holds Search's own region (./search.tsx), scoped to the context by
+// its id — the same two groups, never `owner`.
 //
 // The panel never talks to temper itself: both reads go through the worker on the borrowed
 // grant (`temper.explore.contexts`, `temper.context.recent`). Which owners are open is
@@ -41,6 +41,7 @@ import {
   type ResourceSummary
 } from './protocol'
 import { CountHeading, FailedRegion, Loading, NotConnected } from './regions'
+import { resumeSearch, SearchRegion, type SearchScope } from './search'
 
 /** A context pushed onto the detail stack: from Explore, or from a place on Home. */
 export interface ContextEntry {
@@ -233,17 +234,25 @@ export function ExploreTab(props: { onOpenContext: (entry: ContextEntry) => void
   )
 }
 
-/**
- * The context view's search slot — a placeholder the Search build (item 9) fills with search
- * scoped to this context. Until then it says what will stand here, and reads nothing.
- */
-export function ContextSearchSlot(props: { context: ContextEntry }): OrcaNode {
+/** A context as Search scopes to it: by its id, its ref the words the region says. */
+function searchScopeOf(context: ContextEntry): SearchScope {
+  return { kind: 'context', id: context.id, ref: context.ref }
+}
+
+/** A context view's search owes the question it held on an earlier run. */
+export function resumeContextSearch(context: ContextEntry): void {
+  resumeSearch(searchScopeOf(context))
+}
+
+/** The context view's search slot: Search's own region, scoped to this context by its id. */
+export function ContextSearchSlot(props: {
+  context: ContextEntry
+  onOpenItem: (item: ResourceSummary) => void
+}): OrcaNode {
   return (
-    <Stack gap="xs">
+    <Stack gap="sm">
       <Heading level={3}>search in this context</Heading>
-      <Text muted size="xs">
-        {`Search within ${props.context.ref} arrives with the Search build — exact and by-meaning matching, scoped here.`}
-      </Text>
+      <SearchRegion scope={searchScopeOf(props.context)} onOpenItem={props.onOpenItem} />
     </Stack>
   )
 }
@@ -337,7 +346,7 @@ export function ContextView(props: {
           {props.entry.ref}
         </Text>
       </Stack>
-      <ContextSearchSlot context={props.entry} />
+      <ContextSearchSlot context={props.entry} onOpenItem={props.onOpenItem} />
       <ContextRecentRegion context={props.entry} onOpenItem={props.onOpenItem} />
     </Stack>
   )
