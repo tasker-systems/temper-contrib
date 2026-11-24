@@ -35,6 +35,7 @@ type Asked = { query: string; contextId?: string; docType?: string }
 function okAnswer(input: Asked, extra: { exact?: object; wide?: object } = {}) {
   return {
     state: 'ok' as const,
+    engine: 'search' as const,
     query: input.query,
     contextId: input.contextId ?? null,
     docType: input.docType ?? null,
@@ -424,4 +425,205 @@ test('the answer key changes with the type and the context', async () => {
     answerKey({ kind: 'context', id: WORKFLOWS_ID, ref: '+alpha/workflows' }, { docType: 'task', context: null })
   ])
   assert.equal(keys.size, 6, 'every question its own key')
+})
+
+// Stage, status and tags (0.2.2): through a query plan, answered among the filter stage's count.
+
+type PlanAsked = Asked & { stage?: string; status?: string; tags?: string[] }
+
+function planAnswer(
+  input: PlanAsked,
+  extra: { among?: number; exact?: object; wide?: object } = {}
+) {
+  return {
+    state: 'ok' as const,
+    engine: 'plan' as const,
+    query: input.query,
+    contextId: input.contextId ?? null,
+    docType: input.docType ?? null,
+    stage: input.stage ?? null,
+    status: input.status ?? null,
+    tags: input.tags ?? [],
+    among: extra.among ?? 31,
+    exact: { rows: [BOTH, summary('b2', 'A side rail task', 'task', 'done')], more: false, ...extra.exact },
+    wide: { rows: [summary('b3', 'A panel beside the editor', 'task', 'done'), BOTH], more: true, degraded: false, ...extra.wide }
+  }
+}
+
+/** Answers the plan when a stage, a status or a tag rides the read, the search door otherwise. */
+function planOrSearch(extra: Parameters<typeof planAnswer>[1] = {}) {
+  return (input: PlanAsked) =>
+    input.stage !== undefined || input.status !== undefined || (input.tags?.length ?? 0) > 0
+      ? planAnswer(input, extra)
+      : okAnswer(input)
+}
+
+const STAGE = { type: 'Select', label: 'stage' }
+const STATUS = { type: 'Select', label: 'status' }
+const TAGS = { type: 'Input', label: 'tags' }
+
+test('the stage select stands only under task, the status select only under goal, from temper\'s values', async () => {
+  mounted = await mount(panel, { host: servedHost() })
+  await openSearch()
+  assert.equal(mounted.find(STAGE), null, 'any type: no stage')
+  assert.equal(mounted.find(STATUS), null, 'any type: no status')
+  assert.ok(mounted.find(TAGS), 'tags stand under any type')
+  await mounted.select(TYPE, 'task')
+  const stages = (mounted.find(STAGE)?.props.options ?? []) as { value: string }[]
+  assert.deepEqual(stages.map((option) => option.value), ['any-stage', 'backlog', 'in-progress', 'done', 'cancelled'])
+  assert.equal(mounted.find(STATUS), null)
+  await mounted.select(TYPE, 'goal')
+  assert.equal(mounted.find(STAGE), null)
+  const statuses = (mounted.find(STATUS)?.props.options ?? []) as { value: string }[]
+  assert.deepEqual(statuses.map((option) => option.value), ['any-status', 'active', 'completed', 'paused', 'cancelled'])
+  await mounted.select(TYPE, 'research')
+  assert.equal(mounted.find(STAGE), null)
+  assert.equal(mounted.find(STATUS), null)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a stage asks the plan; the answer names every filter and the scope, among M, the two arms apart', async () => {
+  const asked: PlanAsked[] = []
+  mounted = await mount(panel, { host: servedHost({ asked, answer: planOrSearch() }) })
+  await openSearch()
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  await mounted.select(TYPE, 'task')
+  await mounted.select(STAGE, 'done')
+  assert.deepEqual(asked.at(-1), { query: 'side rail', docType: 'task', stage: 'done' })
+  assert.equal('owner' in (asked.at(-1) ?? {}), false, 'no "yours" narrowing (R2)')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in everything you can read, among 31 task records at done.' }))
+  assert.ok(mounted.find({ type: 'List', label: 'exact' }), 'the exact arm is its own list')
+  assert.ok(mounted.find({ type: 'List', label: 'by meaning' }), 'the meaning arm is its own list')
+  assert.equal(mounted.findAll({ type: 'ListItem', label: 'The side rail design' }).length, 2, 'never merged')
+  assert.ok(mounted.find({ text: 'All 2 of the 31 match these words.' }), 'exactly N back: all N')
+  assert.ok(mounted.find({ text: 'The 2 closest in meaning of the 31; the rest not shown.' }))
+  assert.equal(mounted.find({ text: /draw/ }), null, 'a bounded meaning arm has no draw to say')
+
+  // Back to any stage: the search door again, exactly as before.
+  await mounted.select(STAGE, 'any-stage')
+  assert.deepEqual(asked.at(-1), { query: 'side rail', docType: 'task' })
+  assert.ok(mounted.find({ text: 'Results for “side rail” in task records in everything you can read.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the exact arm says more only when one past the page came back', async () => {
+  mounted = await mount(panel, { host: servedHost({ answer: planOrSearch({ exact: { more: true } }) }) })
+  await openSearch()
+  await mounted.select(TYPE, 'goal')
+  await mounted.select(STATUS, 'active')
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.ok(mounted.find({ text: 'Results for “side rail” in everything you can read, among 31 goal records at active.' }))
+  assert.ok(mounted.find({ text: '2 shown of the 31; more match these words.' }), 'N+1 back: more')
+  assert.equal(mounted.find({ text: /^All 2 of the 31/ }), null)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the meaning arm says all when it ranked every one of the M, and the shortfall when not', async () => {
+  const { planMeaningSentence, planExactSentence } = await import('./search')
+  const two = [BOTH, summary('b2', 'x', 'task')]
+  assert.equal(planMeaningSentence({ rows: two, more: false }, 2), 'All 2 of the 2, closest in meaning first.')
+  assert.equal(
+    planMeaningSentence({ rows: two, more: false }, 5),
+    'The 2 closest in meaning of the 5; the other 3 were not ranked by meaning.'
+  )
+  assert.equal(planMeaningSentence({ rows: two, more: true }, 30), 'The 2 closest in meaning of the 30; the rest not shown.')
+  assert.equal(planExactSentence({ rows: [], more: false }, 30), 'None of the 30 match these words — try different words.')
+})
+
+test('a filter set admitting nothing says so — nothing was searched, never "no results"', async () => {
+  mounted = await mount(panel, { host: servedHost({ answer: planOrSearch({ among: 0, exact: { rows: [] }, wide: { rows: [], more: false } }) }) })
+  await mounted.press({ type: 'ListItem', label: 'workflows' })
+  await mounted.select(TYPE, 'task')
+  await mounted.select(STAGE, 'cancelled')
+  await mounted.type({ type: 'Input', label: 'search +alpha/workflows' }, 'side rail', { submit: true })
+  assert.ok(mounted.find({ text: 'No task records at cancelled in +alpha/workflows — nothing was searched for “side rail”.' }))
+  assert.equal(mounted.find({ type: 'Heading', text: /^exact/ }), null, 'no arm stands to read as an answer')
+  assert.equal(mounted.find({ text: /no results/i }), null)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a tag is added on Enter, matched all-of, said in the answer, and removed by its chip', async () => {
+  const asked: PlanAsked[] = []
+  mounted = await mount(panel, { host: servedHost({ asked, answer: planOrSearch() }) })
+  await openSearch()
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  await mounted.type(TAGS, ' orca ', { submit: true })
+  assert.deepEqual(asked.at(-1), { query: 'side rail', tags: ['orca'] })
+  await mounted.type(TAGS, 'rail', { submit: true })
+  assert.deepEqual(asked.at(-1), { query: 'side rail', tags: ['orca', 'rail'] }, 'every tag rides the read')
+  const before = asked.length
+  await mounted.type(TAGS, 'orca', { submit: true })
+  assert.equal(asked.length, before, 'a repeated tag adds nothing and asks nothing')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in everything you can read, among 31 records tagged orca and rail.' }))
+  assert.ok(mounted.find({ type: 'Button', text: 'orca' }), 'each tag stands as a chip')
+  await mounted.press({ type: 'Button', text: 'orca' })
+  await mounted.press({ type: 'Button', text: 'rail' })
+  assert.deepEqual(asked.at(-1), { query: 'side rail' }, 'no tag left: the search door again')
+  assert.ok(mounted.find({ text: 'Results for “side rail” in everything you can read.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a degraded meaning stage in a plan is the warning callout, the exact arm beside it', async () => {
+  mounted = await mount(panel, { host: servedHost({ answer: planOrSearch({ wide: { rows: [], more: false, degraded: true } }) }) })
+  await openSearch()
+  await mounted.type(TAGS, 'orca', { submit: true })
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.ok(mounted.find({ type: 'Callout', label: "Meaning-match couldn't run just now" }))
+  assert.equal(mounted.find({ type: 'List', label: 'by meaning' }), null)
+  assert.equal(mounted.find({ text: /closest in meaning/ }), null, 'no meaning sentence stands for an arm that did not run')
+  assert.ok(mounted.find({ type: 'List', label: 'exact' }), 'the exact arm still shows')
+  assert.ok(mounted.find({ text: 'All 2 of the 31 match these words.' }))
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('a refused plan is a fault in the region, never an empty answer', async () => {
+  mounted = await mount(panel, {
+    host: servedHost({
+      answer: () => ({
+        state: 'failed',
+        message: "temper refused the search plan (PLAN_REFUSED) — a defect in the plugin's plan, not an empty answer: exact: filter_not_applicable — no"
+      })
+    })
+  })
+  await openSearch()
+  await mounted.type(TAGS, 'orca', { submit: true })
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  assert.ok(mounted.find({ type: 'Callout', label: 'search unavailable — nothing here was read.' }))
+  assert.ok(mounted.find({ text: /PLAN_REFUSED/ }))
+  assert.equal(mounted.find({ type: 'Heading', text: /^exact/ }), null)
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('changing the type away from task drops the stage, so no hidden filter narrows the read', async () => {
+  const asked: PlanAsked[] = []
+  mounted = await mount(panel, { host: servedHost({ asked, answer: planOrSearch() }) })
+  await openSearch()
+  await mounted.type(FIELD, 'side rail', { submit: true })
+  await mounted.select(TYPE, 'task')
+  await mounted.select(STAGE, 'done')
+  await mounted.select(TYPE, 'research')
+  assert.deepEqual(asked.at(-1), { query: 'side rail', docType: 'research' }, 'the stage went with the task type')
+  await mounted.select(TYPE, 'task')
+  assert.equal(mounted.find(STAGE)?.props.value, 'any-stage')
+  assert.deepEqual(mounted.errors, [])
+})
+
+test('the answer key changes with the stage, the status and each tag', async () => {
+  const { answerKey, EVERYTHING } = await import('./search')
+  const keys = [
+    answerKey(EVERYTHING, { docType: 'task' }),
+    answerKey(EVERYTHING, { docType: 'task', stage: 'done' }),
+    answerKey(EVERYTHING, { docType: 'task', stage: 'backlog' }),
+    answerKey(EVERYTHING, { docType: 'goal', status: 'active' }),
+    answerKey(EVERYTHING, { docType: 'goal', status: 'paused' }),
+    answerKey(EVERYTHING, { tags: ['orca'] }),
+    answerKey(EVERYTHING, { tags: ['orca', 'rail'] }),
+    answerKey(EVERYTHING, { tags: ['rail'] })
+  ]
+  assert.equal(new Set(keys).size, keys.length, 'every filter its own key')
+  assert.equal(
+    answerKey(EVERYTHING, { tags: ['orca', 'rail'] }),
+    answerKey(EVERYTHING, { tags: ['rail', 'orca'] }),
+    'all-of has no order'
+  )
 })

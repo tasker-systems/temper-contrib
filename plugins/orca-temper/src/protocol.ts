@@ -16,7 +16,8 @@
 //                           bound — scoped by the context's id, never by `owner`
 //   temper.search         — Search: `POST /api/search` over everything the person can read,
 //                           or one context by its id, one doc type when chosen — never
-//                           `owner`; its two arms answered
+//                           `owner`; with a stage, status or tag, `POST /api/query` instead,
+//                           a filter stage then both arms within it; its two arms answered
 //                           apart, each with its own reason and `truncated`, the wide arm's
 //                           `degraded` and draw beside it
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
@@ -213,6 +214,15 @@ export interface SearchInput {
   contextId?: string
   /** One doc type the answer is narrowed to, sent as `doc_type`. Absent: any type. */
   docType?: string
+  /**
+   * A task stage (one of `TASK_STAGES`), a goal status (one of `GOAL_STATUSES`), and tags matched
+   * all-of. Any one of them set sends the question as a query plan (`POST /api/query`): a filter
+   * stage selects the population, and both arms rank inside it. None set: `POST /api/search`,
+   * exactly as before.
+   */
+  stage?: string
+  status?: string
+  tags?: string[]
 }
 
 /** Why an arm's answer is shaped as it is, in temper's word for it. */
@@ -243,6 +253,8 @@ export interface WideSearchArm extends SearchArm {
 export type SearchOutput =
   | {
       state: 'ok'
+      /** Answered by the search door (`POST /api/search`): no stage, status or tag was asked. */
+      engine: 'search'
       query: string
       /** The context the search was scoped to, by id; null for everything readable. */
       contextId: string | null
@@ -251,7 +263,51 @@ export type SearchOutput =
       exact: SearchArm
       wide: WideSearchArm
     }
+  | PlanSearchAnswer
   | RegionFailure
+
+/**
+ * One arm of a plan's answer: the rows shown (at most `SEARCH_LIMIT`), and whether more came back
+ * than that — the arm was asked for one past the page, so `more` is what the server answered,
+ * never inferred from a full page.
+ */
+export interface PlanSearchArm {
+  rows: ResourceSummary[]
+  more: boolean
+}
+
+/**
+ * A question asked as a query plan: the filter stage's population and the two arms ranked inside
+ * it, each its own list in its own order, never merged. `among` is the filter stage's
+ * `produced_ids` — how many records the filters admit in the scope, the denominator both arms'
+ * sentences name. Zero means nothing was searched: there was nothing to search among.
+ */
+export interface PlanSearchAnswer {
+  state: 'ok'
+  engine: 'plan'
+  query: string
+  contextId: string | null
+  docType: string | null
+  stage: string | null
+  status: string | null
+  tags: string[]
+  among: number
+  exact: PlanSearchArm
+  /** The meaning stage was refused `embedding_unavailable`: it did not run, its rows say nothing. */
+  wide: PlanSearchArm & { degraded: boolean }
+}
+
+/**
+ * The stages a task takes and the statuses a goal takes — the values temper's own task and goal
+ * schemas declare (temper-workflow's `task.schema.json` `temper-stage`, `goal.schema.json`
+ * `temper-status`), as temper-ui's vault filters offer them. Interim, like `WAY_IN_MAX`:
+ * temper-design does not publish them yet.
+ */
+export const TASK_STAGES = ['backlog', 'in-progress', 'done', 'cancelled'] as const
+export const GOAL_STATUSES = ['active', 'completed', 'paused', 'cancelled'] as const
+
+/** The most tags a question narrows by: a handful the person typed, never a vocabulary. */
+export const SEARCH_TAGS_MAX = 8
 
 /** How many hits each arm answers: temper-ui's search page size. */
 export const SEARCH_LIMIT = 10
