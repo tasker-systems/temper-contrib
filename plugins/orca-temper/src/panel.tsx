@@ -18,8 +18,9 @@
 // the "this workspace" strip (./serves-strip.tsx): the focused workspace, the task it serves
 // and its agents. Explore (./explore.tsx) lists teams, each with its contexts; a pressed
 // context — from Explore, or a place on Home — pushes the context view onto the same stack.
-// Search (./search.tsx) asks everything the person can read; the context view asks its own
-// context through the same region. Its two groups — exact and by meaning — never merge.
+// Search (./search.tsx) asks everything the person can read, or one context its picker names
+// from Explore's own read, narrowed to a doc type when one is chosen; the context view asks its
+// own context through the same region. Its two groups — exact and by meaning — never merge.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -88,6 +89,7 @@ import {
   isContextEntry,
   loadContextRecent,
   loadExplore,
+  readableContexts,
   resumeContextSearch
 } from './explore'
 import { EVERYTHING, everythingWasAsked, resumeSearch, SearchRegion } from './search'
@@ -185,11 +187,11 @@ function openSummary(item: ResourceSummary): void {
   pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: item.docType })
 }
 
-/** The sub-tab picked; Explore reads its contexts the first time it is shown, and Search owes
- * the question it held on an earlier run. */
+/** The sub-tab picked; Explore reads its contexts the first time it — or Search, whose context
+ * picker lists them — is shown, and Search owes the question it held on an earlier run. */
 function pickTab(value: string): void {
   set(activeTab, value)
-  if (value === 'explore' && !exploreWasAsked() && !allRefused()) {
+  if ((value === 'explore' || value === 'search') && !exploreWasAsked() && !allRefused()) {
     void loadExplore()
   }
   if (value === 'search' && !allRefused()) {
@@ -357,8 +359,9 @@ async function refresh(): Promise<void> {
     })
     set(wayInResults, results)
     // Explore reads only once it is shown — it is not Home's read — and never into a refusal
-    // that stands over every tab. A run that reopens on Explore owes its read here.
-    if ((exploreWasAsked() || read(activeTab) === 'explore') && !allRefused()) {
+    // that stands over every tab. A run that reopens on Explore, or on Search (its context picker
+    // lists Explore's contexts), owes its read here.
+    if ((exploreWasAsked() || read(activeTab) === 'explore' || read(activeTab) === 'search') && !allRefused()) {
       void loadExplore()
     }
     // Search asks only what the person asked: a Refresh asks the held question again, and a run
@@ -870,7 +873,7 @@ function Frame() {
           {allRefused() ? undefined : <ExploreTab onOpenContext={pushContext} />}
         </Tab>
         <Tab value="search" label="Search">
-          {allRefused() ? undefined : <SearchRegion scope={EVERYTHING} onOpenItem={openSummary} />}
+          {allRefused() ? undefined : <SearchRegion scope={EVERYTHING} contexts={readableContexts()} onOpenItem={openSummary} />}
         </Tab>
       </Tabs>
     </Stack>

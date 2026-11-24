@@ -68,6 +68,21 @@ const exploreOpen = atom('explore-open', {} as Record<string, boolean>, { persis
 
 let exploreAsked = false
 
+/**
+ * Every context the read answered, in its owners' order (teams, then people) —
+ * the Search tab's context picker lists these, from the same read, never one of its own. Null
+ * while the read is out, before it was asked, or when it did not answer.
+ */
+export function readableContexts(): { id: string; ref: string }[] | null {
+  const answer = read(exploreResult)
+  if (answer === null || answer.state !== 'ok') {
+    return null
+  }
+  return answer.owners.flatMap((owner) =>
+    owner.contexts.map((context) => ({ id: context.id, ref: context.ref }))
+  )
+}
+
 /** True once Explore's read was asked in this run, so a Refresh asks it again. */
 export function exploreWasAsked(): boolean {
   return exploreAsked

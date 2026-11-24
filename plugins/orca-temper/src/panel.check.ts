@@ -37,7 +37,10 @@
 // (build item 9), from a question held on an earlier run: unasked, the two groups apart with
 // each one's omission sentence, a meaning arm drawn from the nearest passages and an exhaustive
 // one, nothing matched, the meaning arm degraded, and the region states; `look-context-search`
-// draws a context view's search, scoped to it.
+// draws a context view's search, scoped to it. The filters (0.2.1): `look-search-type` a doc
+// type on an unscoped search, its meaning arm saying the type narrowed the draw;
+// `look-search-in` the context picker set; `look-search-type-in` both; and
+// `look-context-search-type` a doc type on a context's own search, read exhaustively.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -348,18 +351,23 @@ const SEARCH_WIDE = [
 ]
 
 function searchAnswer(
-  input: { query: string; contextId?: string },
+  input: { query: string; contextId?: string; docType?: string },
   extra: { exact?: Record<string, unknown>; wide?: Record<string, unknown> } = {}
 ) {
+  // A doc type narrows each arm to its rows; the narrowed pages here are short, so more is false.
+  const typed = (rows: typeof SEARCH_EXACT) =>
+    input.docType === undefined ? rows : rows.filter((item) => item.docType === input.docType)
+  const more = input.docType === undefined
   return {
     state: 'ok' as const,
     query: input.query,
     contextId: input.contextId ?? null,
-    exact: { rows: SEARCH_EXACT, reason: 'ok' as const, truncated: true, ...extra.exact },
+    docType: input.docType ?? null,
+    exact: { rows: typed(SEARCH_EXACT), reason: 'ok' as const, truncated: more, ...extra.exact },
     wide: {
-      rows: SEARCH_WIDE,
+      rows: typed(SEARCH_WIDE),
       reason: 'ok' as const,
-      truncated: true,
+      truncated: more,
       degraded: false,
       draw: input.contextId === undefined ? { kind: 'nearest' as const, chunks: 100 } : { kind: 'exhaustive' as const },
       ...extra.wide
@@ -369,6 +377,11 @@ function searchAnswer(
 
 /** Search's tab, holding the question an earlier run asked. */
 const SEARCH_HELD = { plugin: { 'detail-stack': [], 'active-tab': 'search', 'search-asked': { everything: 'side rail' } } }
+/** Search's tab holding a question under its filters: a doc type, a picked context, or both. */
+function searchHeldUnder(filters: { docType: string | null; context: { id: string; ref: string } | null }) {
+  return { plugin: { ...SEARCH_HELD.plugin, 'search-filters': { everything: filters } } }
+}
+const RESEARCH_CONTEXT = { id: '00000000-0000-7000-8000-000000000011', ref: '+team/research' }
 
 /** The context view as the panel holds it after a press from Explore. */
 const CONTEXT_ENTRY = { kind: 'context', id: CONTEXT_ID, ref: CONTEXT, name: 'workflows' }
@@ -414,7 +427,7 @@ const LOOK = {
       total: 38,
       bound: input.bound
     }),
-    'temper.search': (input: { query: string; contextId?: string }) => searchAnswer(input),
+    'temper.search': (input: { query: string; contextId?: string; docType?: string }) => searchAnswer(input),
     'temper.home.recent': () => ({
       state: 'ok' as const,
       rows: [
@@ -966,7 +979,7 @@ export default defineCheck({
     ...LOOK,
     requests: {
       ...LOOK.requests,
-      'temper.search': (input: { query: string; contextId?: string }) =>
+      'temper.search': (input: { query: string; contextId?: string; docType?: string }) =>
         searchAnswer(input, {
           exact: { rows: SEARCH_EXACT.slice(0, 1), truncated: false },
           wide: { rows: SEARCH_WIDE.slice(0, 2), truncated: false, draw: { kind: 'exhaustive' } }
@@ -979,7 +992,7 @@ export default defineCheck({
     ...LOOK,
     requests: {
       ...LOOK.requests,
-      'temper.search': (input: { query: string; contextId?: string }) =>
+      'temper.search': (input: { query: string; contextId?: string; docType?: string }) =>
         searchAnswer(input, {
           exact: { rows: [], reason: 'no_match', truncated: false },
           wide: { rows: [], reason: 'out_of_scope', truncated: false }
@@ -992,7 +1005,7 @@ export default defineCheck({
     ...LOOK,
     requests: {
       ...LOOK.requests,
-      'temper.search': (input: { query: string; contextId?: string }) =>
+      'temper.search': (input: { query: string; contextId?: string; docType?: string }) =>
         searchAnswer(input, { wide: { rows: [], reason: 'no_match', truncated: false, degraded: true, draw: null } })
     },
     persisted: SEARCH_HELD
@@ -1017,6 +1030,24 @@ export default defineCheck({
   'look-context-search': {
     ...LOOK,
     persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY], 'search-asked': { [`context:${CONTEXT_ID}`]: 'side rail' } } }
+  },
+  // A doc type on an unscoped search: both groups name the type, and the meaning arm says the
+  // type narrowed its draw of the nearest passages — never that every match was looked at.
+  'look-search-type': { ...LOOK, persisted: searchHeldUnder({ docType: 'research', context: null }) },
+  // The context picker set: the same read, scoped by the picked context's bare id.
+  'look-search-in': { ...LOOK, persisted: searchHeldUnder({ docType: null, context: RESEARCH_CONTEXT }) },
+  // Both filters: a doc type within a picked context, read exhaustively there.
+  'look-search-type-in': { ...LOOK, persisted: searchHeldUnder({ docType: 'research', context: RESEARCH_CONTEXT }) },
+  // A doc type on a context's own search: no picker, the type said, the context read whole.
+  'look-context-search-type': {
+    ...LOOK,
+    persisted: {
+      plugin: {
+        'detail-stack': [CONTEXT_ENTRY],
+        'search-asked': { [`context:${CONTEXT_ID}`]: 'side rail' },
+        'search-filters': { [`context:${CONTEXT_ID}`]: { docType: 'research', context: null } }
+      }
+    }
   },
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {

@@ -180,7 +180,8 @@ export default function activate(orca: OrcaWorkerApi): void {
       answer(async (read) => ({ state: 'ok' as const, ...(await contextRecent(read, input)) }))
   )
 
-  // Search: the two arms apart, over everything readable or one context by its id — never
+  // Search: the two arms apart, over everything readable or one context by its id, narrowed to
+  // one doc type when one was chosen — never
   // `owner` (R2) — behind the same grant gate as every other read.
   orca.panels.handle('temper.search', async (input: SearchInput): Promise<SearchOutput> =>
     answer(async (read) => ({ state: 'ok' as const, ...(await searchResources(read, input)) }))

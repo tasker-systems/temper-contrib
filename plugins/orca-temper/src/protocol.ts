@@ -15,7 +15,8 @@
 //   temper.context.recent — a pressed context's recently updated items, at the panel's
 //                           bound — scoped by the context's id, never by `owner`
 //   temper.search         — Search: `POST /api/search` over everything the person can read,
-//                           or one context by its id — never `owner`; its two arms answered
+//                           or one context by its id, one doc type when chosen — never
+//                           `owner`; its two arms answered
 //                           apart, each with its own reason and `truncated`, the wide arm's
 //                           `degraded` and draw beside it
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
@@ -205,8 +206,13 @@ export const WAY_IN_MAX = 200
  */
 export interface SearchInput {
   query: string
-  /** The context's id, a bare UUID — set only by the context view's search. */
+  /**
+   * The context's id, a bare UUID — set by a context view's search, or by the Search tab's
+   * context picker. Absent: everything the person can read.
+   */
   contextId?: string
+  /** One doc type the answer is narrowed to, sent as `doc_type`. Absent: any type. */
+  docType?: string
 }
 
 /** Why an arm's answer is shaped as it is, in temper's word for it. */
@@ -240,6 +246,8 @@ export type SearchOutput =
       query: string
       /** The context the search was scoped to, by id; null for everything readable. */
       contextId: string | null
+      /** The doc type the search was narrowed to; null for any type. */
+      docType: string | null
       exact: SearchArm
       wide: WideSearchArm
     }
@@ -250,6 +258,9 @@ export const SEARCH_LIMIT = 10
 
 /** The most a query may carry, in bytes: the search door refuses a longer one. */
 export const SEARCH_QUERY_MAX_BYTES = 4096
+
+/** The most a doc type may carry, in bytes: the search door refuses a longer one. */
+export const SEARCH_DOC_TYPE_MAX_BYTES = 256
 
 /** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
 export type CapabilitiesOutput = {
