@@ -40,7 +40,12 @@
 // draws a context view's search, scoped to it. The filters (0.2.1): `look-search-type` a doc
 // type on an unscoped search, its meaning arm saying the type narrowed the draw;
 // `look-search-in` the context picker set; `look-search-type-in` both; and
-// `look-context-search-type` a doc type on a context's own search, read exhaustively.
+// `look-context-search-type` a doc type on a context's own search, read exhaustively. Through a
+// query plan (0.2.2): `look-search-stage` a task stage, among the filter stage's count, both arms
+// apart; `look-search-stage-more` the exact arm past its page; `look-search-status` a goal
+// status; `look-search-tags` tags as chips, matched all-of; `look-search-plan-none` a filter set
+// admitting nothing; `look-search-plan-degraded` the meaning stage unembedded beside the exact
+// arm; and `look-search-plan-refused` a refused plan, said as a fault.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -360,6 +365,7 @@ function searchAnswer(
   const more = input.docType === undefined
   return {
     state: 'ok' as const,
+    engine: 'search' as const,
     query: input.query,
     contextId: input.contextId ?? null,
     docType: input.docType ?? null,
@@ -375,10 +381,56 @@ function searchAnswer(
   }
 }
 
+/** A plan's arms (0.2.2): done tasks matching the words, and the closest in meaning of them. */
+const PLAN_EXACT = [
+  row(24, 'orca-temper Search: a doc-type filter and a context picker', 'task', 'done'),
+  row(25, 'orca-temper Search: exact and by meaning as separate groups', 'task', 'done')
+]
+const PLAN_WIDE = [
+  row(25, 'orca-temper Search: exact and by meaning as separate groups', 'task', 'done'),
+  row(24, 'orca-temper Search: a doc-type filter and a context picker', 'task', 'done'),
+  row(26, 'The launcher sheet names the agent before it runs', 'task', 'done')
+]
+
+type PlanInput = {
+  query: string
+  contextId?: string
+  docType?: string
+  stage?: string
+  status?: string
+  tags?: string[]
+}
+
+/** Search's answer through the plan: among the filter stage's count, the two arms apart. */
+function planSearchAnswer(
+  input: PlanInput,
+  extra: { among?: number; exact?: Record<string, unknown>; wide?: Record<string, unknown> } = {}
+) {
+  return {
+    state: 'ok' as const,
+    engine: 'plan' as const,
+    query: input.query,
+    contextId: input.contextId ?? null,
+    docType: input.docType ?? null,
+    stage: input.stage ?? null,
+    status: input.status ?? null,
+    tags: input.tags ?? [],
+    among: extra.among ?? 31,
+    exact: { rows: PLAN_EXACT, more: false, ...extra.exact },
+    wide: { rows: PLAN_WIDE, more: true, degraded: false, ...extra.wide }
+  }
+}
+
 /** Search's tab, holding the question an earlier run asked. */
 const SEARCH_HELD = { plugin: { 'detail-stack': [], 'active-tab': 'search', 'search-asked': { everything: 'side rail' } } }
 /** Search's tab holding a question under its filters: a doc type, a picked context, or both. */
-function searchHeldUnder(filters: { docType: string | null; context: { id: string; ref: string } | null }) {
+function searchHeldUnder(filters: {
+  docType: string | null
+  context: { id: string; ref: string } | null
+  stage?: string | null
+  status?: string | null
+  tags?: string[]
+}) {
   return { plugin: { ...SEARCH_HELD.plugin, 'search-filters': { everything: filters } } }
 }
 const RESEARCH_CONTEXT = { id: '00000000-0000-7000-8000-000000000011', ref: '+team/research' }
@@ -1048,6 +1100,84 @@ export default defineCheck({
         'search-filters': { [`context:${CONTEXT_ID}`]: { docType: 'research', context: null } }
       }
     }
+  },
+  // A task stage through the plan: among the filter stage's 31, the exact arm all of its matches,
+  // the meaning arm the closest of the 31 with the rest not shown.
+  'look-search-stage': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.search': (input: PlanInput) => planSearchAnswer(input) },
+    persisted: searchHeldUnder({ docType: 'task', context: null, stage: 'done' })
+  },
+  // The exact arm past its page: one past it came back, so more is said.
+  'look-search-stage-more': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: PlanInput) => planSearchAnswer(input, { exact: { more: true } })
+    },
+    persisted: searchHeldUnder({ docType: 'task', context: RESEARCH_CONTEXT, stage: 'done' })
+  },
+  // A goal status through the plan, every one of the M ranked by meaning.
+  'look-search-status': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: PlanInput) =>
+        planSearchAnswer(
+          { ...input },
+          {
+            among: 2,
+            exact: { rows: [row(17, 'The rail reads temper on a borrowed grant', 'goal', 'active')] },
+            wide: {
+              rows: [
+                row(17, 'The rail reads temper on a borrowed grant', 'goal', 'active'),
+                row(27, 'Search with filters through a query plan', 'goal', 'active')
+              ],
+              more: false
+            }
+          }
+        )
+    },
+    persisted: searchHeldUnder({ docType: 'goal', context: null, status: 'active' })
+  },
+  // Tags as chips, all of them matched; the answer names them.
+  'look-search-tags': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.search': (input: PlanInput) => planSearchAnswer(input, { among: 12 }) },
+    persisted: searchHeldUnder({ docType: null, context: null, tags: ['orca', 'search'] })
+  },
+  // A filter set that admits nothing: said so, and that nothing was searched.
+  'look-search-plan-none': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: PlanInput) =>
+        planSearchAnswer(input, { among: 0, exact: { rows: [] }, wide: { rows: [], more: false } })
+    },
+    persisted: searchHeldUnder({ docType: 'task', context: RESEARCH_CONTEXT, stage: 'cancelled' })
+  },
+  // The meaning stage could not be embedded: the warning callout, the exact arm beside it.
+  'look-search-plan-degraded': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: PlanInput) =>
+        planSearchAnswer(input, { wide: { rows: [], more: false, degraded: true } })
+    },
+    persisted: searchHeldUnder({ docType: 'task', context: null, stage: 'done' })
+  },
+  // A plan the server refused: a fault in the region, never an empty answer.
+  'look-search-plan-refused': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': () => ({
+        state: 'failed' as const,
+        message:
+          "temper refused the search plan (PLAN_REFUSED) — a defect in the plugin's plan, not an empty answer: exact: filter_not_applicable — this act does not narrow by `stage`"
+      })
+    },
+    persisted: searchHeldUnder({ docType: 'task', context: null, stage: 'done' })
   },
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {

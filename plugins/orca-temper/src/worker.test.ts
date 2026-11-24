@@ -1379,6 +1379,7 @@ test('search asks POST /api/search with the words and the page size, and never s
 
   assert.equal(answer.state, 'ok')
   if (answer.state !== 'ok') return
+  if (answer.engine !== 'search') return assert.fail('no stage, status or tag: the search door answers')
   assert.equal(answer.query, 'side rail', 'the words are asked trimmed')
   assert.equal(answer.contextId, null, 'unscoped: everything the person can read')
   assert.deepEqual(
@@ -1424,6 +1425,7 @@ test("a context's search is scoped by the context's bare id, and still sends no 
 
   assert.equal(answer.state, 'ok')
   if (answer.state !== 'ok') return
+  if (answer.engine !== 'search') return assert.fail('no stage, status or tag: the search door answers')
   assert.equal(answer.contextId, CONTEXT_ID)
   assert.deepEqual(answer.wide.draw, { kind: 'exhaustive' })
   const body = (await requests[0]?.json()) as Record<string, unknown>
@@ -1441,6 +1443,7 @@ test('a doc type rides as doc_type only when chosen, beside a bare context id, a
   const typed = await worker.request('temper.search', { query: 'words', docType: 'task' })
   assert.equal(typed.state, 'ok')
   if (typed.state !== 'ok') return
+  if (typed.engine !== 'search') return assert.fail('no stage, status or tag: the search door answers')
   assert.equal(typed.docType, 'task', 'the answer says the type it was asked under')
   const both = await worker.request('temper.search', { query: 'words', docType: 'task', contextId: CONTEXT_ID })
   assert.equal(both.state === 'ok' ? both.docType : undefined, 'task')
@@ -1483,6 +1486,7 @@ test('a degraded meaning arm is said, and the exact arm stands unaffected beside
   const answer = await worker.request('temper.search', { query: 'words' })
   assert.equal(answer.state, 'ok')
   if (answer.state !== 'ok') return
+  if (answer.engine !== 'search') return assert.fail('no stage, status or tag: the search door answers')
   assert.equal(answer.wide.degraded, true, 'the meaning arm says it could not run')
   assert.equal(answer.wide.draw, null)
   assert.deepEqual(answer.exact.rows.map((item) => item.title), ['Still found by its words'])
@@ -1498,6 +1502,7 @@ test('an arm that does not say whether more matched is carried as not said, neve
   const answer = await worker.request('temper.search', { query: 'one' })
   assert.equal(answer.state, 'ok')
   if (answer.state !== 'ok') return
+  if (answer.engine !== 'search') return assert.fail('no stage, status or tag: the search door answers')
   assert.equal(answer.exact.truncated, null)
   await worker.deactivate()
 })
@@ -1546,4 +1551,268 @@ test('a refused search is the search\'s failure; a 401 is the signed-out refusal
   const lost = await again.request('temper.search', { query: 'x' })
   assert.equal(lost.state, 'not-connected')
   await again.deactivate()
+})
+
+/**
+ * The plan door's answer for Search's three stages: the filter stage's count in the trace, and
+ * each arm's hits (as many as given — a page and one past it when the fixture says so). A meaning
+ * stage refused `embedding_unavailable` answers no rows and says why.
+ */
+function planResponse(options: {
+  among: number
+  exact?: RowFixture[]
+  meaning?: RowFixture[]
+  meaningRefused?: string
+}) {
+  const stageResult = (act: string, rows: RowFixture[], kind: string) => ({
+    act,
+    disposition: rows.length === 0 ? 'empty' : 'answered',
+    extent: { extent: rows.length > 10 ? 'partial' : 'complete' },
+    terms_applied: { limit: 11 },
+    narrowed_by: [],
+    input_ids: options.among,
+    input_unusable: 0,
+    orders_by: { field: kind },
+    produced: {
+      produced: 'resources',
+      hits: rows.map((resource, n) => ({ resource, scoring: { score_kind: kind, score: 0.9 - n / 100, score_present: true }, located_at: null }))
+    }
+  })
+  const meaning =
+    options.meaningRefused === undefined
+      ? stageResult('find-about-within', options.meaning ?? [], 'vec_norm')
+      : {
+          ...stageResult('find-about-within', [], 'vec_norm'),
+          disposition: 'refused',
+          refusal: { reason: options.meaningRefused, detail: 'the server could not embed the question' },
+          produced: { produced: 'resources', hits: [] }
+        }
+  return {
+    returned: { exact: stageResult('find-exact', options.exact ?? [], 'fts_norm'), meaning },
+    trace: {
+      stages: [
+        {
+          stage: 'filtered',
+          act: 'find-resources-with',
+          disposition: options.among === 0 ? 'empty' : 'answered',
+          input_ids: 1,
+          input_unusable: 0,
+          produced_ids: options.among,
+          extent: { extent: 'complete' },
+          terms_applied: {},
+          narrowed_by: []
+        },
+        { stage: 'exact', act: 'find-exact', disposition: 'answered', input_ids: options.among, input_unusable: 0, produced_ids: 0, extent: { extent: 'complete' }, terms_applied: {}, narrowed_by: [] },
+        { stage: 'meaning', act: 'find-about-within', disposition: meaning.disposition, input_ids: options.among, input_unusable: 0, produced_ids: 0, extent: { extent: 'complete' }, terms_applied: {}, narrowed_by: [] }
+      ]
+    }
+  }
+}
+
+/** Every key anywhere in a JSON value, walked whole. */
+function everyKey(value: unknown, keys: string[] = []): string[] {
+  if (Array.isArray(value)) {
+    for (const item of value) everyKey(item, keys)
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, inner] of Object.entries(value)) {
+      keys.push(key)
+      everyKey(inner, keys)
+    }
+  }
+  return keys
+}
+
+const rows = (prefix: string, count: number) =>
+  Array.from({ length: count }, (_, n) => row(`${prefix}${n}`.padStart(2, '0').slice(-2), `${prefix} hit ${n}`, 'task'))
+
+test('a stage, a status or a tag asks POST /api/query; none set asks POST /api/search', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    const fixture = new URL(input.url).pathname === '/api/query' ? planResponse({ among: 3, exact: rows('e', 1), meaning: rows('m', 1) }) : searchResponse()
+    return new Response(JSON.stringify(fixture), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const asks = [
+    { query: 'w' },
+    { query: 'w', docType: 'task', contextId: CONTEXT_ID },
+    { query: 'w', docType: 'task', stage: 'done' },
+    { query: 'w', docType: 'goal', status: 'active' },
+    { query: 'w', tags: ['orca'] },
+    { query: 'w', tags: [] }
+  ]
+  const engines: string[] = []
+  for (const ask of asks) {
+    const answer = await worker.request('temper.search', ask)
+    engines.push(answer.state === 'ok' ? answer.engine : answer.state)
+  }
+  assert.deepEqual(engines, ['search', 'search', 'plan', 'plan', 'plan', 'search'])
+  assert.deepEqual(
+    requests.map((request) => new URL(request.url).pathname),
+    ['/api/search', '/api/search', '/api/query', '/api/query', '/api/query', '/api/search'],
+    'the search door unless a stage, a status or a tag is set — an empty tag list is none'
+  )
+  await worker.deactivate()
+})
+
+test('the plan selects with find-resources-with, then both arms bound to it, one past the page, never owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(planResponse({ among: 31, exact: rows('e', 8), meaning: rows('m', 11) }), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const scoped = await worker.request('temper.search', {
+    query: ' search ',
+    contextId: CONTEXT_ID,
+    docType: 'task',
+    stage: 'done',
+    tags: ['orca', 'rail']
+  })
+  assert.equal(scoped.state, 'ok')
+  const unscoped = await worker.request('temper.search', { query: 'search', docType: 'goal', status: 'active' })
+  assert.equal(unscoped.state, 'ok')
+
+  const [first, second] = (await Promise.all(requests.map((request) => request.json()))) as Record<string, unknown>[]
+  assert.equal(requests[0]?.method, 'POST')
+  assert.deepEqual(first, {
+    stages: [
+      {
+        name: 'filtered',
+        act: 'find-resources-with',
+        inputs: [{ from: 'caller', as: 'bound', ids: { kind: 'context', ids: [CONTEXT_ID] } }],
+        resource_filter: { doc_type: ['task'], stage: 'done', tags: ['orca', 'rail'] }
+      },
+      {
+        name: 'exact',
+        act: 'find-exact',
+        intention: { query: 'search' },
+        inputs: [{ from: 'upstream', as: 'bound', stage: 'filtered' }],
+        terms: { limit: 11 }
+      },
+      {
+        name: 'meaning',
+        act: 'find-about-within',
+        intention: { query: 'search' },
+        inputs: [{ from: 'upstream', as: 'bound', stage: 'filtered' }],
+        terms: { limit: 11 }
+      }
+    ],
+    outcome: { returns: [{ stage: 'exact', with: [] }, { stage: 'meaning', with: [] }] }
+  })
+  assert.deepEqual(
+    (second?.stages as Record<string, unknown>[])[0],
+    { name: 'filtered', act: 'find-resources-with', resource_filter: { doc_type: ['goal'], status: 'active' } },
+    'everything readable: the filter stage takes no bound'
+  )
+  for (const body of [first, second]) {
+    const keys = everyKey(body)
+    assert.equal(keys.includes('owner'), false, 'no owner anywhere in the composition (R2)')
+    assert.equal(keys.includes('changed_by'), false, 'no changed_by anywhere (R2)')
+    assert.equal(keys.includes('embedding'), false, 'no embedding: the server embeds')
+  }
+  await worker.deactivate()
+})
+
+test('among M is the filter stage\'s produced_ids, and each arm keeps its own rows apart', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(planResponse({ among: 31, exact: rows('e', 8), meaning: rows('m', 11) }), [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'search', docType: 'task', stage: 'done' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  if (answer.engine !== 'plan') return assert.fail('a stage set: the plan answers')
+  assert.equal(answer.among, 31)
+  assert.equal(answer.stage, 'done')
+  assert.deepEqual(answer.tags, [])
+  assert.equal(answer.exact.rows.length, 8)
+  assert.equal(answer.exact.more, false, 'eight of a page of ten came back: nothing more')
+  assert.equal(answer.wide.rows.length, 10, 'one past the page is never shown')
+  assert.equal(answer.wide.more, true, 'one past the page came back: more')
+  assert.equal(answer.wide.degraded, false)
+  assert.deepEqual(answer.exact.rows.map((item) => item.title)[0], 'e hit 0')
+  assert.deepEqual(answer.wide.rows.map((item) => item.title)[0], 'm hit 0', 'the arms never merge')
+  await worker.deactivate()
+})
+
+test('exactly a page is not more; a page and one past it is', async () => {
+  deps.run = async () => mintedToken()
+  const ask = { query: 'w', tags: ['orca'] }
+  for (const [count, more] of [[10, false], [11, true]] as const) {
+    deps.fetch = answering(planResponse({ among: 40, exact: rows('e', count), meaning: rows('m', count) }), [])
+    const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+    const answer = await worker.request('temper.search', ask)
+    assert.equal(answer.state, 'ok')
+    if (answer.state !== 'ok' || answer.engine !== 'plan') return assert.fail('the plan answers')
+    assert.equal(answer.exact.rows.length, 10)
+    assert.equal(answer.exact.more, more, `${count} back: more is ${more}`)
+    await worker.deactivate()
+  }
+})
+
+test('a meaning stage refused embedding_unavailable is the degraded arm; the exact arm still stands', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(planResponse({ among: 5, exact: rows('e', 2), meaningRefused: 'embedding_unavailable' }), [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'w', docType: 'task', stage: 'backlog' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok' || answer.engine !== 'plan') return assert.fail('the plan answers')
+  assert.equal(answer.wide.degraded, true)
+  assert.deepEqual(answer.wide.rows, [])
+  assert.equal(answer.exact.rows.length, 2, 'the exact arm is unaffected')
+  await worker.deactivate()
+})
+
+test('any other refused stage is a fault, never an empty answer', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(planResponse({ among: 5, exact: rows('e', 2), meaningRefused: 'not_implemented' }), [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'w', tags: ['x'] })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /"meaning" stage did not answer \(not_implemented/)
+  await worker.deactivate()
+})
+
+test('a PLAN_REFUSED is surfaced as a fault naming every refusal, never as an empty answer', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        error: {
+          code: 'PLAN_REFUSED',
+          message: 'Plan refused: 1 refusal(s)',
+          details: { refusals: [{ stage: 'exact', reason: 'filter_not_applicable', detail: 'this act does not narrow by `stage`' }] }
+        }
+      }),
+      { status: 400, headers: { 'content-type': 'application/json' } }
+    )
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'w', docType: 'task', stage: 'done' })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /PLAN_REFUSED/)
+  assert.match(answer.message, /a defect in the plugin's plan, not an empty answer/)
+  assert.match(answer.message, /exact: filter_not_applicable — this act does not narrow by `stage`/)
+  await worker.deactivate()
+})
+
+test('a stage or status temper does not declare, or a bad tag, asks nothing', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(planResponse({ among: 0 }), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  for (const ask of [
+    { query: 'w', stage: 'in progress' },
+    { query: 'w', status: 'done' },
+    { query: 'w', tags: [' orca'] },
+    { query: 'w', tags: [''] },
+    { query: 'w', tags: ['a', 'a'] },
+    { query: 'w', tags: Array.from({ length: 9 }, (_, n) => `t${n}`) }
+  ]) {
+    const answer = await worker.request('temper.search', ask)
+    assert.equal(answer.state, 'failed', JSON.stringify(ask))
+  }
+  assert.equal(requests.length, 0, 'none asked the API')
+  await worker.deactivate()
 })

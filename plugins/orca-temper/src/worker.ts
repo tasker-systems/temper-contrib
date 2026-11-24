@@ -181,10 +181,10 @@ export default function activate(orca: OrcaWorkerApi): void {
   )
 
   // Search: the two arms apart, over everything readable or one context by its id, narrowed to
-  // one doc type when one was chosen — never
-  // `owner` (R2) — behind the same grant gate as every other read.
+  // one doc type when one was chosen, and — through a query plan — to a stage, a status and tags
+  // when any is. Never `owner` (R2); behind the same grant gate as every other read.
   orca.panels.handle('temper.search', async (input: SearchInput): Promise<SearchOutput> =>
-    answer(async (read) => ({ state: 'ok' as const, ...(await searchResources(read, input)) }))
+    answer(async (read) => searchResources(read, input))
   )
 
   // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;

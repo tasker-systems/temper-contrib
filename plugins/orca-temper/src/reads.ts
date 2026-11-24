@@ -7,23 +7,34 @@
 // orients; only the latest handoff needs a body, and it asks for it explicitly, the Next section
 // quoted by temper-design's own parser. A record's detail asks for neither — the single-record
 // door with no `sections` query answers the meta alone, so the body never crosses the read.
-import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
+import { createTemperClient, type components, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import { WAY_TOGGLES, wayStatus } from './way-status'
-import { SEARCH_DOC_TYPE_MAX_BYTES, SEARCH_LIMIT, SEARCH_QUERY_MAX_BYTES, WAY_IN_MAX } from './protocol'
+import {
+  GOAL_STATUSES,
+  SEARCH_DOC_TYPE_MAX_BYTES,
+  SEARCH_LIMIT,
+  SEARCH_QUERY_MAX_BYTES,
+  SEARCH_TAGS_MAX,
+  TASK_STAGES,
+  WAY_IN_MAX
+} from './protocol'
 import type {
   ContextRecentInput,
   ExploreContext,
   ExploreOwner,
   NextSummary,
   PlaceInUse,
+  PlanSearchAnswer,
+  PlanSearchArm,
   PropertyRow,
   RecordDetail,
   ResourceSummary,
   SearchArm,
   SearchDraw,
   SearchInput,
+  SearchOutput,
   SearchReason,
   WideSearchArm
 } from './protocol'
@@ -564,19 +575,22 @@ function drawOf(draw: { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number
   return draw.kind === 'nearest' ? { kind: 'nearest', chunks: draw.chunks } : { kind: 'exhaustive' }
 }
 
+/** The question as the person asked it, vetted: the words, the scope and every filter. */
+interface SearchQuestion {
+  query: string
+  contextId: string | null
+  docType: string | null
+  stage: string | null
+  status: string | null
+  tags: string[]
+}
+
 /**
- * Search: `POST /api/search` with the person's words, over everything they can read or one
- * context named by its bare UUID, narrowed to one doc type only when one was chosen — never
- * `owner` (R2), no embedding: the server embeds the words itself, and says so in `wide.degraded`
- * when it could not. The two arms come back apart and stay apart: each keeps its own rows in its
- * own order, its reason and its `truncated`, so no view can merge them or rank one against the
- * other. An empty query, or one past the door's 4096 bytes, is refused here and never asked; so
- * is a doc type that is blank or past the door's 256 bytes.
+ * Vets a search's input before anything is asked: an empty query, or one past the door's 4096
+ * bytes, asks nothing; nor does a decorated context, a blank or padded doc type, a stage or
+ * status temper does not declare, or a tag that is blank, padded, overlong or repeated.
  */
-export async function searchResources(
-  read: TemperRead,
-  input: SearchInput
-): Promise<{ query: string; contextId: string | null; docType: string | null; exact: SearchArm; wide: WideSearchArm }> {
+function searchQuestion(input: SearchInput): SearchQuestion {
   const query = typeof input.query === 'string' ? input.query.trim() : ''
   if (query === '') {
     throw new Error('an empty search asks nothing — type the words to search for')
@@ -590,13 +604,68 @@ export async function searchResources(
   }
   const docType = input.docType ?? null
   if (docType !== null) {
-    if (typeof docType !== 'string' || docType.trim() === '' || docType !== docType.trim()) {
-      throw new Error(`a doc type is one word with no space around it — "${String(docType)}" is not one, so nothing is asked`)
-    }
-    if (new TextEncoder().encode(docType).length > SEARCH_DOC_TYPE_MAX_BYTES) {
-      throw new Error(`a doc type carries at most ${SEARCH_DOC_TYPE_MAX_BYTES} bytes — nothing was asked`)
-    }
+    assertWord(docType, 'a doc type')
   }
+  const stage = input.stage ?? null
+  if (stage !== null && !(TASK_STAGES as readonly string[]).includes(stage)) {
+    throw new Error(`a task's stage is one of ${TASK_STAGES.join(', ')} — "${String(stage)}" is not, so nothing is asked`)
+  }
+  const status = input.status ?? null
+  if (status !== null && !(GOAL_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(`a goal's status is one of ${GOAL_STATUSES.join(', ')} — "${String(status)}" is not, so nothing is asked`)
+  }
+  const tags = input.tags ?? []
+  if (!Array.isArray(tags) || tags.length > SEARCH_TAGS_MAX) {
+    throw new Error(`a search narrows by at most ${SEARCH_TAGS_MAX} tags — nothing was asked`)
+  }
+  for (const tag of tags) {
+    assertWord(tag, 'a tag')
+  }
+  if (new Set(tags).size !== tags.length) {
+    throw new Error('a tag is named once — nothing was asked')
+  }
+  return { query, contextId, docType, stage, status, tags: [...tags] }
+}
+
+/** A filter value: one word with no space around it, within the doors' 256 bytes. */
+function assertWord(value: unknown, what: string): void {
+  if (typeof value !== 'string' || value.trim() === '' || value !== value.trim()) {
+    throw new Error(`${what} is one word with no space around it — "${String(value)}" is not one, so nothing is asked`)
+  }
+  if (new TextEncoder().encode(value).length > SEARCH_DOC_TYPE_MAX_BYTES) {
+    throw new Error(`${what} carries at most ${SEARCH_DOC_TYPE_MAX_BYTES} bytes — nothing was asked`)
+  }
+}
+
+/**
+ * Search, through whichever door the question needs. No stage, status or tag: `POST /api/search`,
+ * exactly as before — the door that says what an unscoped by-meaning arm drew from, which a plan
+ * cannot. Any of them: a query plan (`POST /api/query`), a filter stage then both arms within it.
+ * Neither ever sends `owner` or `changed_by` (R2).
+ */
+export async function searchResources(
+  read: TemperRead,
+  input: SearchInput
+): Promise<Exclude<SearchOutput, { state: 'failed' | 'not-connected' }>> {
+  const question = searchQuestion(input)
+  if (question.stage === null && question.status === null && question.tags.length === 0) {
+    return { state: 'ok', engine: 'search', ...(await searchDoor(read, question)) }
+  }
+  return planSearch(read, question)
+}
+
+/**
+ * `POST /api/search` with the person's words, over everything they can read or one context named
+ * by its bare UUID, narrowed to one doc type only when one was chosen — never `owner` (R2), no
+ * embedding: the server embeds the words itself, and says so in `wide.degraded` when it could not.
+ * The two arms come back apart and stay apart: each keeps its own rows in its own order, its reason
+ * and its `truncated`, so no view can merge them or rank one against the other.
+ */
+async function searchDoor(
+  read: TemperRead,
+  question: SearchQuestion
+): Promise<{ query: string; contextId: string | null; docType: string | null; exact: SearchArm; wide: WideSearchArm }> {
+  const { query, contextId, docType } = question
   const client = clientOf(read)
   const body = {
     query,
@@ -617,6 +686,140 @@ export async function searchResources(
     docType,
     exact: armOf(data.exact),
     wide: { ...armOf(data.wide), degraded: data.wide.degraded === true, draw: drawOf(data.wide.draw) }
+  }
+}
+
+type Composition = components['schemas']['Composition']
+type QueryResponse = components['schemas']['QueryResponse']
+type StageResult = components['schemas']['StageResult']
+
+/** The plan's stage names: the population, then the two arms ranked inside it. */
+const PLAN_FILTERED = 'filtered'
+const PLAN_EXACT = 'exact'
+const PLAN_MEANING = 'meaning'
+
+/**
+ * The query plan for a filtered question, in three stages:
+ *
+ * 1. `find-resources-with` selects the population — bound to the context by its bare UUID, or
+ *    unbounded for everything readable — by `resource_filter` (the doc type when set, the stage,
+ *    the status, the tags). It is a complete set, so its `produced_ids` is a true "among M".
+ * 2. `find-exact` and 3. `find-about-within` each rank the same words inside it, asked for one
+ *    past the page so "more" is what came back, never a full page read as more.
+ *
+ * Both arms are returned and neither is merged. No `intention.embedding`: the server embeds. No
+ * `owner`, ever (R2) — the plan door has the field, and this builder never sets it.
+ */
+function searchPlan(question: SearchQuestion): Composition {
+  const filter: components['schemas']['ResourceFilter'] = {
+    ...(question.docType === null ? {} : { doc_type: [question.docType] }),
+    ...(question.stage === null ? {} : { stage: question.stage }),
+    ...(question.status === null ? {} : { status: question.status }),
+    ...(question.tags.length === 0 ? {} : { tags: [...question.tags] })
+  }
+  const within = [{ from: 'upstream' as const, as: 'bound' as const, stage: PLAN_FILTERED }]
+  const terms = { limit: SEARCH_LIMIT + 1 }
+  return {
+    stages: [
+      {
+        name: PLAN_FILTERED,
+        act: 'find-resources-with',
+        ...(question.contextId === null
+          ? {}
+          : {
+              inputs: [
+                { from: 'caller' as const, as: 'bound' as const, ids: { kind: 'context' as const, ids: [question.contextId] } }
+              ]
+            }),
+        resource_filter: filter
+      },
+      { name: PLAN_EXACT, act: 'find-exact', intention: { query: question.query }, inputs: within, terms },
+      { name: PLAN_MEANING, act: 'find-about-within', intention: { query: question.query }, inputs: within, terms }
+    ],
+    outcome: { returns: [{ stage: PLAN_EXACT, with: [] }, { stage: PLAN_MEANING, with: [] }] }
+  } as Composition
+}
+
+/** The refusals a `PLAN_REFUSED` lists, in words — each its stage, its reason and its detail. */
+function refusalWords(error: unknown): string {
+  const details = (error as { error?: { details?: { refusals?: unknown } } } | null)?.error?.details
+  const refusals = Array.isArray(details?.refusals) ? (details.refusals as Record<string, unknown>[]) : []
+  if (refusals.length === 0) {
+    return JSON.stringify(error ?? null)
+  }
+  return refusals
+    .map((refusal) => `${String(refusal['stage'] ?? '?')}: ${String(refusal['reason'] ?? '?')} — ${String(refusal['detail'] ?? '')}`)
+    .join('; ')
+}
+
+/** A stage's rows, at most a page, and whether one past the page came back. */
+function planArmOf(result: StageResult): PlanSearchArm {
+  const hits = result.produced.produced === 'resources' ? result.produced.hits : []
+  return {
+    rows: hits.slice(0, SEARCH_LIMIT).map((hit) => summaryOf(hit.resource as unknown as ListRow)),
+    more: hits.length > SEARCH_LIMIT
+  }
+}
+
+/** A stage that answered, or answered nothing: anything else is the plan's fault, said as one. */
+function answeredStage(result: StageResult | undefined, name: string): StageResult {
+  if (result === undefined) {
+    throw new Error(`temper's plan answer carries no "${name}" stage — nothing here can be said of it`)
+  }
+  if (result.disposition !== 'answered' && result.disposition !== 'empty') {
+    const why = result.refusal ? `${result.refusal.reason} — ${result.refusal.detail}` : result.disposition
+    throw new Error(`temper's "${name}" stage did not answer (${why}) — a fault, not an empty answer`)
+  }
+  return result
+}
+
+/**
+ * A filtered question through `POST /api/query` (the plan above). A `PLAN_REFUSED` is a defect —
+ * the plugin built a plan the server will not run — and is thrown as a fault, never answered as
+ * empty. A meaning stage refused `embedding_unavailable` is the degraded arm, said as such, while
+ * the exact arm stands. "Among M" is the filter stage's `produced_ids`, from the trace, read only
+ * when that stage says it is complete.
+ */
+async function planSearch(read: TemperRead, question: SearchQuestion): Promise<PlanSearchAnswer> {
+  const client = clientOf(read)
+  const { data, error, response } = await client.POST('/api/query', { body: searchPlan(question) })
+  if (error || !data) {
+    if (response.status === 401) {
+      throw new GrantLostError()
+    }
+    const code = (error as { error?: { code?: unknown } } | null)?.error?.code
+    if (code === 'PLAN_REFUSED') {
+      throw new Error(`temper refused the search plan (PLAN_REFUSED) — a defect in the plugin's plan, not an empty answer: ${refusalWords(error)}`)
+    }
+    throw new Error(`temper refused the search plan: HTTP ${response.status} ${JSON.stringify(error ?? null)}`)
+  }
+  const answer = data as QueryResponse
+  const filtered = answer.trace.stages.find((stage) => stage.stage === PLAN_FILTERED)
+  if (filtered === undefined || (filtered.disposition !== 'answered' && filtered.disposition !== 'empty')) {
+    const why = filtered?.refusal ? `${filtered.refusal.reason} — ${filtered.refusal.detail}` : (filtered?.disposition ?? 'absent')
+    throw new Error(`temper's filter stage did not answer (${why}) — a fault, not an empty answer`)
+  }
+  if (filtered.extent.extent !== 'complete') {
+    throw new Error(`temper's filter stage answered a ${filtered.extent.extent} set — no honest "among" can be said of it`)
+  }
+  const exact = planArmOf(answeredStage(answer.returned[PLAN_EXACT], PLAN_EXACT))
+  const meaning = answer.returned[PLAN_MEANING]
+  const degraded = meaning?.disposition === 'refused' && meaning.refusal?.reason === 'embedding_unavailable'
+  const wide = degraded
+    ? { rows: [], more: false, degraded: true }
+    : { ...planArmOf(answeredStage(meaning, PLAN_MEANING)), degraded: false }
+  return {
+    state: 'ok',
+    engine: 'plan',
+    query: question.query,
+    contextId: question.contextId,
+    docType: question.docType,
+    stage: question.stage,
+    status: question.status,
+    tags: question.tags,
+    among: filtered.produced_ids,
+    exact,
+    wide
   }
 }
 
