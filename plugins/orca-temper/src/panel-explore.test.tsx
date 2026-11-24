@@ -3,7 +3,7 @@
 // pressed context — from Explore, or a place on Home — pushes the same context view, whose read
 // is scoped by the context's id and carries no `owner` (R2); the view holds its recently
 // updated items, each opening its record's detail, Show more growing the list, and the search
-// slot named for the Search build. It reads the panel alone: the request answers are fixture
+// slot holding Search's field scoped to the context. It reads the panel alone: the request answers are fixture
 // data, typed here rather than imported, so this one file stands on its own.
 import { assert, mockHost, mount, test, afterEach, type TestPanel } from 'orca/testing'
 import * as panel from './panel'
@@ -171,9 +171,10 @@ test('a pressed context shows its recently updated items, read by its id with no
   assert.equal(first?.props.icon, 'hammer')
   assert.ok(mounted.find({ text: /8 of 12 resources in \+alpha\/workflows/ }), 'the view says what it omits')
 
-  // The search slot stands named for the Search build, reading nothing.
+  // The search slot holds Search's field, scoped to the context, asking nothing until asked.
   assert.ok(mounted.find({ type: 'Heading', text: 'search in this context' }))
-  assert.ok(mounted.find({ text: /^Search within \+alpha\/workflows arrives with the Search build/ }))
+  assert.ok(mounted.find({ type: 'Input', label: 'search +alpha/workflows' }))
+  assert.ok(mounted.find({ text: /^Type words and press Enter to search \+alpha\/workflows/ }))
 
   // Show more grows the list in place, by the same step and the same read.
   await mounted.press({ text: 'Show more' })

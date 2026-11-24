@@ -8,7 +8,9 @@ Goals toggle between active and completed, and Tasks between backlog, in progres
 defaults are the statuses temper-ui's home reads, and the pick is held on this device.
 Explore lists every context the person can read — teams, each with its contexts, then the people
 whose contexts they can read — with no "yours" narrowing; a pressed context, from Explore or a
-place on Home, shows its recently updated items, with a search slot the Search sub-tab will fill.
+place on Home, shows its recently updated items under a search scoped to it. Search asks one
+question of everything the person can read, or of that context, and answers in two groups that
+never merge — exact and by meaning — each saying whether more matched.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.home.*`,
   `temper.capabilities`, `src/protocol.ts`), the worker's one credential strategy
@@ -41,6 +43,16 @@ place on Home, shows its recently updated items, with a search slot the Search s
   `<webUrl>/vault/r/<id>` with `shell.openExternal`, never derived from the API origin.
 - `src/explore.tsx` draws Explore and the context view. Its reads (`temper.explore.contexts`,
   `temper.context.recent`) never send `owner`; the context view's is scoped by the context's id.
+- `src/search.tsx` draws Search, on the Search sub-tab and in the context view's slot. Its read
+  (`temper.search`, `POST /api/search`) carries the words and the page size (10), and in a
+  context the context's id — never `owner`, and nothing else. The two arms stay apart: **exact**
+  and **by meaning** are each their own list in their own order, a resource both found stands in
+  both, and each says in temper-design's sentences whether more matched (`truncated`) — the
+  meaning arm also what it ranked from, an exhaustive read or a draw of the nearest passages. When
+  the meaning arm could not run (`wide.degraded`) it is a warning callout, never an empty list;
+  the exact group stands beside it. An empty query asks nothing. A pressed result opens its
+  record's detail. The last question asked in each scope is device-local view state, so a run
+  that reopens on it reads it again, and Refresh asks the Search tab's question again.
 - The look is Orca's own controls (`src/look.ts`): a row wears its doc-type icon beside the
   doc-type word and says its state in words ("task · in progress"); a region's count is a badge
   on its heading; the latest handoff is a card, its Resume sheet opening below the card; a

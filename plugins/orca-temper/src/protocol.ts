@@ -14,6 +14,10 @@
 //                           owner (a team, or a person) — no "yours" narrowing, no `owner`
 //   temper.context.recent — a pressed context's recently updated items, at the panel's
 //                           bound — scoped by the context's id, never by `owner`
+//   temper.search         — Search: `POST /api/search` over everything the person can read,
+//                           or one context by its id — never `owner`; its two arms answered
+//                           apart, each with its own reason and `truncated`, the wide arm's
+//                           `degraded` and draw beside it
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
 //                           panel lights actions with them and names those it may not run
 //   temper.resource.detail — one record's meta, read with no `sections` query (no body, no
@@ -194,6 +198,58 @@ export const CONTEXT_RECENT_BOUND = 8
  * from temper-design" swaps it for the package's export.
  */
 export const WAY_IN_MAX = 200
+
+/**
+ * `temper.search`: one question, asked of everything the person can read or of one context.
+ * The query is the person's words, trimmed; an empty one is never asked.
+ */
+export interface SearchInput {
+  query: string
+  /** The context's id, a bare UUID — set only by the context view's search. */
+  contextId?: string
+}
+
+/** Why an arm's answer is shaped as it is, in temper's word for it. */
+export type SearchReason = 'ok' | 'no_match' | 'out_of_scope'
+
+/** One arm of the answer: its rows in the arm's own order, and what the arm said of itself. */
+export interface SearchArm {
+  rows: ResourceSummary[]
+  reason: SearchReason
+  /** Whether more matched past this page, in the arm's own word; null when it did not say. */
+  truncated: boolean | null
+}
+
+/** What the wide arm ranked from: every resource the scope admits, or the nearest passages. */
+export type SearchDraw = { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number } | null
+
+/** The by-meaning arm: an exact arm's fields, plus whether it could run and what it drew from. */
+export interface WideSearchArm extends SearchArm {
+  /** The query could not be embedded: the arm could not run, and its rows say nothing. */
+  degraded: boolean
+  draw: SearchDraw
+}
+
+/**
+ * The answer, in two arms that are never merged: `exact` (the words matched) and `wide` (the
+ * meaning matched). No field ranks one against the other, and a resource in both stands in both.
+ */
+export type SearchOutput =
+  | {
+      state: 'ok'
+      query: string
+      /** The context the search was scoped to, by id; null for everything readable. */
+      contextId: string | null
+      exact: SearchArm
+      wide: WideSearchArm
+    }
+  | RegionFailure
+
+/** How many hits each arm answers: temper-ui's search page size. */
+export const SEARCH_LIMIT = 10
+
+/** The most a query may carry, in bytes: the search door refuses a longer one. */
+export const SEARCH_QUERY_MAX_BYTES = 4096
 
 /** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
 export type CapabilitiesOutput = {
@@ -525,6 +581,8 @@ declare module 'orca' {
     'temper.explore.contexts': { output: ExploreOutput }
     /** A pressed context's recently updated items. */
     'temper.context.recent': { input: ContextRecentInput; output: ContextRecentOutput }
+    /** Search: the two arms apart, over everything readable or one context. */
+    'temper.search': { input: SearchInput; output: SearchOutput }
     /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
     'temper.capabilities': { output: CapabilitiesOutput }
     /** One record's meta, its read asking no body, no sections — or a signed-out refusal. */

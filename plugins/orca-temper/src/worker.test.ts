@@ -132,7 +132,8 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
     ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
     ['temper.handoff.tasks', { sessionId: '00000000-0000-7000-8000-0000000000a1' }],
     ['temper.explore.contexts', undefined],
-    ['temper.context.recent', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }]
+    ['temper.context.recent', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
+    ['temper.search', { query: 'side rail' }]
   ] as const
   for (const [name, input] of reads) {
     const answer = await worker.request(name, input as never)
@@ -1328,4 +1329,180 @@ test('a failed connections read is the read\'s failure, never an empty list', as
   if (answer.state !== 'failed') return
   assert.match(answer.message, /session's connections/)
   await worker.deactivate()
+})
+
+/** The search door's answer: two arms, each with its own reason and word on more, and a scope. */
+function searchResponse(options: {
+  exact?: RowFixture[]
+  wide?: RowFixture[]
+  exactTruncated?: boolean
+  wideTruncated?: boolean
+  degraded?: boolean
+  draw?: unknown
+  scope?: string
+} = {}) {
+  const exact = options.exact ?? []
+  const wide = options.wide ?? []
+  return {
+    scope: { kind: options.scope ?? 'global' },
+    exact: {
+      hits: exact.map((resource, n) => ({ resource, fts_norm: 0.5 - n / 100 })),
+      reason: exact.length === 0 ? 'no_match' : 'ok',
+      truncated: options.exactTruncated ?? false
+    },
+    wide: {
+      hits: wide.map((resource, n) => ({ resource, vec_norm: 0.9 - n / 100 })),
+      reason: wide.length === 0 ? 'no_match' : 'ok',
+      degraded: options.degraded ?? false,
+      truncated: options.wideTruncated ?? false,
+      draw: options.draw === undefined ? { kind: 'nearest', chunks: 100 } : options.draw
+    }
+  }
+}
+
+test('search asks POST /api/search with the words and the page size, and never sends owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  const both = row('c1', 'The side rail design', 'research')
+  deps.fetch = answering(
+    searchResponse({
+      exact: [both, row('c2', 'A side rail task', 'task', { managed_meta: { 'temper-stage': 'in-progress' } })],
+      wide: [row('c3', 'A panel beside the editor', 'concept'), both],
+      exactTruncated: true,
+      wideTruncated: false
+    }),
+    requests
+  )
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: '  side rail  ' })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.query, 'side rail', 'the words are asked trimmed')
+  assert.equal(answer.contextId, null, 'unscoped: everything the person can read')
+  assert.deepEqual(
+    answer.exact.rows.map((item) => [item.title, item.docType, item.stage]),
+    [
+      ['The side rail design', 'research', null],
+      ['A side rail task', 'task', 'in-progress']
+    ],
+    'the exact arm keeps its own rows in its own order'
+  )
+  assert.deepEqual(
+    answer.wide.rows.map((item) => item.title),
+    ['A panel beside the editor', 'The side rail design'],
+    'the meaning arm keeps its own; a resource both found stands in both — the arms never merge'
+  )
+  assert.equal(answer.exact.truncated, true, "the exact arm's own word on more")
+  assert.equal(answer.wide.truncated, false, "the meaning arm's own word on more")
+  assert.equal(answer.wide.degraded, false)
+  assert.deepEqual(answer.wide.draw, { kind: 'nearest', chunks: 100 })
+  assert.equal(answer.exact.reason, 'ok')
+
+  assert.equal(requests.length, 1)
+  const request = requests[0]
+  assert.equal(request?.method, 'POST')
+  assert.equal(new URL(request?.url ?? '').pathname, '/api/search')
+  assert.equal(new URL(request?.url ?? '').search, '', 'nothing rides the query string')
+  const body = (await request?.json()) as Record<string, unknown>
+  assert.deepEqual(body, { query: 'side rail', limit: 10 }, 'the words and the page size, nothing else')
+  assert.equal('owner' in body, false, 'no "yours" narrowing (R2)')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test("a context's search is scoped by the context's bare id, and still sends no owner", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    searchResponse({ exact: [row('c1', 'Here', 'task')], draw: { kind: 'exhaustive' }, scope: 'context' }),
+    requests
+  )
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'here', contextId: CONTEXT_ID })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.contextId, CONTEXT_ID)
+  assert.deepEqual(answer.wide.draw, { kind: 'exhaustive' })
+  const body = (await requests[0]?.json()) as Record<string, unknown>
+  assert.deepEqual(body, { query: 'here', limit: 10, context_ref: CONTEXT_ID }, 'scoped by the bare id')
+  assert.equal('owner' in body, false, 'no "yours" narrowing (R2)')
+  await worker.deactivate()
+})
+
+test('a degraded meaning arm is said, and the exact arm stands unaffected beside it', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    searchResponse({ exact: [row('c1', 'Still found by its words', 'task')], degraded: true, draw: null }),
+    []
+  )
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'words' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.wide.degraded, true, 'the meaning arm says it could not run')
+  assert.equal(answer.wide.draw, null)
+  assert.deepEqual(answer.exact.rows.map((item) => item.title), ['Still found by its words'])
+  await worker.deactivate()
+})
+
+test('an arm that does not say whether more matched is carried as not said, never as none', async () => {
+  deps.run = async () => mintedToken()
+  const fixture = searchResponse({ exact: [row('c1', 'One', 'task')] }) as { exact: Record<string, unknown> }
+  delete fixture.exact['truncated']
+  deps.fetch = answering(fixture, [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'one' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.exact.truncated, null)
+  await worker.deactivate()
+})
+
+test('an empty query, an overlong one or a decorated context asks nothing', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(searchResponse(), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const empty = await worker.request('temper.search', { query: '   ' })
+  assert.equal(empty.state, 'failed')
+  if (empty.state !== 'failed') return
+  assert.match(empty.message, /an empty search asks nothing/)
+
+  const long = await worker.request('temper.search', { query: 'x'.repeat(4097) })
+  assert.equal(long.state, 'failed')
+  if (long.state !== 'failed') return
+  assert.match(long.message, /at most 4096 bytes/)
+
+  const decorated = await worker.request('temper.search', { query: 'x', contextId: '+alpha/workflows' })
+  assert.equal(decorated.state, 'failed')
+  if (decorated.state !== 'failed') return
+  assert.match(decorated.message, /a bare UUID names a context/)
+
+  assert.equal(requests.length, 0, 'none asked the API')
+  await worker.deactivate()
+})
+
+test('a refused search is the search\'s failure; a 401 is the signed-out refusal', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: { code: 'BAD_REQUEST', message: 'no' } }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const refused = await worker.request('temper.search', { query: 'x' })
+  assert.equal(refused.state, 'failed')
+  if (refused.state !== 'failed') return
+  assert.match(refused.message, /temper refused the search: HTTP 400/)
+  await worker.deactivate()
+
+  deps.fetch = async () => new Response('{}', { status: 401, headers: { 'content-type': 'application/json' } })
+  const again = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const lost = await again.request('temper.search', { query: 'x' })
+  assert.equal(lost.state, 'not-connected')
+  await again.deactivate()
 })

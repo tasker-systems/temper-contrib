@@ -33,7 +33,11 @@
 // `look-explore*` scenarios draw Explore (build item 8): teams with one opened on its contexts
 // and the people after them, and the region states — none readable, loading, failed and signed
 // out; the `look-context*` scenarios draw a pressed context's view — its recently updated items
-// under the search slot, and the same region states.
+// under the search slot, and the same region states. The `look-search*` scenarios draw Search
+// (build item 9), from a question held on an earlier run: unasked, the two groups apart with
+// each one's omission sentence, a meaning arm drawn from the nearest passages and an exhaustive
+// one, nothing matched, the meaning arm degraded, and the region states; `look-context-search`
+// draws a context view's search, scoped to it.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -330,6 +334,42 @@ const CONTEXT_ITEMS = [
   row(19, 'A concept: claim-style workflow contexts', 'concept')
 ]
 
+/** Search's answer for a held question: the exact arm and the meaning arm, kept apart. */
+const SEARCH_EXACT = [
+  row(20, 'Design: the Orca side rail', 'research'),
+  row(4, TASK_DETAIL_TITLE, 'task', 'in-progress'),
+  row(21, 'Session: Orca side-rail design pass', 'session')
+]
+const SEARCH_WIDE = [
+  row(22, 'A panel beside the editor that stays in view', 'concept'),
+  row(20, 'Design: the Orca side rail', 'research'),
+  row(17, 'The rail reads temper on a borrowed grant', 'goal', 'active'),
+  row(23, 'Research: how the desktop arranges its rooms', 'research')
+]
+
+function searchAnswer(
+  input: { query: string; contextId?: string },
+  extra: { exact?: Record<string, unknown>; wide?: Record<string, unknown> } = {}
+) {
+  return {
+    state: 'ok' as const,
+    query: input.query,
+    contextId: input.contextId ?? null,
+    exact: { rows: SEARCH_EXACT, reason: 'ok' as const, truncated: true, ...extra.exact },
+    wide: {
+      rows: SEARCH_WIDE,
+      reason: 'ok' as const,
+      truncated: true,
+      degraded: false,
+      draw: input.contextId === undefined ? { kind: 'nearest' as const, chunks: 100 } : { kind: 'exhaustive' as const },
+      ...extra.wide
+    }
+  }
+}
+
+/** Search's tab, holding the question an earlier run asked. */
+const SEARCH_HELD = { plugin: { 'detail-stack': [], 'active-tab': 'search', 'search-asked': { everything: 'side rail' } } }
+
 /** The context view as the panel holds it after a press from Explore. */
 const CONTEXT_ENTRY = { kind: 'context', id: CONTEXT_ID, ref: CONTEXT, name: 'workflows' }
 
@@ -374,6 +414,7 @@ const LOOK = {
       total: 38,
       bound: input.bound
     }),
+    'temper.search': (input: { query: string; contextId?: string }) => searchAnswer(input),
     'temper.home.recent': () => ({
       state: 'ok' as const,
       rows: [
@@ -915,6 +956,67 @@ export default defineCheck({
     ...LOOK,
     requests: { ...LOOK.requests, 'temper.context.recent': () => NOT_CONNECTED },
     persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } }
+  },
+  // Search, nothing asked yet: the field, and what it would search.
+  'look-search-unasked': { ...LOOK, persisted: { plugin: { 'detail-stack': [], 'active-tab': 'search' } } },
+  // The two groups apart, each truncated; the meaning arm ranked from the nearest passages.
+  'look-search': { ...LOOK, persisted: SEARCH_HELD },
+  // Every match each arm could find: the exact arm says all, the meaning arm read exhaustively.
+  'look-search-all': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: { query: string; contextId?: string }) =>
+        searchAnswer(input, {
+          exact: { rows: SEARCH_EXACT.slice(0, 1), truncated: false },
+          wide: { rows: SEARCH_WIDE.slice(0, 2), truncated: false, draw: { kind: 'exhaustive' } }
+        })
+    },
+    persisted: SEARCH_HELD
+  },
+  // Nothing matched these words; by meaning, scope-shaped emptiness says no phrasing will reach it.
+  'look-search-empty': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: { query: string; contextId?: string }) =>
+        searchAnswer(input, {
+          exact: { rows: [], reason: 'no_match', truncated: false },
+          wide: { rows: [], reason: 'out_of_scope', truncated: false }
+        })
+    },
+    persisted: SEARCH_HELD
+  },
+  // The meaning arm could not run: the warning callout, the exact group unaffected beside it.
+  'look-search-degraded': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.search': (input: { query: string; contextId?: string }) =>
+        searchAnswer(input, { wide: { rows: [], reason: 'no_match', truncated: false, degraded: true, draw: null } })
+    },
+    persisted: SEARCH_HELD
+  },
+  'look-search-loading': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.search': () => null as never },
+    persisted: SEARCH_HELD
+  },
+  'look-search-failed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.search': () => FAILED('search') },
+    persisted: SEARCH_HELD
+  },
+  // The grant lost after Home answered: Search says temper is not connected.
+  'look-search-signed-out': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.search': () => NOT_CONNECTED },
+    persisted: SEARCH_HELD
+  },
+  // A context view's search: the same two groups, scoped to the context.
+  'look-context-search': {
+    ...LOOK,
+    persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY], 'search-asked': { [`context:${CONTEXT_ID}`]: 'side rail' } } }
   },
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {
