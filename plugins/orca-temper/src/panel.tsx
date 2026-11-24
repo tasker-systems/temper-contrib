@@ -16,7 +16,10 @@
 // is device-local view state, and every status keeps the count, the omission sentence, Show
 // more and the region states. A goal's linked tasks grow by the same Show more. Home opens on
 // the "this workspace" strip (./serves-strip.tsx): the focused workspace, the task it serves
-// and its agents.
+// and its agents. Explore (./explore.tsx) lists teams, each with its contexts; a pressed
+// context — from Explore, or a place on Home — pushes the context view onto the same stack.
+// Search (./search.tsx) asks everything the person can read; the context view asks its own
+// context through the same region. Its two groups — exact and by meaning — never merge.
 //
 // Text is temper-design's job and is imported from it, never copied: the ways in, their bound
 // and order (WAYS_IN, WAY_IN_BOUND, WAY_IN_ORDER), the omission sentences and HANDOFF_LABEL.
@@ -31,10 +34,8 @@ import {
   Badge,
   Box,
   Button,
-  Callout,
   Card,
   Collapsible,
-  EmptyState,
   Heading,
   host,
   KeyValue,
@@ -74,9 +75,23 @@ import {
   ReopenOutcome,
   setupLauncher
 } from './launcher'
+import { cardLaunchLabel, HandoffTasks, loadHandoffTasks } from './handoff-card'
+import { loadWorkRecords, WorkRegion } from './work-region'
 import { OpenBodyAnswer, OpenBodyButton, OpenBodyConsent } from './editor-room/open-body-action'
 import { loadSkillReadiness, SkillReadinessRegion } from './skill-readiness/region'
 import { refreshServes, ServesRegion, setupServes } from './serves-strip'
+import {
+  type ContextEntry,
+  ContextView,
+  exploreWasAsked,
+  ExploreTab,
+  isContextEntry,
+  loadContextRecent,
+  loadExplore,
+  resumeContextSearch
+} from './explore'
+import { EVERYTHING, everythingWasAsked, resumeSearch, SearchRegion } from './search'
+import { CountHeading, FailedRegion, Loading, NotConnected, Unavailable } from './regions'
 import {
   ACT_ICON,
   docTypeIcon,
@@ -98,14 +113,8 @@ import type {
   ResumeOutput,
   WayInOutput
 } from './protocol'
-import { LINKED_TASKS_BOUND } from './protocol'
+import { LINKED_TASKS_BOUND, WAY_IN_MAX } from './protocol'
 import { WAY_TOGGLES, type WayToggle } from './way-status'
-
-// Interim, ruled by Pete 2026-11-20: temper-design does not yet export the Show-more cap
-// (WAY_IN_MAX lives only in temper-ui's first-view), so Home ships this local constant until
-// the follow-up task "orca-temper imports the Show-more cap from temper-design" swaps it for
-// the package's export.
-const WAY_IN_MAX = 200
 
 /** Where a way in starts from, and what recently updated and places cover, in their own words. */
 const RECENT_SCOPE = 'resources you can read'
@@ -128,8 +137,8 @@ const wayInStatus = atom('way-in-status', {} as Record<string, string>, { persis
 /** True while the first refresh is out. */
 const loading = atom('loading', false)
 
-/** Which sub-tab holds. */
-const activeTab = atom('active-tab', 'home')
+/** Which sub-tab holds — device-local view state, held across the panel's runs (Rulings Q2). */
+const activeTab = atom('active-tab', 'home', { persist: 'plugin' })
 
 /** One pushed detail view: the item's identity and the doc-type word it is. */
 interface DetailEntry {
@@ -139,10 +148,11 @@ interface DetailEntry {
   docType: string
 }
 
-/** The in-panel detail stack: pressing an item pushes, Back pops. Held here, in full, across
- * the panel's runs within this Orca session — device-local view state (Rulings Q2), so the
- * rail reopens where the person was, and a check run can stand a detail up from a seeded run. */
-const detailStack = atom('detail-stack', [] as DetailEntry[], { persist: 'plugin' })
+/** The in-panel detail stack: pressing an item or a context pushes, Back pops. Held here, in
+ * full, across the panel's runs within this Orca session — device-local view state (Rulings
+ * Q2), so the rail reopens where the person was, and a check run can stand a detail up from a
+ * seeded run. A record's entry carries no `kind`; a context's carries `kind: 'context'`. */
+const detailStack = atom('detail-stack', [] as (DetailEntry | ContextEntry)[], { persist: 'plugin' })
 
 /** The detail's answer per pushed id, null while its request is out. */
 const detailResults = atom('detail-results', {} as Record<string, RecordDetailOutput | null>)
@@ -158,6 +168,33 @@ function pushDetail(entry: DetailEntry): void {
   loadDetail(entry)
   loadLinkedTasks(entry)
   void loadItemLinks(entry.id)
+  if (entry.docType === 'task') {
+    void loadWorkRecords(entry.id)
+  }
+}
+
+/** A pressed context — from Explore, or a place on Home — pushes the context view. */
+function pushContext(entry: ContextEntry): void {
+  set(detailStack, [...read(detailStack), entry])
+  void loadContextRecent(entry)
+  resumeContextSearch(entry)
+}
+
+/** A row in the context view opens its record's detail, on top of the context. */
+function openSummary(item: ResourceSummary): void {
+  pushDetail({ id: item.id, ref: item.ref, title: item.title, docType: item.docType })
+}
+
+/** The sub-tab picked; Explore reads its contexts the first time it is shown, and Search owes
+ * the question it held on an earlier run. */
+function pickTab(value: string): void {
+  set(activeTab, value)
+  if (value === 'explore' && !exploreWasAsked() && !allRefused()) {
+    void loadExplore()
+  }
+  if (value === 'search' && !allRefused()) {
+    resumeSearch(EVERYTHING)
+  }
 }
 
 function popDetail(): void {
@@ -305,6 +342,10 @@ async function refresh(): Promise<void> {
     ])
     set(resumeResult, resume)
     set(handoffResult, handoff)
+    // The tasks the latest session advanced, with their stages from temper — read beside the card.
+    if (handoff.state === 'ok' && handoff.handoff !== null) {
+      void loadHandoffTasks(handoff.handoff.id)
+    }
     set(placesResult, places)
     set(recentResult, recent)
     const results: Record<string, WayInOutput | null> = { ...read(wayInResults) }
@@ -315,6 +356,16 @@ async function refresh(): Promise<void> {
       }
     })
     set(wayInResults, results)
+    // Explore reads only once it is shown — it is not Home's read — and never into a refusal
+    // that stands over every tab. A run that reopens on Explore owes its read here.
+    if ((exploreWasAsked() || read(activeTab) === 'explore') && !allRefused()) {
+      void loadExplore()
+    }
+    // Search asks only what the person asked: a Refresh asks the held question again, and a run
+    // that reopens on Search owes its read — never into the refusal over every tab.
+    if (!allRefused() && (read(activeTab) === 'search' || everythingWasAsked())) {
+      resumeSearch(EVERYTHING, { again: true })
+    }
     // The consents ride along so actions draw lit or named from the start.
     await refreshGrantedCapabilities()
   } finally {
@@ -369,10 +420,16 @@ export function setup(ctx: PanelContext): void {
   // A detail stack carried over from the panel's last run (device-local view state) owes its
   // reads: the entry arrived without the panel pressing it, so its loads must fire here.
   const carried = read(detailStack)[read(detailStack).length - 1]
-  if (carried !== undefined) {
+  if (carried !== undefined && isContextEntry(carried)) {
+    void loadContextRecent(carried)
+    resumeContextSearch(carried)
+  } else if (carried !== undefined) {
     void loadDetail(carried)
     void loadLinkedTasks(carried)
     void loadItemLinks(carried.id)
+    if (carried.docType === 'task') {
+      void loadWorkRecords(carried.id)
+    }
   }
   setupLauncher()
   setupServes(ctx)
@@ -420,11 +477,6 @@ function Refusal() {
   return <NotConnected message={refusalMessage()} />
 }
 
-/** Signed out: temper was never reached. `plug` says connection; the words say the rest. */
-function NotConnected(props: { message: string }) {
-  return <EmptyState title="temper is not connected" description={props.message} icon="plug" />
-}
-
 /** The loading region, for every tab: reads happen once, on the panel's behalf. */
 function LoadingRegion() {
   return (
@@ -434,43 +486,6 @@ function LoadingRegion() {
         <Text muted>◌ Loading …</Text>
       </Row>
       <Skeleton lines={3} label="Reading temper" />
-    </Stack>
-  )
-}
-
-/** A read still out: its house words, muted, with the skeleton of what will stand there. */
-function Loading(props: { words: string }) {
-  return (
-    <Stack gap="xs">
-      <Text muted size="xs">
-        {props.words}
-      </Text>
-      <Skeleton lines={3} label={props.words} />
-    </Stack>
-  )
-}
-
-/**
- * A read that failed: a warning callout whose title is the house words — what is unavailable,
- * and that nothing here was read — and whose body is the message; the callout draws its own
- * glyph, so the words carry no "⚠" (Rulings 21.3).
- */
-function Unavailable(props: { title: string; message: string }) {
-  return (
-    <Callout tone="warning" title={props.title}>
-      <Text muted size="xs">
-        {props.message}
-      </Text>
-    </Callout>
-  )
-}
-
-/** A region whose read failed: its label, then what failed; nothing stands in its place. */
-function FailedRegion(props: { label: string; message: string }) {
-  return (
-    <Stack gap="xs">
-      <Heading level={3}>{props.label}</Heading>
-      <Unavailable title={`${props.label} unavailable — nothing here was read.`} message={props.message} />
     </Stack>
   )
 }
@@ -526,15 +541,6 @@ export function Region(props: {
 
 // The Start / Resume launcher lives in ./launcher.tsx; the detail view and Home place its
 // buttons only, along the ruled table (Rulings: Where Start and Resume appear).
-
-/** A region's heading: its label, its count a badge beside it. */
-function CountHeading(props: { label: string; count: number }) {
-  return (
-    <Heading level={3}>
-      {props.label} <Badge>{String(props.count)}</Badge>
-    </Heading>
-  )
-}
 
 /** Resume: the one resource the person last changed — nothing stands in its place if none. */
 function ResumeRegion() {
@@ -609,6 +615,7 @@ function HandoffRegion() {
                     }
                   />
                 </List>
+                <HandoffTasks sessionId={handoff.id} onOpen={pushDetail} />
                 {handoff.next === null ? undefined : (
                   <Box background="muted" radius="sm" padding="sm" gap="xs">
                     <Text muted size="xs">{`excerpt · ${handoff.next.heading}`}</Text>
@@ -621,7 +628,7 @@ function HandoffRegion() {
                   </Box>
                 )}
                 <Row>
-                  <HandoffLaunchButton handoff={handoff} />
+                  <HandoffLaunchButton handoff={handoff} label={cardLaunchLabel(handoff.id)} />
                 </Row>
                 <Text muted size="xs">
                   {omissionSentence(answer.sessionCount, 1, sessionScope)}
@@ -739,7 +746,8 @@ function WayInRegion(props: { id: string }) {
   )
 }
 
-/** Places: the contexts the person changed something in, by their own latest change in each. */
+/** Places: the contexts the person changed something in, by their own latest change in each;
+ *  a pressed place opens the same context view Explore opens. */
 function PlacesRegion() {
   const answer = read(placesResult)
   return (
@@ -760,6 +768,9 @@ function PlacesRegion() {
                   title={place.name}
                   icon={PLACE_ICON}
                   description={place.ref}
+                  onPress={() =>
+                    pushContext({ kind: 'context', id: place.id, ref: place.ref, name: place.name })
+                  }
                 >
                   <RelativeTime at={Date.parse(place.lastChangedAt)} muted />
                 </ListItem>
@@ -836,18 +847,6 @@ function HomeTab() {
   )
 }
 
-/**
- * Explore and Search hold until their build items land; each says so instead of pretending a
- * region. Neither draws a lens switcher — the sub-tab frame replaced it.
- */
-function TabPlaceholder(props: { text: string }) {
-  return (
-    <Text muted size="sm">
-      {props.text}
-    </Text>
-  )
-}
-
 /** The frame: the sub-tabs, the refusal standing over them, and the read region. */
 function Frame() {
   return (
@@ -862,20 +861,16 @@ function Frame() {
       <Tabs
         label="temper view"
         value={read(activeTab)}
-        onChange={(value) => set(activeTab, value)}
+        onChange={pickTab}
       >
         <Tab value="home" label="Home">
           <HomeTab />
         </Tab>
         <Tab value="explore" label="Explore">
-          {allRefused() ? undefined : (
-            <TabPlaceholder text="Explore arrives with a later iteration — teams, then their contexts." />
-          )}
+          {allRefused() ? undefined : <ExploreTab onOpenContext={pushContext} />}
         </Tab>
         <Tab value="search" label="Search">
-          {allRefused() ? undefined : (
-            <TabPlaceholder text="Search arrives with a later iteration — exact and by-meaning matching." />
-          )}
+          {allRefused() ? undefined : <SearchRegion scope={EVERYTHING} onOpenItem={openSummary} />}
         </Tab>
       </Tabs>
     </Stack>
@@ -925,6 +920,7 @@ function DetailView(props: { entry: DetailEntry }) {
         <WayOutNote id={props.entry.id} />
       </Stack>
       {detail === null ? undefined : <LauncherSheet from="detail" itemId={props.entry.id} />}
+      {detail === null ? undefined : <WorkRegion detail={detail} />}
       <RecordDetailRegion answer={answer} />
       {props.entry.docType === 'goal' && (answer === null || answer.state !== 'not-connected') ? (
         <LinkedTasksRegion goal={props.entry} />
@@ -1034,5 +1030,12 @@ function WayOutNote(props: { id: string }) {
 export default function Panel() {
   const stack = read(detailStack)
   const top = stack.length === 0 ? null : stack[stack.length - 1]
-  return top === null ? <Frame /> : <DetailView entry={top} />
+  if (top === null || top === undefined) {
+    return <Frame />
+  }
+  return isContextEntry(top) ? (
+    <ContextView entry={top} onBack={popDetail} onOpenItem={openSummary} />
+  ) : (
+    <DetailView entry={top} />
+  )
 }

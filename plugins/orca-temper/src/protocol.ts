@@ -10,6 +10,14 @@
 //                           the panel's Show more bound, goals and tasks by a picked status
 //   temper.home.places    — the contexts the person changed something in
 //   temper.home.recent    — recently updated across everything the person can read
+//   temper.explore.contexts — Explore: every context the person can read, grouped by its
+//                           owner (a team, or a person) — no "yours" narrowing, no `owner`
+//   temper.context.recent — a pressed context's recently updated items, at the panel's
+//                           bound — scoped by the context's id, never by `owner`
+//   temper.search         — Search: `POST /api/search` over everything the person can read,
+//                           or one context by its id — never `owner`; its two arms answered
+//                           apart, each with its own reason and `truncated`, the wide arm's
+//                           `degraded` and draw beside it
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
 //                           panel lights actions with them and names those it may not run
 //   temper.resource.detail — one record's meta, read with no `sections` query (no body, no
@@ -31,6 +39,9 @@
 //   temper.serves         — what the focused workspace serves: the stored link joining it
 //                           to an item, and that item's record read on the grant (Home's
 //                           "this workspace" strip)
+//   temper.agent.focus    — takes the person to an agent: `terminal.focus` on its terminal,
+//                           or `workspace.open` on its workspace when no terminal is known
+//                           (a chat). It moves Orca's view only: never task state, no temper write
 //
 // Every answer is one region's state: `ok` carries the read; `not-connected` is the signed-out
 // refusal (never partial or cached data); `failed` names what failed. A `not-connected` region
@@ -123,6 +134,8 @@ export type WayInOutput =
 
 /** One place the person works in: the context, and when they last changed something there. */
 export interface PlaceInUse {
+  /** The context's id: a pressed place opens the same context view Explore opens. */
+  id: string
   ref: string
   name: string
   lastChangedAt: string
@@ -135,6 +148,108 @@ export type PlacesOutput =
 export type RecentOutput =
   | { state: 'ok'; rows: ResourceSummary[]; total: number }
   | RegionFailure
+
+/** One context as Explore lists it: its id, its decorated ref and name, what it homes. */
+export interface ExploreContext {
+  id: string
+  /** `{owner_ref}/{slug}`, the context's decorated ref. */
+  ref: string
+  name: string
+  /** How many resources the context homes, as the contexts read counts them. */
+  resourceCount: number
+}
+
+/** One owner's contexts: a team (`+slug`) or a person (`@handle`), its contexts by name. */
+export interface ExploreOwner {
+  /** The owner's sigil'd addressable, as the contexts read names it. */
+  ownerRef: string
+  /** Which kind of owner it is, in words: a team, or a person. */
+  kind: 'team' | 'person'
+  contexts: ExploreContext[]
+}
+
+/**
+ * `temper.explore.contexts`: every context the person can read, grouped by owner — teams by
+ * name, then the people whose contexts they can read. Nothing narrows it to "yours" (R2).
+ */
+export type ExploreOutput =
+  | { state: 'ok'; owners: ExploreOwner[]; contextCount: number }
+  | RegionFailure
+
+/** `temper.context.recent`: one context's recently updated items, at the panel's bound. */
+export interface ContextRecentInput {
+  /** The context's id, a bare UUID. */
+  id: string
+  /** The explicit limit the read asks for; the raw list endpoint is uncapped without one. */
+  bound: number
+}
+
+export type ContextRecentOutput =
+  | { state: 'ok'; rows: ResourceSummary[]; total: number; bound: number }
+  | RegionFailure
+
+/** How many of a context's items its view shows before Show more — the ways-in bound. */
+export const CONTEXT_RECENT_BOUND = 8
+
+/**
+ * How far Show more grows a list in place. Interim, ruled by Pete 2026-11-20: temper-design
+ * does not yet export the Show-more cap (WAY_IN_MAX lives only in temper-ui's first-view), so the
+ * rail ships this local constant until the follow-up task "orca-temper imports the Show-more cap
+ * from temper-design" swaps it for the package's export.
+ */
+export const WAY_IN_MAX = 200
+
+/**
+ * `temper.search`: one question, asked of everything the person can read or of one context.
+ * The query is the person's words, trimmed; an empty one is never asked.
+ */
+export interface SearchInput {
+  query: string
+  /** The context's id, a bare UUID — set only by the context view's search. */
+  contextId?: string
+}
+
+/** Why an arm's answer is shaped as it is, in temper's word for it. */
+export type SearchReason = 'ok' | 'no_match' | 'out_of_scope'
+
+/** One arm of the answer: its rows in the arm's own order, and what the arm said of itself. */
+export interface SearchArm {
+  rows: ResourceSummary[]
+  reason: SearchReason
+  /** Whether more matched past this page, in the arm's own word; null when it did not say. */
+  truncated: boolean | null
+}
+
+/** What the wide arm ranked from: every resource the scope admits, or the nearest passages. */
+export type SearchDraw = { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number } | null
+
+/** The by-meaning arm: an exact arm's fields, plus whether it could run and what it drew from. */
+export interface WideSearchArm extends SearchArm {
+  /** The query could not be embedded: the arm could not run, and its rows say nothing. */
+  degraded: boolean
+  draw: SearchDraw
+}
+
+/**
+ * The answer, in two arms that are never merged: `exact` (the words matched) and `wide` (the
+ * meaning matched). No field ranks one against the other, and a resource in both stands in both.
+ */
+export type SearchOutput =
+  | {
+      state: 'ok'
+      query: string
+      /** The context the search was scoped to, by id; null for everything readable. */
+      contextId: string | null
+      exact: SearchArm
+      wide: WideSearchArm
+    }
+  | RegionFailure
+
+/** How many hits each arm answers: temper-ui's search page size. */
+export const SEARCH_LIMIT = 10
+
+/** The most a query may carry, in bytes: the search door refuses a longer one. */
+export const SEARCH_QUERY_MAX_BYTES = 4096
 
 /** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
 export type CapabilitiesOutput = {
@@ -224,6 +339,12 @@ export interface LaunchItem {
   id: string
   ref: string
   title: string
+  /**
+   * The home-context address, as the press composed it. A press whose item names none — a
+   * carried sheet, a compose from before the context was known — still launches: the worker
+   * reads the record's `context_ref` itself to hold it in the pending link the launch hook
+   * answers from, and a failed read blocks nothing (the launch runs with none).
+   */
   contextRef: string | null
   /**
    * The record's doc-type word, when the press knows it (a detail's launch, or the handoff
@@ -307,6 +428,13 @@ export interface LaunchLink {
    */
   projectId?: string
   path?: string
+  /**
+   * When Orca last reported the run in that terminal done (`agent.status.changed`, or an
+   * `agents.list` row), and Orca's word for how it ended (`unreported` when it named none).
+   * Cleared when the terminal's agent works again. The run's state — never the task's.
+   */
+  finishedAt?: string
+  outcome?: string
 }
 
 /** The plugin-storage key under which the launch links sit, as a JSON array. */
@@ -365,6 +493,19 @@ export type TaskHandoffOutput =
   | RegionFailure
 
 /**
+ * `temper.handoff.tasks`: the tasks a session advanced (its outgoing `advances` edges), each
+ * with its stage as temper holds it at the read. Home's handoff card asks it to name them, and
+ * the card's press asks it again, so the prompt branches on the stage read then — never on what
+ * the card showed earlier, nor on anything the plugin stores (ruling 26).
+ */
+export interface HandoffTasksInput {
+  /** The session's id, a bare UUID. */
+  sessionId: string
+}
+
+export type HandoffTasksOutput = { state: 'ok'; tasks: ResourceSummary[] } | RegionFailure
+
+/**
  * What the launcher's press needs (Rulings Q9's "Start, new workspace" row): every launch goes
  * into a new workspace through `workspace.create`.
  */
@@ -406,6 +547,24 @@ export const SERVES_NEEDS = ['workspace:read', 'storage:own'] as const
 /** What the strip's agents line needs: `agents.list` and the status events. */
 export const SERVES_AGENTS_NEEDS = ['agent:read'] as const
 
+/**
+ * `temper.agent.focus`: where an agent is. A terminal is focused when one is known; otherwise
+ * its workspace is opened — Orca has no plugin call that focuses a chat tab (stablyai/orca#42069).
+ */
+export interface FocusAgentInput {
+  workspaceId: string
+  terminalId: string | null
+}
+
+export type FocusAgentOutput =
+  /** Orca answered. `focused` is false when Orca did not move to it (a newer focus won). */
+  | { state: 'shown'; via: 'terminal' | 'workspace'; focused: boolean }
+  | { state: 'failed'; message: string }
+  | { state: 'refused'; code: string | null; message: string }
+
+/** What a press that takes the person to an agent needs: `terminal.focus` and `workspace.open`. */
+export const FOCUS_AGENT_NEEDS = ['workspace:write'] as const
+
 declare module 'orca' {
   interface PluginRequests {
     /** The one resource the person last changed, or a signed-out refusal. */
@@ -418,6 +577,12 @@ declare module 'orca' {
     'temper.home.places': { output: PlacesOutput }
     /** Recently updated across everything the person can read. */
     'temper.home.recent': { output: RecentOutput }
+    /** Explore: every readable context, by owner. */
+    'temper.explore.contexts': { output: ExploreOutput }
+    /** A pressed context's recently updated items. */
+    'temper.context.recent': { input: ContextRecentInput; output: ContextRecentOutput }
+    /** Search: the two arms apart, over everything readable or one context. */
+    'temper.search': { input: SearchInput; output: SearchOutput }
     /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
     'temper.capabilities': { output: CapabilitiesOutput }
     /** One record's meta, its read asking no body, no sections — or a signed-out refusal. */
@@ -436,7 +601,11 @@ declare module 'orca' {
     'temper.reopen.go': { input: ReopenInput; output: ReopenOutput }
     /** The task's own newest linked session and its Next section — never the person's latest. */
     'temper.launch.task-handoff': { input: TaskHandoffInput; output: TaskHandoffOutput }
+    /** The tasks a session advanced, each with its stage as temper holds it now. */
+    'temper.handoff.tasks': { input: HandoffTasksInput; output: HandoffTasksOutput }
     /** What the focused workspace serves: its stored link, and the item's record read. */
     'temper.serves': { input: ServesInput; output: ServesOutput }
+    /** Takes the person to an agent: its terminal focused, or its workspace opened. */
+    'temper.agent.focus': { input: FocusAgentInput; output: FocusAgentOutput }
   }
 }

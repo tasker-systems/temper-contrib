@@ -24,8 +24,12 @@
 // enumeration). A task's prompt
 // quotes the task's own newest linked session's Next section — the session→task `advances`
 // edge — and says so when none exists; the person's newest session is never quoted in a
-// task's place (Review 1). The Home card's Resume keeps the person's newest session: it is
-// the card's own subject.
+// task's place (Review 1). The Home card's press keeps the person's newest session: it is
+// the card's own subject. Its prompt branches on the tasks that session advanced, their stages
+// read from temper at the press (decision ruling 28): Resume task for one in-progress task,
+// Continue from handoff otherwise — a done or cancelled task's Next read as follow-ups,
+// several tasks named for the person to choose, none the session start, a failed read the
+// session start with a line to check the task's state first.
 import {
   atom,
   Button,
@@ -50,13 +54,18 @@ import {
 } from './capabilities'
 import {
   goalWorkPrompt,
+  handoffBranch,
+  handoffLabel,
+  handoffPrompt,
   handoffResumePrompt,
   taskResumePrompt,
   taskStartPrompt,
+  type HandoffBranch,
   type PromptItem,
   type TaskHandoffInfo
 } from './prompts'
 import type {
+  HandoffTasksOutput,
   LaunchAgentsOutput,
   LaunchInput,
   LaunchItem,
@@ -70,6 +79,8 @@ import type {
 } from './protocol'
 import { LAUNCH_PRESS_NEEDS, REOPEN_NEEDS } from './protocol'
 import { ensureSkillReadiness, SheetSkillNote } from './skill-readiness/region'
+import { FocusOutcome, GoToAgent } from './focus-agent'
+import { ClaimLine, loadTaskClaim } from './claim-line'
 
 /** The act a sheet launches: the ruled buttons (Resume task stands on a task and on the
  *  handoff card, each with its own prompt). */
@@ -123,12 +134,52 @@ const lastProjectByContext = atom<Record<string, string>>(
 const launchSending = atom('launch-sending', false)
 const launchOutcome = atom<LaunchOutput | null>('launch-outcome', null, { persist: 'plugin' })
 
-/** The words on each button and sheet heading, per act. */
+/** The words on each button and sheet heading, per act. The handoff card's follow its branch
+ *  (`labelFor`); this is its word before any stage is read. */
 const KIND_LABEL: Record<LaunchKind, string> = {
   'task-start': 'Start agent',
   'task-resume': 'Resume task',
   'goal-work': 'Work this goal',
-  'handoff-resume': 'Resume task'
+  'handoff-resume': 'Continue from handoff'
+}
+
+/**
+ * The handoff card's press reads the tasks its session advanced again, from temper, at the
+ * press — the stages the card showed earlier may have moved — and the prompt branches on this
+ * read alone (decision ruling 28). null while the read is out.
+ */
+const pressTasks = atom<HandoffTasksOutput | null>('launch-handoff-tasks', null)
+
+/** The branch the handoff card's sheet stands on; null for another act, or while the read is out.
+ *  A read that failed or was refused is the `unread` branch: the session start, with the check. */
+function pressBranch(compose: LaunchCompose): HandoffBranch | null {
+  if (compose.kind !== 'handoff-resume') {
+    return null
+  }
+  const answer = read(pressTasks)
+  if (answer === null) {
+    return null
+  }
+  return handoffBranch(
+    answer.state === 'ok' ? { state: 'ok', tasks: answer.tasks } : { state: 'failed', message: answer.message }
+  )
+}
+
+/** The sheet's heading and confirm words: the act's, or the handoff branch's. */
+function labelFor(compose: LaunchCompose): string {
+  const branch = pressBranch(compose)
+  return branch === null ? KIND_LABEL[compose.kind] : handoffLabel(branch)
+}
+
+/** The item the launch is for: the in-progress task the handoff resumes, else the pressed item —
+ *  so the new workspace's link and serves marker name the task the agent resumes. */
+function launchItemFor(compose: LaunchCompose): LaunchItem {
+  const branch = pressBranch(compose)
+  if (branch === null || branch.kind !== 'resume-task') {
+    return compose.item
+  }
+  const task = branch.task
+  return { id: task.id, ref: task.ref, title: task.title, contextRef: task.contextRef, docType: 'task' }
 }
 
 /**
@@ -176,8 +227,12 @@ function promptFor(compose: LaunchCompose): string {
       return taskResumePrompt(item, handoff)
     case 'goal-work':
       return goalWorkPrompt(item)
-    case 'handoff-resume':
-      return handoffResumePrompt(item, handoff?.next ?? null)
+    case 'handoff-resume': {
+      const branch = pressBranch(compose)
+      return branch === null
+        ? handoffResumePrompt(item, handoff?.next ?? null)
+        : handoffPrompt(item, handoff?.next ?? null, branch)
+    }
   }
 }
 
@@ -219,8 +274,13 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
     kind === 'handoff-resume' ? { hasSession: true, session: null, next: compose.handoffNext } : null
   )
   set(launchPick, { projectId: null, agent: null })
+  set(pressTasks, null)
   // The picked agent's skill line reads Home's readiness answer, asked here if Home never did.
   ensureSkillReadiness()
+  // temper's claim on the task, read before the confirm (ruling 26): named, never a gate.
+  if (kind === 'task-start' || kind === 'task-resume') {
+    void loadTaskClaim(item.id)
+  }
 
   const [projects, agents, , taskRead] = await Promise.all([
     plugin.request('temper.launch.projects').catch(
@@ -240,7 +300,8 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
     // `advances` edge — never the person's latest (Review 1).
     kind === 'task-start' || kind === 'task-resume'
       ? plugin.request('temper.launch.task-handoff', { id: item.id }).catch(() => null)
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    kind === 'handoff-resume' ? loadPressTasks(compose) : Promise.resolve()
   ])
 
   set(launchChoices, { projects, agents })
@@ -273,6 +334,25 @@ async function loadLaunch(compose: LaunchCompose): Promise<void> {
   set(launchPick, { projectId, agent })
 }
 
+/** The handoff card's press reads the session's advanced tasks from temper; a resumed task's own
+ *  linked workspaces are read after, so the sheet names them before the confirm. */
+async function loadPressTasks(compose: LaunchCompose): Promise<void> {
+  let answer: HandoffTasksOutput
+  try {
+    answer = await plugin.request('temper.handoff.tasks', { sessionId: compose.item.id })
+  } catch (error) {
+    answer = {
+      state: 'failed',
+      message: `the stage read never answered: ${error instanceof Error ? error.message : String(error)}`
+    }
+  }
+  set(pressTasks, answer)
+  const item = launchItemFor(compose)
+  if (item.id !== compose.item.id) {
+    await loadItemLinks(item.id)
+  }
+}
+
 /** Closes the sheet without sending. */
 function cancelLaunch(): void {
   set(launchCompose, null)
@@ -291,6 +371,9 @@ async function confirmLaunch(): Promise<void> {
   if (compose === null || pick === null || choices === null || pick.agent === null || pick.projectId === null) {
     return
   }
+  if (compose.kind === 'handoff-resume' && read(pressTasks) === null) {
+    return
+  }
   set(lastProjectByContext, {
     ...read(lastProjectByContext),
     [compose.item.contextRef ?? '']: pick.projectId
@@ -301,14 +384,14 @@ async function confirmLaunch(): Promise<void> {
     projectId: pick.projectId,
     agent: pick.agent,
     prompt: promptFor(compose),
-    item: compose.item
+    item: launchItemFor(compose)
   }
   set(launchSending, true)
   try {
     const outcome = await plugin.request('temper.launch.go', input)
     set(launchOutcome, outcome)
     if (outcome.state === 'launched') {
-      void loadItemLinks(compose.item.id)
+      void loadItemLinks(input.item.id)
     }
   } catch (error) {
     set(launchOutcome, {
@@ -330,13 +413,15 @@ function LaunchButton(props: {
   item: LaunchItem
   handoffNext?: NextSummary | null
   named?: boolean
+  /** The press's words when they are not the act's own (the handoff card's branch). */
+  label?: string
 }) {
   const open = read(launchCompose)?.item.id === props.item.id
   return (
     <GatedAction
       needs={LAUNCH_PRESS_NEEDS}
       granted={read(grantedCapabilities)}
-      label={KIND_LABEL[props.kind]}
+      label={props.label ?? KIND_LABEL[props.kind]}
       variant={open ? 'outline' : 'solid'}
       tone={open ? undefined : 'accent'}
       icon={props.kind === 'goal-work' ? 'rocket' : 'play'}
@@ -387,8 +472,9 @@ export function DetailLaunchConsent(props: { detail: RecordDetail }): OrcaNode {
   )
 }
 
-/** The latest-handoff card's Resume task (Home) — a session start from that session. Its sheet is
- *  `LauncherSheet from="home"`, placed by Home after the card's omission sentence. */
+/** The latest-handoff card's press (Home), labelled by the branch the card's own read shows —
+ *  Resume task or Continue from handoff (`label`); the sheet reads the stages again at the press.
+ *  Its sheet is `LauncherSheet from="home"`, placed by Home after the card's omission sentence. */
 export function HandoffLaunchButton(props: {
   handoff: {
     id: string
@@ -397,6 +483,7 @@ export function HandoffLaunchButton(props: {
     contextRef: string | null
     next: NextSummary | null
   }
+  label: string
 }): OrcaNode {
   const item: LaunchItem = {
     id: props.handoff.id,
@@ -411,6 +498,7 @@ export function HandoffLaunchButton(props: {
       from="home"
       item={item}
       handoffNext={props.handoff.next}
+      label={props.label}
     />
   )
 }
@@ -457,13 +545,15 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
   if (compose === null || compose.from !== props.from || compose.item.id !== props.itemId) {
     return undefined
   }
-  const title = KIND_LABEL[compose.kind]
+  const title = labelFor(compose)
   const outcome = read(launchOutcome)
   if (outcome !== null && outcome.state === 'launched') {
     return (
       <Card title={title}>
         <Stack gap="sm">
           <Callout tone="success" title="The agent was launched." />
+          <GoToAgent place={{ workspaceId: outcome.workspaceId, terminalId: outcome.terminalId }} />
+          <FocusOutcome place={{ workspaceId: outcome.workspaceId, terminalId: outcome.terminalId }} />
           {outcome.linkError === null ? undefined : (
             <Callout tone="warning" title="The workspace's link to the item was not stored">
               <Text muted size="xs">
@@ -493,7 +583,9 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
   const granted = read(grantedCapabilities)
   const current: LaunchPick = pick ?? { projectId: null, agent: null }
   const missing = missingConsents(LAUNCH_PRESS_NEEDS, granted)
-  const linked = linksOf(compose.item.id)
+  const linked = linksOf(launchItemFor(compose).id)
+  // The handoff card's stage read, at the press: out, failed, or answered (its branch).
+  const staging = compose.kind === 'handoff-resume' ? read(pressTasks) : undefined
 
   const projects = choices?.projects ?? null
   const agents = choices?.agents ?? null
@@ -512,7 +604,9 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
   // Not-ready is said plainly beside a disabled confirm; missing consent is named by the
   // gated action in Orca's own words — never attempted.
   const unready: string | null =
-    choices === null
+    staging === null
+      ? 'Reading the stages of the tasks this session advanced…'
+      : choices === null
       ? 'Reading what Orca can launch…'
       : current.agent === null
         ? 'Pick an agent.'
@@ -544,7 +638,21 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
       description="The first prompt — sent when you confirm, written to nothing but the agent."
     >
       <Stack gap="sm">
-        <CodeView code={promptFor(compose)} wrap maxHeight="sm" label="first prompt" />
+        {staging === null ? (
+          <Text muted size="xs">
+            ◌ Reading the tasks this session advanced, and their stages, from temper…
+          </Text>
+        ) : (
+          <CodeView code={promptFor(compose)} wrap maxHeight="sm" label="first prompt" />
+        )}
+        {staging !== null && staging !== undefined && staging.state !== 'ok' ? (
+          <Stack gap="xs">
+            <SheetReadFailure label="The stages of the tasks it advanced" message={staging.message} />
+            <Text muted size="xs">
+              The prompt starts from the session, and tells the agent to check the task's state first.
+            </Text>
+          </Stack>
+        ) : undefined}
         {wantsHandoff(compose.kind) && compose.kind !== 'handoff-resume' && choices === null ? (
           <Text muted size="xs">
             ◌ the task's own latest handoff rides along once it answers; with none linked, the
@@ -555,6 +663,7 @@ export function LauncherSheet(props: { from: 'detail' | 'home'; itemId: string }
           The agent works in a new workspace: a new branch and worktree in the picked project.
         </Text>
         {linked.length === 0 ? undefined : <LinkedWorkspaceNote links={linked} />}
+        {compose.kind === 'task-start' || compose.kind === 'task-resume' ? <ClaimLine itemId={compose.item.id} /> : undefined}
         {projects === null ? (
           <Text muted size="xs">◌ Reading Orca's projects…</Text>
         ) : projects.state === 'failed' ? (
@@ -712,15 +821,20 @@ export function ReopenOutcome(props: { itemId: string }): OrcaNode {
     )
   }
   if (output.state === 'reopened') {
+    const place = { workspaceId: answer.workspaceId, terminalId: output.terminalId }
     return (
-      <Callout
-        tone="success"
-        title={
-          output.started
-            ? `The agent session was reopened in ${answer.name}.`
-            : `The agent session is already running in ${answer.name}.`
-        }
-      />
+      <Stack gap="xs">
+        <Callout
+          tone="success"
+          title={
+            output.started
+              ? `The agent session was reopened in ${answer.name}.`
+              : `The agent session is already running in ${answer.name}.`
+          }
+        />
+        <GoToAgent place={place} />
+        <FocusOutcome place={place} />
+      </Stack>
     )
   }
   return output.state === 'refused' ? (

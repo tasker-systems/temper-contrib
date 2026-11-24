@@ -1,6 +1,7 @@
 // The plugin's reads, asked of the temper API through temper-ts on the credentials the caller
-// vetted — the person-scoped reads temper-ui's home makes (design record, Rulings Q1/R2), never
-// context-scoped ones. An explicit limit rides every list call — the raw list endpoint is
+// vetted — Home's are the person-scoped reads temper-ui's home makes (design record, Rulings
+// Q1/R2), never context-scoped ones; Explore's are the reverse (R2/R3): every context the
+// person can read, and a pressed context's recently updated items, neither ever sending `owner`. An explicit limit rides every list call — the raw list endpoint is
 // uncapped without one — and the ways-in filters come from temper-design's WAYS_IN, so the rail
 // asks for each way under the same name, scope and filter as both other surfaces. A list
 // orients; only the latest handoff needs a body, and it asks for it explicitly, the Next section
@@ -10,12 +11,21 @@ import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import { WAY_TOGGLES, wayStatus } from './way-status'
+import { SEARCH_LIMIT, SEARCH_QUERY_MAX_BYTES, WAY_IN_MAX } from './protocol'
 import type {
+  ContextRecentInput,
+  ExploreContext,
+  ExploreOwner,
   NextSummary,
   PlaceInUse,
   PropertyRow,
   RecordDetail,
-  ResourceSummary
+  ResourceSummary,
+  SearchArm,
+  SearchDraw,
+  SearchInput,
+  SearchReason,
+  WideSearchArm
 } from './protocol'
 
 /** What every read shares: the origin temper auth status reports, the vetted grant, the fetch. */
@@ -117,6 +127,8 @@ function managedWord(meta: Record<string, unknown> | null | undefined, key: stri
 
 /** The query every Home list asks, each part named by its caller. */
 interface ListQuery {
+  /** The context scope, as the context's bare UUID — Explore's context view only. */
+  context_ref?: string
   doc_type_name?: string
   owner?: string
   changed_by?: string
@@ -137,6 +149,7 @@ async function listResources(read: TemperRead, what: string, query: ListQuery): 
   const { data, error, response } = await client.GET('/api/resources', {
     params: {
       query: {
+        context_ref: query.context_ref,
         doc_type_name: query.doc_type_name,
         owner: query.owner,
         changed_by: query.changed_by,
@@ -299,6 +312,54 @@ export async function taskHandoff(
   return { handoff: { id, ref, title, next: nextSection(body.data.content ?? '') } }
 }
 
+/** How many tasks one session's advances read names at most — far past any real session. */
+export const SESSION_TASKS_LIMIT = 50
+
+/**
+ * The tasks a session advanced: its outgoing `advances` edges (the session→task edge
+ * `temper resource create --task` asserts), each task read on the list door for its title and
+ * its stage as temper holds it now. Never from the plugin's links or `orca-work` records
+ * (ruling 26): the stage is temper's. A session that advanced no task answers an empty list;
+ * an edge to anything but a task (a goal) is not a task, and is left out by the doc-type scope.
+ */
+export async function sessionTasks(
+  read: TemperRead,
+  sessionId: string
+): Promise<{ tasks: ResourceSummary[] }> {
+  assertBareId(sessionId, 'a session')
+  const client = clientOf(read)
+  const connections = await client.GET('/api/resources/{id}/connections', {
+    params: { path: { id: sessionId }, query: { limit: 200 } }
+  })
+  if (connections.error || !connections.data) {
+    if (connections.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(
+      `temper refused the session's connections read: ${JSON.stringify(connections.error)}`
+    )
+  }
+  const advanced = connections.data.rows
+    .filter(
+      (row) =>
+        row.direction === 'outgoing' &&
+        row.label === 'advances' &&
+        row.peer_table === 'kb_resources'
+    )
+    .map((row) => row.peer_id)
+  if (advanced.length === 0) {
+    return { tasks: [] }
+  }
+  const page = await listResources(read, 'advanced tasks', {
+    doc_type_name: 'task',
+    ids: [...new Set(advanced)].join(','),
+    sort: 'updated',
+    order: 'desc',
+    limit: SESSION_TASKS_LIMIT
+  })
+  return { tasks: page.rows.map(summaryOf) }
+}
+
 /**
  * One of the standing ways in — goals, tasks, sessions — at the bound the panel asks for: the
  * filter is the way's own from WAYS_IN (`owner: '@me'`, the workflow state where one applies),
@@ -388,7 +449,7 @@ export async function placesInUse(
   const refById = new Map(
     contexts.map((context) => [
       context.id,
-      { ref: `${context.owner_ref}/${context.slug}`, name: context.name }
+      { id: context.id, ref: `${context.owner_ref}/${context.slug}`, name: context.name }
     ])
   )
   const all = activity.flatMap(({ context_id, last_changed_at }) => {
@@ -409,6 +470,140 @@ export async function recentlyUpdated(
     limit: HOME_LIST_BOUND
   })
   return { rows: page.rows.map(summaryOf), total: page.total }
+}
+
+/**
+ * Explore: every context the person can read, grouped by its owner — `GET /api/contexts`, which
+ * answers each context with its `owner_ref` and `resource_count`. Nothing narrows it: no
+ * `owner`, no "yours" (R2), and no assumption about what a context holds (R3). Teams come
+ * first, by name, then the people whose contexts the person can read, by handle; each owner's
+ * contexts by name. A retired context is not listed — the read path never answers one.
+ */
+export async function exploreContexts(
+  read: TemperRead
+): Promise<{ owners: ExploreOwner[]; contextCount: number }> {
+  const client = clientOf(read)
+  const answer = await client.GET('/api/contexts')
+  // The spec declares only the 200 for this read, so the failure shows through `data`.
+  if (!answer.data) {
+    if (answer.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the contexts read: HTTP ${answer.response.status}`)
+  }
+  const byOwner = new Map<string, ExploreOwner>()
+  let contextCount = 0
+  for (const context of answer.data) {
+    if (context.retired) {
+      continue
+    }
+    const kind = context.owner_ref.startsWith('+') ? 'team' : 'person'
+    const owner = byOwner.get(context.owner_ref) ?? { ownerRef: context.owner_ref, kind, contexts: [] }
+    const row: ExploreContext = {
+      id: context.id,
+      ref: `${context.owner_ref}/${context.slug}`,
+      name: context.name,
+      resourceCount: context.resource_count
+    }
+    owner.contexts.push(row)
+    byOwner.set(context.owner_ref, owner)
+    contextCount += 1
+  }
+  const owners = [...byOwner.values()]
+  for (const owner of owners) {
+    owner.contexts.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  owners.sort((a, b) =>
+    a.kind === b.kind ? a.ownerRef.localeCompare(b.ownerRef) : a.kind === 'team' ? -1 : 1
+  )
+  return { owners, contextCount }
+}
+
+/**
+ * A pressed context's recently updated items: the list door scoped by the context's bare UUID,
+ * newest update first, at the caller's bound — everything the person can read there, never
+ * narrowed by `owner` (R2). The bound is explicit, because the raw list endpoint is uncapped
+ * without one, and it is the panel's: a whole number from 1 to the Show-more cap.
+ */
+export async function contextRecent(
+  read: TemperRead,
+  input: ContextRecentInput
+): Promise<{ rows: ResourceSummary[]; total: number; bound: number }> {
+  assertBareId(input.id, 'a context')
+  if (!Number.isInteger(input.bound) || input.bound < 1 || input.bound > WAY_IN_MAX) {
+    throw new Error(`a context's items are read at a bound from 1 to ${WAY_IN_MAX} — not ${input.bound}`)
+  }
+  const page = await listResources(read, "the context's items", {
+    context_ref: input.id,
+    sort: 'updated',
+    order: 'desc',
+    limit: input.bound
+  })
+  return { rows: page.rows.map(summaryOf), total: page.total, bound: input.bound }
+}
+
+/** One arm of the search door's answer, as the read carries it. */
+interface SearchArmWire {
+  hits: { resource: ListRow }[]
+  reason: SearchReason
+  truncated?: boolean
+}
+
+function armOf(arm: SearchArmWire): SearchArm {
+  return {
+    rows: arm.hits.map((hit) => summaryOf(hit.resource)),
+    reason: arm.reason,
+    truncated: typeof arm.truncated === 'boolean' ? arm.truncated : null
+  }
+}
+
+function drawOf(draw: { kind: 'exhaustive' } | { kind: 'nearest'; chunks: number } | null | undefined): SearchDraw {
+  if (draw === null || draw === undefined) {
+    return null
+  }
+  return draw.kind === 'nearest' ? { kind: 'nearest', chunks: draw.chunks } : { kind: 'exhaustive' }
+}
+
+/**
+ * Search: `POST /api/search` with the person's words, over everything they can read or one
+ * context named by its bare UUID — never `owner` (R2), no doc type, no embedding: the server
+ * embeds the words itself, and says so in `wide.degraded` when it could not. The two arms come
+ * back apart and stay apart: each keeps its own rows in its own order, its reason and its
+ * `truncated`, so no view can merge them or rank one against the other. An empty query, or one
+ * past the door's 4096 bytes, is refused here and never asked.
+ */
+export async function searchResources(
+  read: TemperRead,
+  input: SearchInput
+): Promise<{ query: string; contextId: string | null; exact: SearchArm; wide: WideSearchArm }> {
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+  if (query === '') {
+    throw new Error('an empty search asks nothing — type the words to search for')
+  }
+  if (new TextEncoder().encode(query).length > SEARCH_QUERY_MAX_BYTES) {
+    throw new Error(`a search carries at most ${SEARCH_QUERY_MAX_BYTES} bytes of words — nothing was asked`)
+  }
+  const contextId = input.contextId ?? null
+  if (contextId !== null) {
+    assertBareId(contextId, 'a context')
+  }
+  const client = clientOf(read)
+  const body = contextId === null
+    ? { query, limit: SEARCH_LIMIT }
+    : { query, limit: SEARCH_LIMIT, context_ref: contextId }
+  const { data, error, response } = await client.POST('/api/search', { body })
+  if (error || !data) {
+    if (response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the search: HTTP ${response.status} ${JSON.stringify(error ?? null)}`)
+  }
+  return {
+    query,
+    contextId,
+    exact: armOf(data.exact),
+    wide: { ...armOf(data.wide), degraded: data.wide.degraded === true, draw: drawOf(data.wide.draw) }
+  }
 }
 
 /**

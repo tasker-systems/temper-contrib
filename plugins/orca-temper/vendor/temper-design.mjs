@@ -89,11 +89,28 @@ function omissionSentence(total, shown, scope, page) {
   const rows = shown === 0 ? `None of ${total}` : `${offset + 1}\u2013${offset + shown} of ${total}`;
   return either ? `${rows} ${scope}; ${either}.` : `${rows} ${scope}.`;
 }
+function uncountedSentence(shown, scope, cursor) {
+  if (!cursor)
+    return `${shown} ${scope}; more not reported.`;
+  if (!("first" in cursor))
+    return cursor.more ? `${shown} ${scope}; more not shown.` : `All ${shown} ${scope}.`;
+  const { first, more } = cursor;
+  if (first && !more)
+    return `All ${shown} ${scope}.`;
+  if (first)
+    return `${shown} ${scope}; more after this page.`;
+  return `${shown} ${scope}; more before this page${more ? ", more after it" : ""}.`;
+}
+function drawnSentence(shown, scope, { more, draw, of }) {
+  return `${shown} ${scope} from a draw of the ${draw} ${of}; ${more ? "more not shown" : "past the draw not reported"}.`;
+}
 export {
   HANDOFF_LABEL,
   WAYS_IN,
   WAY_IN_BOUND,
   WAY_IN_ORDER,
+  drawnSentence,
   nextSection,
-  omissionSentence
+  omissionSentence,
+  uncountedSentence
 };

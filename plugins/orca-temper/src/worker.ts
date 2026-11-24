@@ -12,12 +12,16 @@ import { createCliCredentials, TemperNotConnectedError } from './credentials'
 import { deps } from './deps'
 import {
   GrantLostError,
+  contextRecent,
+  exploreContexts,
   goalLinkedTasks,
   latestHandoff,
   placesInUse,
   recentlyUpdated,
+  searchResources,
   resourceDetail,
   resumeItem,
+  sessionTasks,
   taskHandoff,
   wayIn,
   type TemperRead
@@ -27,8 +31,18 @@ import { registerEditorRoom } from './editor-room/open-body'
 import { readLaunchableAgents } from './agents'
 import { registerSkillReadiness } from './skill-readiness/worker'
 import { createPendingLaunches, registerServes, type PendingLaunch } from './serves'
+import { registerWork } from './work'
 import type {
   CapabilitiesOutput,
+  ContextRecentInput,
+  ContextRecentOutput,
+  ExploreOutput,
+  SearchInput,
+  SearchOutput,
+  FocusAgentInput,
+  FocusAgentOutput,
+  HandoffTasksInput,
+  HandoffTasksOutput,
   LatestHandoffOutput,
   LaunchAgentsOutput,
   LaunchInput,
@@ -154,12 +168,37 @@ export default function activate(orca: OrcaWorkerApi): void {
     answer(async (read) => ({ state: 'ok' as const, ...(await recentlyUpdated(read)) }))
   )
 
+  // Explore (R2/R3): every readable context by owner, and a pressed context's recently updated
+  // items — neither read sends `owner`, and both sit behind the same grant gate as Home's.
+  orca.panels.handle('temper.explore.contexts', async (): Promise<ExploreOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await exploreContexts(read)) }))
+  )
+
+  orca.panels.handle(
+    'temper.context.recent',
+    async (input: ContextRecentInput): Promise<ContextRecentOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await contextRecent(read, input)) }))
+  )
+
+  // Search: the two arms apart, over everything readable or one context by its id — never
+  // `owner` (R2) — behind the same grant gate as every other read.
+  orca.panels.handle('temper.search', async (input: SearchInput): Promise<SearchOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await searchResources(read, input)) }))
+  )
+
   // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;
   // it names the task's newest linked session and never the person's latest (Review 1).
   orca.panels.handle(
     'temper.launch.task-handoff',
     async (input: TaskHandoffInput): Promise<TaskHandoffOutput> =>
       answer(async (read) => ({ state: 'ok' as const, ...(await taskHandoff(read, input.id)) }))
+  )
+  // The tasks a session advanced, with their stages as temper holds them now: the handoff
+  // card names them, and its press reads them again to branch its prompt (ruling 28).
+  orca.panels.handle(
+    'temper.handoff.tasks',
+    async (input: HandoffTasksInput): Promise<HandoffTasksOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await sessionTasks(read, input.sessionId)) }))
   )
   // The editor room (Open body): its own module, gated on the same grant.
   registerEditorRoom(orca, answer)
@@ -170,6 +209,9 @@ export default function activate(orca: OrcaWorkerApi): void {
   // The launches still out to workspace.create are held here for the hook (./serves.ts).
   const pendingLaunches = createPendingLaunches()
   registerServes(orca, answer, pendingLaunches)
+  // The work records (decision ruling 26): Record this work, the records read back, Reopen from
+  // a record, and temper's claim for the launch sheet — every temper act behind the same gate.
+  registerWork(orca, answer)
 
   // The consents the host has granted, handed to the panel as they stand — the host re-checks
   // every call itself; the panel uses this to light and name actions, never to authorize one.
@@ -237,7 +279,26 @@ export default function activate(orca: OrcaWorkerApi): void {
     }
 
     // Orca starts the agent before workspace.create returns, so its launch hook may run before
-    // the link below is stored: the launch is held as pending until then (./serves.ts).
+    // the link below is stored: the launch is held as pending until then (./serves.ts). The
+    // pending link is the hook's only source then, so it must carry the item's context — and a
+    // press whose item names none would hold a link to a task with a ref but no context
+    // (TEMPER_TASK without TEMPER_CONTEXT). So when the item arrives without its context, the
+    // worker reads the record's `context_ref` itself before the launch is held: a temper read
+    // on the person's grant, inside the press, for what it would launch into. A read that
+    // fails or is refused — signed out among them — blocks nothing: the launch runs with the
+    // context the item arrived with, and the strip's record read still teaches the link
+    // (./serves.ts `learnLink`).
+    let contextRef = typeof input.item.contextRef === 'string' && input.item.contextRef.trim() !== ''
+      ? input.item.contextRef
+      : null
+    if (contextRef === null) {
+      try {
+        const detail = await resourceDetail(await temperRead(), input.item.id)
+        contextRef = detail.contextRef
+      } catch {
+        // Nothing is invented: the launch runs with what the press knew.
+      }
+    }
     const docType =
       typeof input.item.docType === 'string' && input.item.docType !== '' ? input.item.docType : undefined
     const pending: PendingLaunch = {
@@ -246,7 +307,7 @@ export default function activate(orca: OrcaWorkerApi): void {
       link: {
         itemId: input.item.id,
         ref: input.item.ref,
-        contextRef: input.item.contextRef ?? null,
+        contextRef,
         startedAt: new Date().toISOString(),
         agent: input.agent,
         ...(typeof input.item.title === 'string' ? { title: input.item.title } : {}),
@@ -373,6 +434,29 @@ export default function activate(orca: OrcaWorkerApi): void {
         sessionId: link.sessionId
       })
       return { state: 'reopened', terminalId: resumed.terminalId, started: resumed.started }
+    } catch (error) {
+      return {
+        state: 'refused',
+        code: refusalCode(error),
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }
+  })
+
+  // Takes the person to an agent (./focus-agent.tsx): its terminal when one is known, else its
+  // workspace — a chat tab cannot be focused (stablyai/orca#42069). Only Orca's view moves.
+  orca.panels.handle('temper.agent.focus', async (input: FocusAgentInput): Promise<FocusAgentOutput> => {
+    const terminalId = typeof input?.terminalId === 'string' && input.terminalId !== '' ? input.terminalId : null
+    if (terminalId === null && (typeof input?.workspaceId !== 'string' || input.workspaceId === '')) {
+      return { state: 'failed', message: 'neither a terminal nor a workspace was named' }
+    }
+    try {
+      if (terminalId !== null) {
+        const answer = await orca.host.call('terminal.focus', { terminalId })
+        return { state: 'shown', via: 'terminal', focused: answer.focused }
+      }
+      await orca.host.call('workspace.open', { workspaceId: input.workspaceId })
+      return { state: 'shown', via: 'workspace', focused: true }
     } catch (error) {
       return {
         state: 'refused',

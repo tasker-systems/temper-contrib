@@ -129,7 +129,11 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
     ['temper.home.places', undefined],
     ['temper.home.recent', undefined],
     ['temper.resource.detail', { id: '00000000-0000-7000-8000-0000000000a1' }],
-    ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }]
+    ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
+    ['temper.handoff.tasks', { sessionId: '00000000-0000-7000-8000-0000000000a1' }],
+    ['temper.explore.contexts', undefined],
+    ['temper.context.recent', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
+    ['temper.search', { query: 'side rail' }]
   ] as const
   for (const [name, input] of reads) {
     const answer = await worker.request(name, input as never)
@@ -574,9 +578,144 @@ test('places are the contexts the person changed something in, by their own late
       ['+temper-dev/contrib-workflows', 'contrib-workflows', '2026-11-19T03:00:00Z']
     ]
   )
+  // Each place carries its context's id, so a pressed place opens Explore's context view.
+  assert.deepEqual(
+    answer.rows.map((place) => place.id),
+    [CONTEXTS[1]?.id, CONTEXTS[0]?.id]
+  )
   assert.equal(answer.total, 2)
   assert.deepEqual(requests.sort(), ['/api/contexts', '/api/me/context-activity'])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+/** A contexts row in the read's shape, owned by `ownerRef`. */
+function contextRow(id: string, ownerRef: string, slug: string, count: number, extra: object = {}) {
+  return {
+    id,
+    name: slug,
+    slug,
+    owner_ref: ownerRef,
+    can_write: false,
+    retired: false,
+    created: '2026-01-01T00:00:00Z',
+    updated: '2026-01-01T00:00:00Z',
+    kb_owner_id: '22222222-2222-7222-8222-222222222222',
+    kb_owner_table: ownerRef.startsWith('+') ? 'kb_teams' : 'kb_profiles',
+    resource_count: count,
+    ...extra
+  }
+}
+
+test('explore lists every readable context by owner — teams first — and never sends owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    [
+      contextRow('44444444-4444-7444-8444-444444444441', '@someone', 'notes', 4),
+      contextRow('44444444-4444-7444-8444-444444444442', '+zeta', 'corpus', 120),
+      contextRow('44444444-4444-7444-8444-444444444443', '+alpha', 'workflows', 7),
+      contextRow('44444444-4444-7444-8444-444444444444', '+alpha', 'brain', 0),
+      contextRow('44444444-4444-7444-8444-444444444445', '+alpha', 'gone', 3, { retired: true })
+    ],
+    requests
+  )
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.explore.contexts')
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.owners.map((owner) => [owner.ownerRef, owner.kind, owner.contexts.map((c) => [c.ref, c.resourceCount])]),
+    [
+      ['+alpha', 'team', [['+alpha/brain', 0], ['+alpha/workflows', 7]]],
+      ['+zeta', 'team', [['+zeta/corpus', 120]]],
+      ['@someone', 'person', [['@someone/notes', 4]]]
+    ],
+    'teams by name, then people; each owner\'s contexts by name; a retired context is not listed'
+  )
+  assert.equal(answer.contextCount, 4)
+  assert.equal(requests.length, 1)
+  const url = new URL(requests[0]?.url ?? '')
+  assert.equal(url.pathname, '/api/contexts')
+  assert.equal(url.searchParams.get('owner'), null, 'explore names no owner (R2)')
+  assert.equal([...url.searchParams.keys()].length, 0, 'the contexts read takes no narrowing at all')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a failed contexts read is explore\'s failure, never an empty list', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'db gone' } }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.explore.contexts')
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /contexts read: HTTP 503/)
+  await worker.deactivate()
+})
+
+const CONTEXT_ID = '44444444-4444-7444-8444-444444444443'
+
+test("a context's items are its recently updated rows, scoped by its id, never by owner", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  const rows = [
+    row('f1', 'A task here', 'task', { context_ref: '+alpha/workflows', managed_meta: { 'temper-stage': 'backlog' } }),
+    row('f2', 'A research note here', 'research', { context_ref: '+alpha/workflows' })
+  ]
+  deps.fetch = answering(listResponse(rows, 30), requests)
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.context.recent', { id: CONTEXT_ID, bound: 8 })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.rows.map((item) => [item.title, item.docType, item.stage]),
+    [
+      ['A task here', 'task', 'backlog'],
+      ['A research note here', 'research', null]
+    ]
+  )
+  assert.equal(answer.total, 30)
+  assert.equal(answer.bound, 8)
+  assert.equal(requests.length, 1)
+  const url = new URL(requests[0]?.url ?? '')
+  assert.equal(url.pathname, '/api/resources')
+  assert.equal(url.searchParams.get('context_ref'), CONTEXT_ID, 'scoped by the context\'s bare id')
+  assert.equal(url.searchParams.get('sort'), 'updated')
+  assert.equal(url.searchParams.get('order'), 'desc')
+  assert.equal(url.searchParams.get('limit'), '8', 'the bound rides as an explicit limit')
+  assert.equal(url.searchParams.get('owner'), null, 'no "yours" narrowing (R2)')
+  assert.equal(url.searchParams.get('changed_by'), null)
+  assert.equal(url.searchParams.get('doc_type_name'), null, 'no assumption about what a context holds (R3)')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test("a context's items read refuses a decorated ref or a bound past the cap, and asks nothing", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(listResponse([]), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const decorated = await worker.request('temper.context.recent', { id: '+alpha/workflows', bound: 8 })
+  assert.equal(decorated.state, 'failed')
+  if (decorated.state !== 'failed') return
+  assert.match(decorated.message, /a bare UUID names a context/)
+
+  const past = await worker.request('temper.context.recent', { id: CONTEXT_ID, bound: 201 })
+  assert.equal(past.state, 'failed')
+  if (past.state !== 'failed') return
+  assert.match(past.message, /bound from 1 to 200/)
+
+  assert.equal(requests.length, 0, 'neither asked the API')
   await worker.deactivate()
 })
 
@@ -1088,4 +1227,282 @@ test('a task with no advancing session has no handoff — and no list or body re
   assert.equal(requests.length, 1, 'only the connections read ran')
   assert.deepEqual(worker.refusals, [])
   await worker.deactivate()
+})
+
+// Decision ruling 28: the handoff card names the tasks its session advanced — the session's
+// OUTGOING `advances` edges — each with its stage as temper holds it, read on the list door.
+const HANDOFF_SESSION = '77777777-7777-7777-8777-777777777777'
+const ADVANCED_TASK = row('d1', 'The advanced task', 'task', { managed_meta: { 'temper-stage': 'done' } })
+
+/** The session's connections: its task (outgoing), its goal (outgoing), and an incoming edge. */
+function sessionConnections() {
+  const edge = (peerId: string, direction: string, label = 'advances') => ({
+    edge_id: `eeeeeeee-0000-7000-8000-0000000000${peerId.slice(-2)}`,
+    edge_kind: 'leads_to',
+    label,
+    direction,
+    polarity: 'forward',
+    peer_table: 'kb_resources',
+    peer_id: peerId,
+    peer_slug: `peer-${peerId}`,
+    peer_title: 'a peer',
+    weight: 1,
+    created: '2026-11-20T01:00:00Z'
+  })
+  const rows = [
+    edge(ADVANCED_TASK.id, 'outgoing'),
+    edge(GOAL_DETAIL_ID, 'outgoing'),
+    edge('00000000-0000-7000-8000-0000000000e9', 'incoming'),
+    edge('00000000-0000-7000-8000-0000000000e8', 'outgoing', 'cites')
+  ]
+  return { limit: 200, returned: rows.length, truncated: false, total: rows.length, rows }
+}
+
+test('the tasks a session advanced: its outgoing advances edges, each with its stage from temper', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    const url = new URL(input.url)
+    if (url.pathname === `/api/resources/${HANDOFF_SESSION}/connections`) {
+      return new Response(JSON.stringify(sessionConnections()), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    assert.equal(url.pathname, '/api/resources')
+    // Only the outgoing advances peers, scoped to tasks — the goal edge is not a task.
+    assert.equal(url.searchParams.get('ids'), `${ADVANCED_TASK.id},${GOAL_DETAIL_ID}`)
+    assert.equal(url.searchParams.get('doc_type_name'), 'task')
+    assert.ok(url.searchParams.get('limit'), 'an explicit limit rides the list call')
+    return new Response(JSON.stringify(listResponse([ADVANCED_TASK])), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.tasks.map((task) => [task.id, task.title, task.stage]),
+    [[ADVANCED_TASK.id, 'The advanced task', 'done']],
+    'the stage is the one temper answered'
+  )
+  assert.equal(requests.length, 2, 'the connections, then the scoped task read')
+  assert.ok(requests.every((request) => request.method === 'GET'), 'nothing is written')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a session that advanced no task answers none — and no list read follows', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = async (input: Request) => {
+    requests.push(input)
+    return new Response(JSON.stringify({ limit: 200, returned: 0, truncated: false, total: 0, rows: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  }
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(answer.tasks, [])
+  assert.equal(requests.length, 1)
+  await worker.deactivate()
+})
+
+test('a failed connections read is the read\'s failure, never an empty list', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: 'unavailable' }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.handoff.tasks', { sessionId: HANDOFF_SESSION })
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /session's connections/)
+  await worker.deactivate()
+})
+
+/** The search door's answer: two arms, each with its own reason and word on more, and a scope. */
+function searchResponse(options: {
+  exact?: RowFixture[]
+  wide?: RowFixture[]
+  exactTruncated?: boolean
+  wideTruncated?: boolean
+  degraded?: boolean
+  draw?: unknown
+  scope?: string
+} = {}) {
+  const exact = options.exact ?? []
+  const wide = options.wide ?? []
+  return {
+    scope: { kind: options.scope ?? 'global' },
+    exact: {
+      hits: exact.map((resource, n) => ({ resource, fts_norm: 0.5 - n / 100 })),
+      reason: exact.length === 0 ? 'no_match' : 'ok',
+      truncated: options.exactTruncated ?? false
+    },
+    wide: {
+      hits: wide.map((resource, n) => ({ resource, vec_norm: 0.9 - n / 100 })),
+      reason: wide.length === 0 ? 'no_match' : 'ok',
+      degraded: options.degraded ?? false,
+      truncated: options.wideTruncated ?? false,
+      draw: options.draw === undefined ? { kind: 'nearest', chunks: 100 } : options.draw
+    }
+  }
+}
+
+test('search asks POST /api/search with the words and the page size, and never sends owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  const both = row('c1', 'The side rail design', 'research')
+  deps.fetch = answering(
+    searchResponse({
+      exact: [both, row('c2', 'A side rail task', 'task', { managed_meta: { 'temper-stage': 'in-progress' } })],
+      wide: [row('c3', 'A panel beside the editor', 'concept'), both],
+      exactTruncated: true,
+      wideTruncated: false
+    }),
+    requests
+  )
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: '  side rail  ' })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.query, 'side rail', 'the words are asked trimmed')
+  assert.equal(answer.contextId, null, 'unscoped: everything the person can read')
+  assert.deepEqual(
+    answer.exact.rows.map((item) => [item.title, item.docType, item.stage]),
+    [
+      ['The side rail design', 'research', null],
+      ['A side rail task', 'task', 'in-progress']
+    ],
+    'the exact arm keeps its own rows in its own order'
+  )
+  assert.deepEqual(
+    answer.wide.rows.map((item) => item.title),
+    ['A panel beside the editor', 'The side rail design'],
+    'the meaning arm keeps its own; a resource both found stands in both — the arms never merge'
+  )
+  assert.equal(answer.exact.truncated, true, "the exact arm's own word on more")
+  assert.equal(answer.wide.truncated, false, "the meaning arm's own word on more")
+  assert.equal(answer.wide.degraded, false)
+  assert.deepEqual(answer.wide.draw, { kind: 'nearest', chunks: 100 })
+  assert.equal(answer.exact.reason, 'ok')
+
+  assert.equal(requests.length, 1)
+  const request = requests[0]
+  assert.equal(request?.method, 'POST')
+  assert.equal(new URL(request?.url ?? '').pathname, '/api/search')
+  assert.equal(new URL(request?.url ?? '').search, '', 'nothing rides the query string')
+  const body = (await request?.json()) as Record<string, unknown>
+  assert.deepEqual(body, { query: 'side rail', limit: 10 }, 'the words and the page size, nothing else')
+  assert.equal('owner' in body, false, 'no "yours" narrowing (R2)')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test("a context's search is scoped by the context's bare id, and still sends no owner", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    searchResponse({ exact: [row('c1', 'Here', 'task')], draw: { kind: 'exhaustive' }, scope: 'context' }),
+    requests
+  )
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'here', contextId: CONTEXT_ID })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.contextId, CONTEXT_ID)
+  assert.deepEqual(answer.wide.draw, { kind: 'exhaustive' })
+  const body = (await requests[0]?.json()) as Record<string, unknown>
+  assert.deepEqual(body, { query: 'here', limit: 10, context_ref: CONTEXT_ID }, 'scoped by the bare id')
+  assert.equal('owner' in body, false, 'no "yours" narrowing (R2)')
+  await worker.deactivate()
+})
+
+test('a degraded meaning arm is said, and the exact arm stands unaffected beside it', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    searchResponse({ exact: [row('c1', 'Still found by its words', 'task')], degraded: true, draw: null }),
+    []
+  )
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'words' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.wide.degraded, true, 'the meaning arm says it could not run')
+  assert.equal(answer.wide.draw, null)
+  assert.deepEqual(answer.exact.rows.map((item) => item.title), ['Still found by its words'])
+  await worker.deactivate()
+})
+
+test('an arm that does not say whether more matched is carried as not said, never as none', async () => {
+  deps.run = async () => mintedToken()
+  const fixture = searchResponse({ exact: [row('c1', 'One', 'task')] }) as { exact: Record<string, unknown> }
+  delete fixture.exact['truncated']
+  deps.fetch = answering(fixture, [])
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.search', { query: 'one' })
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.equal(answer.exact.truncated, null)
+  await worker.deactivate()
+})
+
+test('an empty query, an overlong one or a decorated context asks nothing', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(searchResponse(), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const empty = await worker.request('temper.search', { query: '   ' })
+  assert.equal(empty.state, 'failed')
+  if (empty.state !== 'failed') return
+  assert.match(empty.message, /an empty search asks nothing/)
+
+  const long = await worker.request('temper.search', { query: 'x'.repeat(4097) })
+  assert.equal(long.state, 'failed')
+  if (long.state !== 'failed') return
+  assert.match(long.message, /at most 4096 bytes/)
+
+  const decorated = await worker.request('temper.search', { query: 'x', contextId: '+alpha/workflows' })
+  assert.equal(decorated.state, 'failed')
+  if (decorated.state !== 'failed') return
+  assert.match(decorated.message, /a bare UUID names a context/)
+
+  assert.equal(requests.length, 0, 'none asked the API')
+  await worker.deactivate()
+})
+
+test('a refused search is the search\'s failure; a 401 is the signed-out refusal', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: { code: 'BAD_REQUEST', message: 'no' } }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const refused = await worker.request('temper.search', { query: 'x' })
+  assert.equal(refused.state, 'failed')
+  if (refused.state !== 'failed') return
+  assert.match(refused.message, /temper refused the search: HTTP 400/)
+  await worker.deactivate()
+
+  deps.fetch = async () => new Response('{}', { status: 401, headers: { 'content-type': 'application/json' } })
+  const again = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const lost = await again.request('temper.search', { query: 'x' })
+  assert.equal(lost.state, 'not-connected')
+  await again.deactivate()
 })

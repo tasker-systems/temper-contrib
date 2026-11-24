@@ -6,6 +6,11 @@ section, the standing ways in (goals, tasks, sessions) with Show more, the place
 person works in, and recently updated — every list with its omission sentence and its order.
 Goals toggle between active and completed, and Tasks between backlog, in progress and done; the
 defaults are the statuses temper-ui's home reads, and the pick is held on this device.
+Explore lists every context the person can read — teams, each with its contexts, then the people
+whose contexts they can read — with no "yours" narrowing; a pressed context, from Explore or a
+place on Home, shows its recently updated items under a search scoped to it. Search asks one
+question of everything the person can read, or of that context, and answers in two groups that
+never merge — exact and by meaning — each saying whether more matched.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.home.*`,
   `temper.capabilities`, `src/protocol.ts`), the worker's one credential strategy
@@ -36,6 +41,18 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   omission sentence — labelled "linked tasks", the `advances` edges, never "all tasks" — and
   the way out: "Open in temper" lights only on the person's https:// `webUrl` setting and opens
   `<webUrl>/vault/r/<id>` with `shell.openExternal`, never derived from the API origin.
+- `src/explore.tsx` draws Explore and the context view. Its reads (`temper.explore.contexts`,
+  `temper.context.recent`) never send `owner`; the context view's is scoped by the context's id.
+- `src/search.tsx` draws Search, on the Search sub-tab and in the context view's slot. Its read
+  (`temper.search`, `POST /api/search`) carries the words and the page size (10), and in a
+  context the context's id — never `owner`, and nothing else. The two arms stay apart: **exact**
+  and **by meaning** are each their own list in their own order, a resource both found stands in
+  both, and each says in temper-design's sentences whether more matched (`truncated`) — the
+  meaning arm also what it ranked from, an exhaustive read or a draw of the nearest passages. When
+  the meaning arm could not run (`wide.degraded`) it is a warning callout, never an empty list;
+  the exact group stands beside it. An empty query asks nothing. A pressed result opens its
+  record's detail. The last question asked in each scope is device-local view state, so a run
+  that reopens on it reads it again, and Refresh asks the Search tab's question again.
 - The look is Orca's own controls (`src/look.ts`): a row wears its doc-type icon beside the
   doc-type word and says its state in words ("task · in progress"); a region's count is a badge
   on its heading; the latest handoff is a card, its Resume sheet opening below the card; a
@@ -46,7 +63,17 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   detail from fixtures, for `orca plugin shot . --scenario <name> --theme light|dark`.
 - The launcher (`src/launcher.tsx`, prompts in `src/prompts.ts`): a backlog task's detail gets
   **Start agent**, an in-progress one **Resume task**, an active goal **Work this goal**, and
-  the latest-handoff card on Home **Resume task**. Each opens a sheet where the press happened
+  the latest-handoff card on Home **Resume task** or **Continue from handoff**. The card names
+  the tasks its session advanced (the session's outgoing `advances` edges), each with its title
+  and `task · <stage>`, the stage read from temper (`temper.handoff.tasks`,
+  `src/handoff-card.tsx`), never from the plugin's links or records. The card's press reads the
+  stages again, and its prompt branches on that read: one task in progress is that task's
+  resume, with this session as its handoff, and the new workspace is linked to the task; one
+  task done or cancelled says so and quotes the Next section as follow-ups to check against
+  temper, reopening and claiming nothing; several tasks are each named with their stage, and
+  the agent asks the person which to continue; no task is the session start. A stage read that
+  fails is said in the sheet, and the session-start prompt then tells the agent to check the
+  task's state first. Only one in-progress task is labelled Resume task. Each opens a sheet where the press happened
   with the project (picked from `project.list` — the last pick remembered per context in local
   view state), the agent (what `orca agent installed` says the host can launch), and the first
   prompt in full before it is sent: harness-agnostic text naming the temper skill and CLI, the
@@ -57,10 +84,13 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   Start's act with the resume prompt. Every launch goes into a new workspace: confirm sends
   `temper.launch.go` to the worker, `workspace.create { projectId, agent, prompt }`, then the
   workspace ↔ item link in the plugin's own storage (`launch-links`) with the agent and the
-  terminal it started in. When the item is already linked to a workspace, the sheet names it
-  before the confirm. No press writes to temper (Rulings Q3). Consents gate per Q9's table — a
-  lit action needs every consent it uses, a missing one is named and never attempted — and a
-  refused launch shows what Orca said.
+  terminal it started in. The launch holds itself as a pending link first — the launch hook's
+  answer while the create is out — and when the press's item names no context, the worker reads
+  the record's `context_ref` itself before it is held, so the pending link carries the context
+  the item could not; a read that fails or is refused blocks nothing. When the item is already
+  linked to a workspace, the sheet names it before the confirm. No press writes to temper (Rulings
+  Q3). Consents gate per Q9's table — a lit action needs every consent it uses, a missing one is
+  named and never attempted — and a refused launch shows what Orca said.
 - **Reopen agent** (`src/links.ts`) is Orca's resume: the same agent session, back in its
   workspace, through `agent.resume { workspaceId, agent, sessionId }`, with no temper prompt.
   A link learns its session only from Orca naming the launch's own terminal — an
@@ -87,6 +117,46 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   to `workspace.create` answers from memory, since Orca starts its agent before the create
   returns. With no stored link, the hook and the strip fall back to the workspace's serves
   marker. `orca_agent_knows_the_task_it_serves` in `src/serves-witness.test.ts` is its witness.
+- **Work in Orca** (`src/work.ts`, `src/work-region.tsx`, `src/claim-line.tsx`). A linked run is
+  learned to have finished only from Orca: `agent.status.changed` (or an `agents.list` row) for
+  the launch's own terminal reporting the agent done, with Orca's outcome word. That writes
+  nothing to temper; it lights **Record this work — <workspace>** on the task's detail. One press
+  commits one `orca-work` data artifact on the task through `temper data-artifact commit`, as the
+  person acting through the plugin's UI (the Save persona `orca-temper-ui`, a confidence band,
+  no model). The record holds the agent kind, the workspace's name and branch, the Orca session
+  and host, when the run started and finished, and Orca's outcome word — no transcript, no
+  terminal output, no filesystem path, and no field that reads as task state
+  (`schemas/orca-work.schema.json`). A second press for the same run — its session and finish
+  time — writes nothing: presses still out are joined, and the task's records are read before
+  every commit. The detail reads the task's records back on the grant, newest first, and
+  offers **Reopen agent — run of <date>** for each run whose `orca_host` is this Orca host
+  (an opaque digest of the machine; never its name), even when plugin storage holds no link:
+  the record's workspace is found by name in `workspace.list` and its session resumed through
+  `agent.resume`. It is offered whatever the task's stage. A run on another host says it
+  reopens only there. Before Start agent or Resume task the sheet reads the task's
+  `claim_id`, `claimed_at` and `heartbeat_at` from temper and names a held claim with its
+  heartbeat; the launch stays possible. Nothing the plugin stores or records — the link, the
+  marker, an `orca-work` record — is ever read as a task's stage, claim or work in flight.
+  `orca_work_is_findable_from_its_task` in `src/work-witness.test.ts` is its witness.
+
+  **The shape.** A shape governs one home: temper applies the live shape for the artifact's
+  family (its kind owner and kind) in the home of the resource it is committed on, and the kind
+  owner only namespaces the family — it never reaches another context. A commit defaults its
+  kind owner from the task's home, so a task in a team's context and one in the person's own
+  context hold different families. So no single declaration governs `orca-work` on every task
+  of the person's; each context whose tasks carry records declares it once, with
+  `scripts/declare-orca-work-shape.sh <context-ref>`, which compares the live shape first
+  (declaring is not idempotent) and declares only when its `$id` or enforcement differs. A
+  record committed where no shape is declared is `never_declared`, which temper treats as a
+  first-class state.
+- **Going to an agent** (`src/focus-agent.tsx`). Each agent row in the strip is a press, and
+  Reopen agent's and the launch sheet's outcomes offer the same press. The worker's
+  `temper.agent.focus` focuses the agent's terminal (`terminal.focus`) when one is known, and
+  otherwise opens its workspace (`workspace.open`): Orca has no plugin call that focuses a chat
+  tab (stablyai/orca#42069), so a chat's row says it opens the workspace. When Orca answers
+  `focused: false` the rail says "Orca did not move to it.", muted, not as an error. Without
+  `workspace:write` the press is dark and the consent is named. The press only moves Orca's view:
+  it writes nothing and is never read as task state.
 - **The serves marker** (`src/serves-marker.ts`). Orca runs `agent.launch.before` only for agent
   CLIs it starts in a terminal, so a chat agent, another harness, or an agent started outside
   Orca gets no env. Each launch for a task therefore also writes
