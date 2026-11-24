@@ -10,6 +10,10 @@
 //                           the panel's Show more bound, goals and tasks by a picked status
 //   temper.home.places    — the contexts the person changed something in
 //   temper.home.recent    — recently updated across everything the person can read
+//   temper.explore.contexts — Explore: every context the person can read, grouped by its
+//                           owner (a team, or a person) — no "yours" narrowing, no `owner`
+//   temper.context.recent — a pressed context's recently updated items, at the panel's
+//                           bound — scoped by the context's id, never by `owner`
 //   temper.capabilities   — the capability kinds the host has granted the plugin; the
 //                           panel lights actions with them and names those it may not run
 //   temper.resource.detail — one record's meta, read with no `sections` query (no body, no
@@ -126,6 +130,8 @@ export type WayInOutput =
 
 /** One place the person works in: the context, and when they last changed something there. */
 export interface PlaceInUse {
+  /** The context's id: a pressed place opens the same context view Explore opens. */
+  id: string
   ref: string
   name: string
   lastChangedAt: string
@@ -138,6 +144,56 @@ export type PlacesOutput =
 export type RecentOutput =
   | { state: 'ok'; rows: ResourceSummary[]; total: number }
   | RegionFailure
+
+/** One context as Explore lists it: its id, its decorated ref and name, what it homes. */
+export interface ExploreContext {
+  id: string
+  /** `{owner_ref}/{slug}`, the context's decorated ref. */
+  ref: string
+  name: string
+  /** How many resources the context homes, as the contexts read counts them. */
+  resourceCount: number
+}
+
+/** One owner's contexts: a team (`+slug`) or a person (`@handle`), its contexts by name. */
+export interface ExploreOwner {
+  /** The owner's sigil'd addressable, as the contexts read names it. */
+  ownerRef: string
+  /** Which kind of owner it is, in words: a team, or a person. */
+  kind: 'team' | 'person'
+  contexts: ExploreContext[]
+}
+
+/**
+ * `temper.explore.contexts`: every context the person can read, grouped by owner — teams by
+ * name, then the people whose contexts they can read. Nothing narrows it to "yours" (R2).
+ */
+export type ExploreOutput =
+  | { state: 'ok'; owners: ExploreOwner[]; contextCount: number }
+  | RegionFailure
+
+/** `temper.context.recent`: one context's recently updated items, at the panel's bound. */
+export interface ContextRecentInput {
+  /** The context's id, a bare UUID. */
+  id: string
+  /** The explicit limit the read asks for; the raw list endpoint is uncapped without one. */
+  bound: number
+}
+
+export type ContextRecentOutput =
+  | { state: 'ok'; rows: ResourceSummary[]; total: number; bound: number }
+  | RegionFailure
+
+/** How many of a context's items its view shows before Show more — the ways-in bound. */
+export const CONTEXT_RECENT_BOUND = 8
+
+/**
+ * How far Show more grows a list in place. Interim, ruled by Pete 2026-11-20: temper-design
+ * does not yet export the Show-more cap (WAY_IN_MAX lives only in temper-ui's first-view), so the
+ * rail ships this local constant until the follow-up task "orca-temper imports the Show-more cap
+ * from temper-design" swaps it for the package's export.
+ */
+export const WAY_IN_MAX = 200
 
 /** `temper.capabilities` answers with the consent kinds the host has granted this plugin. */
 export type CapabilitiesOutput = {
@@ -465,6 +521,10 @@ declare module 'orca' {
     'temper.home.places': { output: PlacesOutput }
     /** Recently updated across everything the person can read. */
     'temper.home.recent': { output: RecentOutput }
+    /** Explore: every readable context, by owner. */
+    'temper.explore.contexts': { output: ExploreOutput }
+    /** A pressed context's recently updated items. */
+    'temper.context.recent': { input: ContextRecentInput; output: ContextRecentOutput }
     /** The capability kinds Orca has granted the plugin; the panel lights actions with them. */
     'temper.capabilities': { output: CapabilitiesOutput }
     /** One record's meta, its read asking no body, no sections — or a signed-out refusal. */

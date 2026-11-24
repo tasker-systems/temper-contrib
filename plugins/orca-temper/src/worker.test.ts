@@ -130,7 +130,9 @@ test('orca_worker_refuses_without_the_persons_grant', async () => {
     ['temper.home.recent', undefined],
     ['temper.resource.detail', { id: '00000000-0000-7000-8000-0000000000a1' }],
     ['temper.goal.tasks', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }],
-    ['temper.handoff.tasks', { sessionId: '00000000-0000-7000-8000-0000000000a1' }]
+    ['temper.handoff.tasks', { sessionId: '00000000-0000-7000-8000-0000000000a1' }],
+    ['temper.explore.contexts', undefined],
+    ['temper.context.recent', { id: '00000000-0000-7000-8000-0000000000a1', bound: 8 }]
   ] as const
   for (const [name, input] of reads) {
     const answer = await worker.request(name, input as never)
@@ -575,9 +577,144 @@ test('places are the contexts the person changed something in, by their own late
       ['+temper-dev/contrib-workflows', 'contrib-workflows', '2026-11-19T03:00:00Z']
     ]
   )
+  // Each place carries its context's id, so a pressed place opens Explore's context view.
+  assert.deepEqual(
+    answer.rows.map((place) => place.id),
+    [CONTEXTS[1]?.id, CONTEXTS[0]?.id]
+  )
   assert.equal(answer.total, 2)
   assert.deepEqual(requests.sort(), ['/api/contexts', '/api/me/context-activity'])
   assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+/** A contexts row in the read's shape, owned by `ownerRef`. */
+function contextRow(id: string, ownerRef: string, slug: string, count: number, extra: object = {}) {
+  return {
+    id,
+    name: slug,
+    slug,
+    owner_ref: ownerRef,
+    can_write: false,
+    retired: false,
+    created: '2026-01-01T00:00:00Z',
+    updated: '2026-01-01T00:00:00Z',
+    kb_owner_id: '22222222-2222-7222-8222-222222222222',
+    kb_owner_table: ownerRef.startsWith('+') ? 'kb_teams' : 'kb_profiles',
+    resource_count: count,
+    ...extra
+  }
+}
+
+test('explore lists every readable context by owner — teams first — and never sends owner', async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(
+    [
+      contextRow('44444444-4444-7444-8444-444444444441', '@someone', 'notes', 4),
+      contextRow('44444444-4444-7444-8444-444444444442', '+zeta', 'corpus', 120),
+      contextRow('44444444-4444-7444-8444-444444444443', '+alpha', 'workflows', 7),
+      contextRow('44444444-4444-7444-8444-444444444444', '+alpha', 'brain', 0),
+      contextRow('44444444-4444-7444-8444-444444444445', '+alpha', 'gone', 3, { retired: true })
+    ],
+    requests
+  )
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.explore.contexts')
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.owners.map((owner) => [owner.ownerRef, owner.kind, owner.contexts.map((c) => [c.ref, c.resourceCount])]),
+    [
+      ['+alpha', 'team', [['+alpha/brain', 0], ['+alpha/workflows', 7]]],
+      ['+zeta', 'team', [['+zeta/corpus', 120]]],
+      ['@someone', 'person', [['@someone/notes', 4]]]
+    ],
+    'teams by name, then people; each owner\'s contexts by name; a retired context is not listed'
+  )
+  assert.equal(answer.contextCount, 4)
+  assert.equal(requests.length, 1)
+  const url = new URL(requests[0]?.url ?? '')
+  assert.equal(url.pathname, '/api/contexts')
+  assert.equal(url.searchParams.get('owner'), null, 'explore names no owner (R2)')
+  assert.equal([...url.searchParams.keys()].length, 0, 'the contexts read takes no narrowing at all')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test('a failed contexts read is explore\'s failure, never an empty list', async () => {
+  deps.run = async () => mintedToken()
+  deps.fetch = async () =>
+    new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'db gone' } }), {
+      status: 503,
+      headers: { 'content-type': 'application/json' }
+    })
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.explore.contexts')
+  assert.equal(answer.state, 'failed')
+  if (answer.state !== 'failed') return
+  assert.match(answer.message, /contexts read: HTTP 503/)
+  await worker.deactivate()
+})
+
+const CONTEXT_ID = '44444444-4444-7444-8444-444444444443'
+
+test("a context's items are its recently updated rows, scoped by its id, never by owner", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  const rows = [
+    row('f1', 'A task here', 'task', { context_ref: '+alpha/workflows', managed_meta: { 'temper-stage': 'backlog' } }),
+    row('f2', 'A research note here', 'research', { context_ref: '+alpha/workflows' })
+  ]
+  deps.fetch = answering(listResponse(rows, 30), requests)
+
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+  const answer = await worker.request('temper.context.recent', { id: CONTEXT_ID, bound: 8 })
+
+  assert.equal(answer.state, 'ok')
+  if (answer.state !== 'ok') return
+  assert.deepEqual(
+    answer.rows.map((item) => [item.title, item.docType, item.stage]),
+    [
+      ['A task here', 'task', 'backlog'],
+      ['A research note here', 'research', null]
+    ]
+  )
+  assert.equal(answer.total, 30)
+  assert.equal(answer.bound, 8)
+  assert.equal(requests.length, 1)
+  const url = new URL(requests[0]?.url ?? '')
+  assert.equal(url.pathname, '/api/resources')
+  assert.equal(url.searchParams.get('context_ref'), CONTEXT_ID, 'scoped by the context\'s bare id')
+  assert.equal(url.searchParams.get('sort'), 'updated')
+  assert.equal(url.searchParams.get('order'), 'desc')
+  assert.equal(url.searchParams.get('limit'), '8', 'the bound rides as an explicit limit')
+  assert.equal(url.searchParams.get('owner'), null, 'no "yours" narrowing (R2)')
+  assert.equal(url.searchParams.get('changed_by'), null)
+  assert.equal(url.searchParams.get('doc_type_name'), null, 'no assumption about what a context holds (R3)')
+  assert.deepEqual(worker.refusals, [])
+  await worker.deactivate()
+})
+
+test("a context's items read refuses a decorated ref or a bound past the cap, and asks nothing", async () => {
+  const requests: Request[] = []
+  deps.run = async () => mintedToken()
+  deps.fetch = answering(listResponse([]), requests)
+  const worker = await mountWorker(main, { host: mockHost({ settings: SIGNED_IN_SETTINGS }) })
+
+  const decorated = await worker.request('temper.context.recent', { id: '+alpha/workflows', bound: 8 })
+  assert.equal(decorated.state, 'failed')
+  if (decorated.state !== 'failed') return
+  assert.match(decorated.message, /a bare UUID names a context/)
+
+  const past = await worker.request('temper.context.recent', { id: CONTEXT_ID, bound: 201 })
+  assert.equal(past.state, 'failed')
+  if (past.state !== 'failed') return
+  assert.match(past.message, /bound from 1 to 200/)
+
+  assert.equal(requests.length, 0, 'neither asked the API')
   await worker.deactivate()
 })
 

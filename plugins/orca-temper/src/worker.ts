@@ -12,6 +12,8 @@ import { createCliCredentials, TemperNotConnectedError } from './credentials'
 import { deps } from './deps'
 import {
   GrantLostError,
+  contextRecent,
+  exploreContexts,
   goalLinkedTasks,
   latestHandoff,
   placesInUse,
@@ -31,6 +33,9 @@ import { createPendingLaunches, registerServes, type PendingLaunch } from './ser
 import { registerWork } from './work'
 import type {
   CapabilitiesOutput,
+  ContextRecentInput,
+  ContextRecentOutput,
+  ExploreOutput,
   FocusAgentInput,
   FocusAgentOutput,
   HandoffTasksInput,
@@ -158,6 +163,18 @@ export default function activate(orca: OrcaWorkerApi): void {
 
   orca.panels.handle('temper.home.recent', async (): Promise<RecentOutput> =>
     answer(async (read) => ({ state: 'ok' as const, ...(await recentlyUpdated(read)) }))
+  )
+
+  // Explore (R2/R3): every readable context by owner, and a pressed context's recently updated
+  // items — neither read sends `owner`, and both sit behind the same grant gate as Home's.
+  orca.panels.handle('temper.explore.contexts', async (): Promise<ExploreOutput> =>
+    answer(async (read) => ({ state: 'ok' as const, ...(await exploreContexts(read)) }))
+  )
+
+  orca.panels.handle(
+    'temper.context.recent',
+    async (input: ContextRecentInput): Promise<ContextRecentOutput> =>
+      answer(async (read) => ({ state: 'ok' as const, ...(await contextRecent(read, input)) }))
   )
 
   // A task's own handoff for its start/resume prompt: a temper read, so the grant gate holds;

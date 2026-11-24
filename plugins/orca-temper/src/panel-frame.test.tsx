@@ -48,25 +48,20 @@ function servedHost(): ReturnType<typeof mockHost> {
         bound: 8
       }),
       'temper.home.places': () => ({ state: 'ok', rows: [], total: 0 }),
-      'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 })
+      'temper.home.recent': () => ({ state: 'ok', rows: [], total: 0 }),
+      'temper.explore.contexts': () => ({ state: 'ok', owners: [], contextCount: 0 })
     }
   })
 }
 
-test('home holds first; explore and search say what arrives later', async () => {
+test('home holds first; explore lists teams; search says what arrives later', async () => {
   mounted = await mount(panel, { host: servedHost() })
   assert.ok(mounted.find({ type: 'Heading', text: 'goals 1' }), 'home is the tab that holds first')
-  assert.equal(
-    mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
-    null,
-    'the explore placeholder does not show while home holds'
-  )
+  assert.equal(mounted.find({ type: 'Heading', text: 'teams 0' }), null, 'explore does not show while home holds')
 
   await mounted.select({ type: 'Tabs', label: 'temper view' }, 'explore')
-  assert.ok(
-    mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
-    'explore names its placeholder'
-  )
+  assert.ok(mounted.find({ type: 'Heading', text: 'teams 0' }), 'explore draws its teams region')
+  assert.ok(mounted.find({ text: '— No contexts you can read.' }), 'an empty read says so in words')
   assert.equal(mounted.find({ type: 'Heading', text: 'goals 1' }), null, 'the home body does not show under explore')
   assert.deepEqual(mounted.warnings, [])
 
@@ -114,6 +109,7 @@ test('rows carry the doc-type word beside their doc-type icon', async () => {
 })
 
 test('the signed-out refusal holds on every tab', async () => {
+  let exploreAsks = 0
   const host = mockHost({
     requests: {
       'temper.capabilities': () => ({ granted: GRANTED }),
@@ -121,7 +117,11 @@ test('the signed-out refusal holds on every tab', async () => {
       'temper.home.handoff': () => NOT_CONNECTED,
       'temper.home.way-in': () => NOT_CONNECTED,
       'temper.home.places': () => NOT_CONNECTED,
-      'temper.home.recent': () => NOT_CONNECTED
+      'temper.home.recent': () => NOT_CONNECTED,
+      'temper.explore.contexts': () => {
+        exploreAsks += 1
+        return NOT_CONNECTED
+      }
     }
   })
   mounted = await mount(panel, { host })
@@ -131,11 +131,8 @@ test('the signed-out refusal holds on every tab', async () => {
   )
   await mounted.select({ type: 'Tabs', label: 'temper view' }, 'explore')
   assert.ok(mounted.find({ label: 'temper is not connected' }), 'the refusal holds on explore')
-  assert.equal(
-    mounted.find({ text: 'Explore arrives with a later iteration — teams, then their contexts.' }),
-    null,
-    'no placeholder claims a region temper was never read for'
-  )
+  assert.equal(mounted.find({ type: 'Heading', text: /^teams/ }), null, 'no region claims what temper was never read for')
+  assert.equal(exploreAsks, 0, 'signed out, explore asks nothing')
   await mounted.select({ type: 'Tabs', label: 'temper view' }, 'search')
   assert.ok(mounted.find({ label: 'temper is not connected' }), 'the refusal holds on search')
   await mounted.select({ type: 'Tabs', label: 'temper view' }, 'home')

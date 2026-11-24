@@ -88,7 +88,7 @@ test('orca_home_shows_the_persons_in_force_state', async () => {
       'temper.home.places': () => ({
         state: 'ok',
         rows: [
-          { ref: '+temper-dev/contrib-workflows', name: 'contrib-workflows', lastChangedAt: '2026-11-20T03:00:00Z' }
+          { id: '11111111-1111-7111-8111-111111111111', ref: '+temper-dev/contrib-workflows', name: 'contrib-workflows', lastChangedAt: '2026-11-20T03:00:00Z' }
         ],
         total: 1
       }),
@@ -250,7 +250,7 @@ test('Home wears the look: counts as badges, doc-type icons, row states in words
           : wayInAnswer(input.id, [], 0, input.bound),
       'temper.home.places': () => ({
         state: 'ok',
-        rows: [{ ref: '+temper-dev/contrib', name: 'contrib', lastChangedAt: '2026-11-20T03:00:00Z' }],
+        rows: [{ id: '33333333-3333-7333-8333-333333333333', ref: '+temper-dev/contrib', name: 'contrib', lastChangedAt: '2026-11-20T03:00:00Z' }],
         total: 1
       }),
       'temper.home.recent': () => ({
