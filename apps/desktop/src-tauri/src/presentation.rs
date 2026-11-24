@@ -392,6 +392,7 @@ fn pinned_list_params() -> ArtifactListParams {
         intent: Some("pinned".to_string()),
         include_folded: Some(true),
         counts: Some(false),
+        ..Default::default()
     }
 }
 

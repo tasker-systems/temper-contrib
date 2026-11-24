@@ -5,15 +5,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use agent_client_protocol::schema::v1::{
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::v1::schema::{
     AgentCapabilities, ContentBlock, InitializeRequest, McpServer, NewSessionRequest,
     PromptRequest, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     ResourceLink, SelectedPermissionOutcome, SessionConfigOption, SessionConfigOptionValue,
     SessionModeState, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest,
     SetSessionModeRequest, TextContent,
 };
-use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{AcpAgent, Agent, Client, ConnectionTo, Error};
+use agent_client_protocol::v1::ConnectionTo;
+use agent_client_protocol::{AcpAgent, Agent, Client, Error};
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tokio::sync::{mpsc, oneshot};
@@ -412,7 +413,7 @@ pub async fn acp_start(
     };
 
     let connection = Client
-        .builder()
+        .v1()
         .on_receive_notification(
             {
                 let sink = sink.clone();
@@ -529,7 +530,7 @@ fn wants_presentation_server(
 
 /// The presenting agent as its own init answer names it — the title when it
 /// gave one, else its name. An agent that named itself nothing is named so.
-fn agent_name(info: Option<&agent_client_protocol::schema::v1::Implementation>) -> String {
+fn agent_name(info: Option<&agent_client_protocol::v1::schema::Implementation>) -> String {
     info.map(|i| i.title.clone().unwrap_or_else(|| i.name.clone()))
         .unwrap_or_else(|| "an unnamed agent".to_string())
 }
@@ -546,8 +547,7 @@ async fn run_conversation(
         .send_request(InitializeRequest::new(ProtocolVersion::V1))
         .block_task()
         .await?;
-    let agent_info = serde_json::to_value(&init)
-        .map_err(|e| agent_client_protocol::util::internal_error(e.to_string()))?;
+    let agent_info = serde_json::to_value(&init).map_err(Error::into_internal_error)?;
 
     // The capability gate, between initialize and `session/new`: the desktop
     // starts its presentation server only for a conversation whose agent
@@ -571,7 +571,7 @@ async fn run_conversation(
                 },
             )
             .await
-            .map_err(agent_client_protocol::util::internal_error)?;
+            .map_err(|e| Error::new(agent_client_protocol::ErrorCode::INTERNAL_ERROR, e))?;
             let entry = server.as_mcp_server();
             let guard = crate::present_server::RunningServerGuard::new(server);
             (vec![entry], PresentationsState::Available, Some(guard))
@@ -848,7 +848,7 @@ fn conversation_commands(
         .ok_or_else(|| format!("unknown conversation {conversation_id}"))
 }
 
-fn stop_reason_string(reason: &agent_client_protocol::schema::v1::StopReason) -> String {
+fn stop_reason_string(reason: &agent_client_protocol::v1::schema::StopReason) -> String {
     match serde_json::to_value(reason) {
         Ok(serde_json::Value::String(s)) => s,
         Ok(other) => other.to_string(),
@@ -883,7 +883,7 @@ fn expand_cwd(spec: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         HttpHeader, McpCapabilities, McpServerHttp, ToolCallContent, ToolCallStatus,
     };
     use agent_client_protocol::AcpAgentConfig;
@@ -1055,7 +1055,7 @@ mod tests {
         let (sink, recorded) = recording_sink();
 
         let connection = Client
-            .builder()
+            .v1()
             .on_receive_notification(
                 {
                     let sink = sink.clone();
@@ -1317,7 +1317,7 @@ whole. Change nothing outside it, and write nothing else inside it.";
 
     // --- The permission-ask seam ---------------------------------------------
 
-    use agent_client_protocol::schema::v1::{
+    use agent_client_protocol::v1::schema::{
         PermissionOption, PermissionOptionKind, ToolCallUpdate, ToolCallUpdateFields,
     };
 
