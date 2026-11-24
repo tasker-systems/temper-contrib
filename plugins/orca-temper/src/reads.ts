@@ -1,6 +1,7 @@
 // The plugin's reads, asked of the temper API through temper-ts on the credentials the caller
-// vetted — the person-scoped reads temper-ui's home makes (design record, Rulings Q1/R2), never
-// context-scoped ones. An explicit limit rides every list call — the raw list endpoint is
+// vetted — Home's are the person-scoped reads temper-ui's home makes (design record, Rulings
+// Q1/R2), never context-scoped ones; Explore's are the reverse (R2/R3): every context the
+// person can read, and a pressed context's recently updated items, neither ever sending `owner`. An explicit limit rides every list call — the raw list endpoint is
 // uncapped without one — and the ways-in filters come from temper-design's WAYS_IN, so the rail
 // asks for each way under the same name, scope and filter as both other surfaces. A list
 // orients; only the latest handoff needs a body, and it asks for it explicitly, the Next section
@@ -10,7 +11,11 @@ import { createTemperClient, type Credentials } from '../vendor/temper-ts.mjs'
 import { WAYS_IN, nextSection } from '../vendor/temper-design.mjs'
 import type { FetchLike } from './deps'
 import { WAY_TOGGLES, wayStatus } from './way-status'
+import { WAY_IN_MAX } from './protocol'
 import type {
+  ContextRecentInput,
+  ExploreContext,
+  ExploreOwner,
   NextSummary,
   PlaceInUse,
   PropertyRow,
@@ -117,6 +122,8 @@ function managedWord(meta: Record<string, unknown> | null | undefined, key: stri
 
 /** The query every Home list asks, each part named by its caller. */
 interface ListQuery {
+  /** The context scope, as the context's bare UUID — Explore's context view only. */
+  context_ref?: string
   doc_type_name?: string
   owner?: string
   changed_by?: string
@@ -137,6 +144,7 @@ async function listResources(read: TemperRead, what: string, query: ListQuery): 
   const { data, error, response } = await client.GET('/api/resources', {
     params: {
       query: {
+        context_ref: query.context_ref,
         doc_type_name: query.doc_type_name,
         owner: query.owner,
         changed_by: query.changed_by,
@@ -436,7 +444,7 @@ export async function placesInUse(
   const refById = new Map(
     contexts.map((context) => [
       context.id,
-      { ref: `${context.owner_ref}/${context.slug}`, name: context.name }
+      { id: context.id, ref: `${context.owner_ref}/${context.slug}`, name: context.name }
     ])
   )
   const all = activity.flatMap(({ context_id, last_changed_at }) => {
@@ -457,6 +465,76 @@ export async function recentlyUpdated(
     limit: HOME_LIST_BOUND
   })
   return { rows: page.rows.map(summaryOf), total: page.total }
+}
+
+/**
+ * Explore: every context the person can read, grouped by its owner — `GET /api/contexts`, which
+ * answers each context with its `owner_ref` and `resource_count`. Nothing narrows it: no
+ * `owner`, no "yours" (R2), and no assumption about what a context holds (R3). Teams come
+ * first, by name, then the people whose contexts the person can read, by handle; each owner's
+ * contexts by name. A retired context is not listed — the read path never answers one.
+ */
+export async function exploreContexts(
+  read: TemperRead
+): Promise<{ owners: ExploreOwner[]; contextCount: number }> {
+  const client = clientOf(read)
+  const answer = await client.GET('/api/contexts')
+  // The spec declares only the 200 for this read, so the failure shows through `data`.
+  if (!answer.data) {
+    if (answer.response.status === 401) {
+      throw new GrantLostError()
+    }
+    throw new Error(`temper refused the contexts read: HTTP ${answer.response.status}`)
+  }
+  const byOwner = new Map<string, ExploreOwner>()
+  let contextCount = 0
+  for (const context of answer.data) {
+    if (context.retired) {
+      continue
+    }
+    const kind = context.owner_ref.startsWith('+') ? 'team' : 'person'
+    const owner = byOwner.get(context.owner_ref) ?? { ownerRef: context.owner_ref, kind, contexts: [] }
+    const row: ExploreContext = {
+      id: context.id,
+      ref: `${context.owner_ref}/${context.slug}`,
+      name: context.name,
+      resourceCount: context.resource_count
+    }
+    owner.contexts.push(row)
+    byOwner.set(context.owner_ref, owner)
+    contextCount += 1
+  }
+  const owners = [...byOwner.values()]
+  for (const owner of owners) {
+    owner.contexts.sort((a, b) => a.name.localeCompare(b.name))
+  }
+  owners.sort((a, b) =>
+    a.kind === b.kind ? a.ownerRef.localeCompare(b.ownerRef) : a.kind === 'team' ? -1 : 1
+  )
+  return { owners, contextCount }
+}
+
+/**
+ * A pressed context's recently updated items: the list door scoped by the context's bare UUID,
+ * newest update first, at the caller's bound — everything the person can read there, never
+ * narrowed by `owner` (R2). The bound is explicit, because the raw list endpoint is uncapped
+ * without one, and it is the panel's: a whole number from 1 to the Show-more cap.
+ */
+export async function contextRecent(
+  read: TemperRead,
+  input: ContextRecentInput
+): Promise<{ rows: ResourceSummary[]; total: number; bound: number }> {
+  assertBareId(input.id, 'a context')
+  if (!Number.isInteger(input.bound) || input.bound < 1 || input.bound > WAY_IN_MAX) {
+    throw new Error(`a context's items are read at a bound from 1 to ${WAY_IN_MAX} — not ${input.bound}`)
+  }
+  const page = await listResources(read, "the context's items", {
+    context_ref: input.id,
+    sort: 'updated',
+    order: 'desc',
+    limit: input.bound
+  })
+  return { rows: page.rows.map(summaryOf), total: page.total, bound: input.bound }
 }
 
 /**

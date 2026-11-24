@@ -29,7 +29,11 @@
 // failed. The `look-work-*` scenarios draw a
 // task's work in Orca (ruling 26): a finished run offered to record beside recorded runs, one on
 // this host with its dated Reopen and one elsewhere; a done task whose records leave its stage
-// alone; and `look-sheet-claimed` the sheet naming temper's claim held elsewhere.
+// alone; and `look-sheet-claimed` the sheet naming temper's claim held elsewhere. The
+// `look-explore*` scenarios draw Explore (build item 8): teams with one opened on its contexts
+// and the people after them, and the region states — none readable, loading, failed and signed
+// out; the `look-context*` scenarios draw a pressed context's view — its recently updated items
+// under the search slot, and the same region states.
 import { defineCheck } from 'orca/testing'
 import type { HarnessReadiness, SkillReadinessOutput } from './skill-readiness/protocol'
 
@@ -49,6 +53,7 @@ const TASK_ID = '00000000-0000-7000-8000-000000000001'
 const GOAL_ID = '00000000-0000-7000-8000-000000000002'
 const SESSION_ID = '00000000-0000-7000-8000-000000000003'
 const CONTEXT = '+team/workflows'
+const CONTEXT_ID = '00000000-0000-7000-8000-000000000010'
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString()
 
 function row(n: number, title: string, docType: string, stage: string | null = null) {
@@ -120,6 +125,8 @@ function wayAnswer(input: { id: string; bound: number; status?: string }) {
     bound: input.bound
   }
 }
+
+const TASK_DETAIL_TITLE = "The rail's look on Orca's controls: Home and detail"
 
 const TASK_DETAIL = {
   id: TASK_ID,
@@ -282,6 +289,50 @@ const RECORDABLE = {
   outcome: 'success' as const
 }
 /** temper's claim, held by an agent elsewhere. */
+/** Explore's contexts: two teams and a person, every context a placeholder. */
+const EXPLORE = {
+  state: 'ok' as const,
+  contextCount: 5,
+  owners: [
+    {
+      ownerRef: '+team',
+      kind: 'team' as const,
+      contexts: [
+        { id: '00000000-0000-7000-8000-000000000011', ref: '+team/research', name: 'research', resourceCount: 214 },
+        { id: CONTEXT_ID, ref: CONTEXT, name: 'workflows', resourceCount: 38 }
+      ]
+    },
+    {
+      ownerRef: '+corpus-team',
+      kind: 'team' as const,
+      contexts: [
+        { id: '00000000-0000-7000-8000-000000000012', ref: '+corpus-team/papers', name: 'papers', resourceCount: 1290 },
+        { id: '00000000-0000-7000-8000-000000000013', ref: '+corpus-team/brain', name: 'brain', resourceCount: 0 }
+      ]
+    },
+    {
+      ownerRef: '@someone',
+      kind: 'person' as const,
+      contexts: [{ id: '00000000-0000-7000-8000-000000000014', ref: '@someone/notes', name: 'notes', resourceCount: 12 }]
+    }
+  ]
+}
+
+/** A context's recently updated items, at the asked bound of the 38 it homes. */
+const CONTEXT_ITEMS = [
+  row(4, TASK_DETAIL_TITLE, 'task', 'in-progress'),
+  row(8, 'The launcher sheet on Orca controls', 'task', 'backlog'),
+  row(14, 'Decision: contrib work items live in contrib-workflows', 'decision'),
+  row(15, 'Session: the handoff card names its tasks', 'session'),
+  row(16, 'Explore: teams, then their contexts', 'task', 'in-progress'),
+  row(17, 'The rail reads temper on a borrowed grant', 'goal', 'active'),
+  row(18, 'Research: how contexts differ in purpose', 'research'),
+  row(19, 'A concept: claim-style workflow contexts', 'concept')
+]
+
+/** The context view as the panel holds it after a press from Explore. */
+const CONTEXT_ENTRY = { kind: 'context', id: CONTEXT_ID, ref: CONTEXT, name: 'workflows' }
+
 const HELD_CLAIM = { claimId: 'c0ffee00-0000-4000-8000-000000000001', claimedAt: ago(95), heartbeatAt: ago(7) }
 
 const LOOK = {
@@ -313,8 +364,15 @@ const LOOK = {
     'temper.home.way-in': wayAnswer,
     'temper.home.places': () => ({
       state: 'ok' as const,
-      rows: [{ ref: CONTEXT, name: 'workflows', lastChangedAt: ago(4) }],
+      rows: [{ id: CONTEXT_ID, ref: CONTEXT, name: 'workflows', lastChangedAt: ago(4) }],
       total: 3
+    }),
+    'temper.explore.contexts': () => EXPLORE,
+    'temper.context.recent': (input: { id: string; bound: number }) => ({
+      state: 'ok' as const,
+      rows: CONTEXT_ITEMS.slice(0, input.bound),
+      total: 38,
+      bound: input.bound
     }),
     'temper.home.recent': () => ({
       state: 'ok' as const,
@@ -411,7 +469,9 @@ function allAnswer(answer: typeof NOT_CONNECTED) {
     'temper.home.places': () => answer,
     'temper.home.recent': () => answer,
     'temper.resource.detail': () => answer,
-    'temper.goal.tasks': () => answer
+    'temper.goal.tasks': () => answer,
+    'temper.explore.contexts': () => answer,
+    'temper.context.recent': () => answer
   }
 }
 
@@ -801,6 +861,60 @@ export default defineCheck({
       'temper.goal.tasks': () => FAILED('linked tasks')
     },
     persisted: seeded({ id: GOAL_ID, docType: 'goal' })
+  },
+  // Explore: teams by name, one opened on its contexts, the people after them.
+  'look-explore': {
+    ...LOOK,
+    persisted: { plugin: { 'detail-stack': [], 'active-tab': 'explore', 'explore-open': { '+team': true } } }
+  },
+  // No context is readable: the teams region keeps its words and its count at 0.
+  'look-explore-empty': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.explore.contexts': () => ({ state: 'ok' as const, owners: [], contextCount: 0 }) },
+    persisted: { plugin: { 'detail-stack': [], 'active-tab': 'explore' } }
+  },
+  // The contexts read still out (an answer of null draws the still-out branch).
+  'look-explore-loading': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.explore.contexts': () => null as never },
+    persisted: { plugin: { 'detail-stack': [], 'active-tab': 'explore' } }
+  },
+  'look-explore-failed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.explore.contexts': () => FAILED('contexts') },
+    persisted: { plugin: { 'detail-stack': [], 'active-tab': 'explore' } }
+  },
+  // Signed out on Explore: the refusal stands over the tabs, and Explore draws nothing.
+  'look-explore-signed-out': {
+    ...LOOK,
+    requests: { ...LOOK.requests, ...allAnswer(NOT_CONNECTED) },
+    persisted: { plugin: { 'detail-stack': [], 'active-tab': 'explore' } }
+  },
+  // A pressed context: the search slot, then its recently updated items with Show more.
+  'look-context': { ...LOOK, persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } } },
+  'look-context-empty': {
+    ...LOOK,
+    requests: {
+      ...LOOK.requests,
+      'temper.context.recent': (input: { id: string; bound: number }) => ({ state: 'ok' as const, rows: [], total: 0, bound: input.bound })
+    },
+    persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } }
+  },
+  'look-context-loading': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.context.recent': () => null as never },
+    persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } }
+  },
+  'look-context-failed': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.context.recent': () => FAILED("the context's items") },
+    persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } }
+  },
+  // The grant lost after Home answered: the context view says temper is not connected.
+  'look-context-signed-out': {
+    ...LOOK,
+    requests: { ...LOOK.requests, 'temper.context.recent': () => NOT_CONNECTED },
+    persisted: { plugin: { 'detail-stack': [CONTEXT_ENTRY] } }
   },
   // Every list answered empty: each keeps its words and its count at 0.
   'look-state-empty': {

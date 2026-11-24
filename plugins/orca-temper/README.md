@@ -6,6 +6,9 @@ section, the standing ways in (goals, tasks, sessions) with Show more, the place
 person works in, and recently updated — every list with its omission sentence and its order.
 Goals toggle between active and completed, and Tasks between backlog, in progress and done; the
 defaults are the statuses temper-ui's home reads, and the pick is held on this device.
+Explore lists every context the person can read — teams, each with its contexts, then the people
+whose contexts they can read — with no "yours" narrowing; a pressed context, from Explore or a
+place on Home, shows its recently updated items, with a search slot the Search sub-tab will fill.
 
 - `src/worker.ts` is a `trusted-worker`: when the panel asks (`temper.home.*`,
   `temper.capabilities`, `src/protocol.ts`), the worker's one credential strategy
@@ -36,6 +39,8 @@ defaults are the statuses temper-ui's home reads, and the pick is held on this d
   omission sentence — labelled "linked tasks", the `advances` edges, never "all tasks" — and
   the way out: "Open in temper" lights only on the person's https:// `webUrl` setting and opens
   `<webUrl>/vault/r/<id>` with `shell.openExternal`, never derived from the API origin.
+- `src/explore.tsx` draws Explore and the context view. Its reads (`temper.explore.contexts`,
+  `temper.context.recent`) never send `owner`; the context view's is scoped by the context's id.
 - The look is Orca's own controls (`src/look.ts`): a row wears its doc-type icon beside the
   doc-type word and says its state in words ("task · in progress"); a region's count is a badge
   on its heading; the latest handoff is a card, its Resume sheet opening below the card; a
